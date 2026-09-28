@@ -3,7 +3,11 @@ import copy
 import pytest
 
 from quant_studio import QuantStudioError
-from quant_studio.templates import load_template, render_template
+from quant_studio.templates import (
+    apply_factor_selection,
+    load_template,
+    render_template,
+)
 
 
 def test_a_share_render_changes_only_declared_config_fields():
@@ -33,6 +37,25 @@ def test_a_share_render_changes_only_declared_config_fields():
     ]
     assert template.base_config == original
     assert rendered.values["symbols_limit"] == 25
+
+
+def test_factor_selection_keeps_only_known_factors():
+    template = load_template("a-share-four-factor")
+    rendered = render_template(template, {})
+
+    apply_factor_selection(rendered.config, template, ["momentum_20d", "pe_ratio"])
+
+    assert rendered.config["factors"] == ["momentum_20d", "pe_ratio"]
+    assert rendered.config["factor_directions"]["momentum_20d"] == 1
+    assert rendered.config["factor_directions"]["pe_ratio"] == -1
+
+
+def test_unknown_factor_is_rejected():
+    template = load_template("a-share-four-factor")
+    rendered = render_template(template, {})
+
+    with pytest.raises(QuantStudioError, match="未知因子"):
+        apply_factor_selection(rendered.config, template, ["alpha99"])
 
 
 @pytest.mark.parametrize(

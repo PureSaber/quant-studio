@@ -8,7 +8,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from quant_studio import QuantStudioError
-from quant_studio.nav import chart_fragment, parse_nav_csv
+from quant_studio.desk import (
+    FETCH_COMMANDS,
+    html_table,
+    list_runs,
+    scan_datasets,
+    workspace_root,
+)
+from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
 from quant_studio.runner import run, safe_run_file, template_readiness
 from quant_studio.templates import load_template, template_ids
 
@@ -43,7 +50,85 @@ def render_home() -> str:
 合成样例会画出净值，并标明不是市场收益。</p>
 </header>
 <main class="card-grid">{"".join(cards)}</main>"""
-    return _layout("模板库", body)
+    return _layout("模板库", body, "strategy")
+
+
+def render_data() -> str:
+    root = workspace_root()
+    datasets = scan_datasets(root)
+    cards = []
+    for item in datasets:
+        cards.append(
+            f"""<article class="template-card research">
+<span class="eyebrow">{escape(item.market)}</span>
+<h2>{item.files} 个数据文件</h2>
+<p>{escape(str(item.path))}</p>
+</article>"""
+        )
+    if not cards:
+        cards.append(
+            """<article class="template-card research">
+<span class="eyebrow">空状态</span>
+<h2>还没有本地快照</h2>
+<p>设置 QUANT_WORKSPACE_ROOT 后，数据页只读取已有目录，不会自动下载。</p>
+</article>"""
+        )
+    commands = "".join(
+        f"<li><b>{escape(name)}</b><pre>{escape(command)}</pre></li>"
+        for name, command in FETCH_COMMANDS
+    )
+    root_text = str(root) if root else "未设置"
+    body = f"""<header class="page-head">
+<p class="kicker">数据</p>
+<h1>本机行情</h1>
+<p class="lede">工作区：{escape(root_text)}</p>
+</header>
+<main class="card-grid">{"".join(cards)}</main>
+<section class="panel"><h2>拉取命令</h2>
+<ul class="commands">{commands}</ul></section>"""
+    return _layout("数据", body, "data")
+
+
+def render_backtest(runs_root: Path) -> str:
+    rows = _run_rows(list_runs(runs_root), "/runs/")
+    body = f"""<header class="page-head">
+<p class="kicker">回测</p>
+<h1>运行任务</h1>
+<p class="lede">从策略页提交。这里查看状态和日志入口。</p>
+</header>
+<section class="panel"><table>
+<tr><th>模板</th><th>状态</th><th>净值</th></tr>
+{rows or "<tr><td colspan='3'>还没有运行</td></tr>"}
+</table></section>"""
+    return _layout("回测", body, "backtest")
+
+
+def render_results(runs_root: Path) -> str:
+    rows = _run_rows(list_runs(runs_root), "/runs/")
+    body = f"""<header class="page-head">
+<p class="kicker">结果</p>
+<h1>研究记录</h1>
+<p class="lede">有净值的记录可以打开曲线、回撤和持仓成交表。</p>
+</header>
+<section class="panel"><table>
+<tr><th>模板</th><th>状态</th><th>净值</th></tr>
+{rows or "<tr><td colspan='3'>还没有结果</td></tr>"}
+</table></section>"""
+    return _layout("结果", body, "results")
+
+
+def _run_rows(records: list[dict[str, str]], prefix: str) -> str:
+    lines = []
+    for record in records:
+        nav = "有" if record["has_nav"] == "1" else "无"
+        lines.append(
+            "<tr>"
+            f'<td><a href="{prefix}{escape(record["run_id"])}">'
+            f"{escape(record['template_id'])}</a></td>"
+            f"<td>{escape(record['status'])}</td>"
+            f"<td>{nav}</td></tr>"
+        )
+    return "".join(lines)
 
 
 def render_template_page(template_id: str, preset_id: str | None = None) -> str:
@@ -74,6 +159,13 @@ def render_template_page(template_id: str, preset_id: str | None = None) -> str:
     ready = template_readiness(template)
     disabled = "" if ready.runnable else " disabled"
     hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
+    factors = _factor_fields(template)
+    pool = ""
+    if template.id == "a-share-four-factor":
+        pool = (
+            '<p class="note">股票池固定为沪深300。'
+            "因子只能勾选这个模板已经实现的项。</p>"
+        )
     body = f"""<header class="page-head">
 <p class="kicker">{kind}</p>
 <h1>{escape(template.title)}</h1>
@@ -81,8 +173,10 @@ def render_template_page(template_id: str, preset_id: str | None = None) -> str:
 </header>
 <section class="panel">
 <div class="presets">{_preset_links(template, preset_id)}</div>
+{pool}
 {hint}
 <form method="post" action="/templates/{escape(template.id)}">
+{factors}
 {"".join(fields)}
 <div class="actions">
 <button class="btn" name="action" value="preview">仅预览</button>
@@ -91,7 +185,7 @@ def render_template_page(template_id: str, preset_id: str | None = None) -> str:
 </form>
 <p class="note">{escape(template.disclaimer)}</p>
 </section>"""
-    return _layout(template.title, body)
+    return _layout(template.title, body, "strategy")
 
 
 def render_run(run_dir: str | Path) -> str:
@@ -129,20 +223,32 @@ def render_run(run_dir: str | Path) -> str:
         notices.append(
             '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
         )
+    tables = _artifact_tables(directory)
+    benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
+    drawdown = ""
+    if nav_path.is_file():
+        series = parse_nav_csv(nav_path)
+        if series is not None:
+            drawdown = drawdown_fragment(series)
+            if _has_benchmark(nav_path):
+                benchmark = '<p class="note">净值文件包含基准列，已画在主图。</p>'
     body = f"""<header class="page-head">
-<p class="kicker">运行</p>
+<p class="kicker">结果</p>
 <h1>{escape(template.title)}</h1>
 <p class="lede"><span class="status {status}">
 {_STATUS.get(result["status"], status)}</span></p>
 </header>
 {"".join(notices)}
+{benchmark}
 <section class="panel command">
 <h2>命令预览</h2>
 <pre>{argv or "进程内合成样例，无外部命令"}</pre>
 </section>
 {chart}
+{drawdown}
+{tables}
 {report_html}"""
-    return _layout("运行结果", body)
+    return _layout("运行结果", body, "results")
 
 
 def render_environment() -> str:
@@ -168,7 +274,7 @@ def render_environment() -> str:
 {"".join(rows)}
 </table>
 </section>"""
-    return _layout("环境", body)
+    return _layout("环境", body, "data")
 
 
 def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) -> Path:
@@ -217,8 +323,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = unquote(urlparse(self.path).path)
         try:
-            if path == "/":
+            if path in {"/", "/strategy"}:
                 self._send_html(render_home())
+            elif path == "/data":
+                self._send_html(render_data())
+            elif path == "/backtest":
+                self._send_html(render_backtest(self.runs_root))
+            elif path == "/results":
+                self._send_html(render_results(self.runs_root))
             elif path == "/environment":
                 self._send_html(render_environment())
             elif path.startswith("/templates/"):
@@ -250,10 +362,14 @@ class _Handler(BaseHTTPRequestHandler):
             data = parse_qs(self.rfile.read(length).decode("utf-8"))
             template_id = path.removeprefix("/templates/")
             action = data.pop("action", ["preview"])[0]
+            factor_form = data.pop("factor_form", [None])[0]
+            chosen = data.pop("factor", None)
+            factors = list(chosen) if factor_form else None
             knobs = _parse_form_knobs(template_id, data)
             result = run(
                 template_id,
                 knobs,
+                factors=factors,
                 execute=action == "execute",
                 runs_root=self.runs_root,
             )
@@ -311,6 +427,8 @@ _LABELS = {
     "rebalance_freq": "调仓频率",
     "initial_capital": "初始资金",
     "symbols_limit": "股票数量",
+    "commission": "佣金率",
+    "slippage": "滑点",
     "initial_cash": "初始资金（港币）",
     "rebalance_sessions": "调仓间隔",
 }
@@ -326,6 +444,45 @@ _STATUS = {
     "failed": "失败",
     "blocked": "未执行",
 }
+
+
+def _factor_fields(template: object) -> str:
+    catalog = list(template.metadata.get("factor_catalog") or [])
+    if not catalog:
+        return ""
+    boxes = ['<input type="hidden" name="factor_form" value="1">']
+    group = None
+    for item in catalog:
+        if item["group"] != group:
+            group = item["group"]
+            boxes.append(f'<p class="eyebrow">{escape(str(group))}</p>')
+        boxes.append(
+            '<label class="check"><input type="checkbox" name="factor" '
+            f'value="{escape(item["name"])}" checked>'
+            f"<span>{escape(item['label'])}</span></label>"
+        )
+    return "".join(boxes)
+
+
+def _artifact_tables(directory: Path) -> str:
+    titles = {
+        "positions.csv": "持仓",
+        "holdings.csv": "持仓",
+        "orders.csv": "委托",
+        "fills.csv": "成交",
+        "trades.csv": "成交",
+    }
+    parts = []
+    for name, title in titles.items():
+        path = directory / name
+        if path.is_file():
+            parts.append(html_table(path, title))
+    return "".join(parts)
+
+
+def _has_benchmark(path: Path) -> bool:
+    header = path.read_text(encoding="utf-8").splitlines()[:1]
+    return bool(header) and "benchmark" in header[0]
 
 
 def _preset_values(template: object, preset_id: str | None) -> dict[str, object]:
@@ -353,7 +510,16 @@ def _choice_label(name: str, choice: object) -> str:
     return _CHOICES.get(name, {}).get(str(choice), str(choice))
 
 
-def _layout(title: str, body: str) -> str:
+def _layout(title: str, body: str, active: str = "strategy") -> str:
+    links = []
+    for key, label, href in (
+        ("data", "数据", "/data"),
+        ("strategy", "策略", "/strategy"),
+        ("backtest", "回测", "/backtest"),
+        ("results", "结果", "/results"),
+    ):
+        mark = " on" if key == active else ""
+        links.append(f'<a class="nav{mark}" href="{href}">{label}</a>')
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -361,9 +527,9 @@ def _layout(title: str, body: str) -> str:
 <style>{_CSS}</style></head>
 <body><div class="shell">
 <aside class="side">
-<a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
-<nav><a href="/">模板库</a><a href="/environment">环境</a></nav>
-<p class="side-note">不下真实订单。净值只来自合成样例，或上游已经写入的报告。</p>
+<a class="brand" href="/strategy"><b>Quant Studio</b><span>本地研究台</span></a>
+<nav>{"".join(links)}</nav>
+<p class="side-note">不下真实订单。曲线只来自合成样例，或上游已经交出的净值。</p>
 </aside>
 <div class="stage">{body}</div>
 </div></body></html>"""
@@ -410,6 +576,10 @@ nav a {
   background: #172033;
   text-decoration: none;
 }
+nav a.on { background: #24406e; }
+label.check { display: flex; align-items: center; gap: 8px; }
+label.check input { width: auto; margin: 0; }
+ul.commands { padding-left: 18px; }
 .badge {
   margin: 12px 0 0;
   color: var(--muted);

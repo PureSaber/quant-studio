@@ -12,7 +12,12 @@ import yaml
 
 from quant_studio import QuantStudioError
 from quant_studio.nav import collect_outputs
-from quant_studio.templates import Template, load_template, render_template
+from quant_studio.templates import (
+    Template,
+    apply_factor_selection,
+    load_template,
+    render_template,
+)
 
 
 @dataclass(frozen=True)
@@ -53,18 +58,21 @@ def preview(
     template: str | Template,
     knobs: dict[str, Any] | None = None,
     *,
+    factors: list[str] | None = None,
     runs_root: str | Path | None = None,
     run_id: str | None = None,
 ) -> RunResult:
     loaded = load_template(template) if isinstance(template, str) else template
     rendered = render_template(loaded, knobs)
+    if factors is not None:
+        apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(loaded.argv, rendered.values, run_dir, config_path)
     _write_json(
         run_dir / "request.json",
-        {"template_id": loaded.id, "knobs": knobs or {}},
+        {"template_id": loaded.id, "knobs": knobs or {}, "factors": factors},
     )
     _write_json(run_dir / "command.json", {"argv": argv})
     result = RunResult("previewed", identifier, run_dir, argv)
@@ -76,6 +84,7 @@ def run(
     template: str | Template,
     knobs: dict[str, Any] | None = None,
     *,
+    factors: list[str] | None = None,
     execute: bool = False,
     runs_root: str | Path | None = None,
     run_id: str | None = None,
@@ -83,16 +92,29 @@ def run(
 ) -> RunResult:
     loaded = load_template(template) if isinstance(template, str) else template
     if not execute:
-        return preview(loaded, knobs, runs_root=runs_root, run_id=run_id)
+        return preview(
+            loaded,
+            knobs,
+            factors=factors,
+            runs_root=runs_root,
+            run_id=run_id,
+        )
 
     rendered = render_template(loaded, knobs)
+    if factors is not None:
+        apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(loaded.argv, rendered.values, run_dir, config_path)
     _write_json(
         run_dir / "request.json",
-        {"template_id": loaded.id, "knobs": knobs or {}, "execute": True},
+        {
+            "template_id": loaded.id,
+            "knobs": knobs or {},
+            "factors": factors,
+            "execute": True,
+        },
     )
     _write_json(run_dir / "command.json", {"argv": argv})
 

@@ -6,7 +6,10 @@ from quant_studio import QuantStudioError
 from quant_studio.__main__ import main
 from quant_studio.runner import preview, run
 from quant_studio.server import (
+    render_backtest,
+    render_data,
     render_home,
+    render_results,
     render_run,
     render_template_page,
     resolve_run_asset,
@@ -136,3 +139,25 @@ def test_imported_nav_is_charted_with_drawdown(tmp_path, monkeypatch):
     assert "最大回撤" in page
     assert "期末净值" in page
     assert "0.90" in page
+    assert "持仓" in page
+    assert "回撤" in page
+    assert "未提供基准净值" in page
+
+
+def test_data_page_sees_local_snapshot_and_fetch_command(monkeypatch, tmp_path):
+    folder = tmp_path / "a-share-multifactor" / "data"
+    folder.mkdir(parents=True)
+    (folder / "prices.csv").write_text("date,close\n", encoding="utf-8")
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(tmp_path))
+
+    page = render_data()
+
+    assert "1 个数据文件" in page
+    assert "a_share_multifactor.fetch_data" in page
+
+
+def test_backtest_and_results_list_runs(tmp_path):
+    preview("synthetic-demo", {}, runs_root=tmp_path)
+
+    assert "synthetic-demo" in render_backtest(tmp_path)
+    assert "synthetic-demo" in render_results(tmp_path)

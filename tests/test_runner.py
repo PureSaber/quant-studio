@@ -175,6 +175,10 @@ def test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     (output / "report.html").write_text("<p>upstream</p>", encoding="utf-8")
+    (output / "holdings.csv").write_text(
+        "symbol,weight\n000001,0.5\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
     template = load_template("a-share-four-factor")
     template.metadata["argv"] = [sys.executable, "-c", "raise SystemExit(0)"]
@@ -185,3 +189,4 @@ def test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch):
     assert result.report == "report.html"
     assert "0.90" in (result.run_dir / "nav.csv").read_text(encoding="utf-8")
     assert "upstream" in (result.run_dir / "report.html").read_text(encoding="utf-8")
+    assert "000001" in (result.run_dir / "holdings.csv").read_text(encoding="utf-8")

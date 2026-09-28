@@ -9,6 +9,13 @@ from pathlib import Path
 
 DATE_COLUMNS = ("date", "trade_date", "datetime", "dt")
 VALUE_COLUMNS = ("nav", "equity", "capital", "net_value", "value")
+TABLE_FILES = {
+    "positions.csv",
+    "holdings.csv",
+    "orders.csv",
+    "fills.csv",
+    "trades.csv",
+}
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 
 _CHART_CSS = """
@@ -167,9 +174,16 @@ def collect_outputs(
     report = _best_report(files, nav_source)
     destination = (run_dir / "report.html").resolve()
     if report is None or report.resolve() == destination:
-        return
-    if _allowed(report.resolve(), cwd, run_dir):
+        pass
+    elif _allowed(report.resolve(), cwd, run_dir):
         destination.write_bytes(report.read_bytes())
+    for path in files:
+        if path.name not in TABLE_FILES:
+            continue
+        target = (run_dir / path.name).resolve()
+        if path.resolve() == target or not _allowed(path.resolve(), cwd, run_dir):
+            continue
+        target.write_bytes(path.read_bytes())
 
 
 def _output_roots(cwd: Path, run_dir: Path, output_dirs: list[str]) -> list[Path]:
@@ -214,7 +228,7 @@ def _walk(root: Path) -> list[Path]:
             count += 1
             if count > 300:
                 return found
-            if name == "report.html" or name in NAV_FILENAMES:
+            if name == "report.html" or name in NAV_FILENAMES or name in TABLE_FILES:
                 found.append(current / name)
     return found
 
@@ -289,3 +303,35 @@ def _date_axis(dates: list[str], left: int, right: int) -> str:
             f"{escape(dates[index])}</text>"
         )
     return "".join(labels)
+
+
+def drawdown_fragment(series: NavSeries) -> str:
+    peak = series.rows[0][1]
+    points: list[tuple[str, Decimal]] = []
+    for date, value in series.rows:
+        if value > peak:
+            peak = value
+        drop = (value / peak - 1) if peak else Decimal(0)
+        points.append((date, drop * Decimal(100)))
+    low = min(value for _, value in points)
+    high = Decimal(0)
+    span = high - low or Decimal(1)
+    left, top, right, bottom = 78, 16, 900, 140
+    plot_w = Decimal(right - left)
+    plot_h = Decimal(bottom - top)
+    step = Decimal(max(len(points) - 1, 1))
+    coords = []
+    for index, (_, value) in enumerate(points):
+        x = Decimal(left) + plot_w * Decimal(index) / step
+        y = Decimal(top) + (high - value) * plot_h / span
+        coords.append((x, y))
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    worst = min(value for _, value in points)
+    return f"""<section class="chart-card">
+<h2>回撤</h2>
+<p class="muted">最大回撤 {series.max_drawdown * Decimal(100):.2f}%，
+曲线最低 {worst:.2f}%</p>
+<svg viewBox="0 0 940 180" role="img" aria-label="回撤曲线">
+<polyline points="{line}" fill="none" stroke="#d92d20" stroke-width="2.5"/>
+</svg>
+</section>"""
