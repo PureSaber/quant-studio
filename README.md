@@ -1,0 +1,52 @@
+# quant-studio
+
+quant-studio 是只在本机回环地址运行的量化研究模板台。它让用户修改少量已声明参数，先检查生成的配置与参数列表，再选择是否运行上游工具。它不实现因子、撮合、账本或通用绘图，也不会安装三个外部研究仓库。
+
+外部模板只会在设置 `QUANT_WORKSPACE_ROOT` 且对应上游仓库目录存在时执行。合成样例使用仓库内固定收益率，仅用于验证操作流程；合成样例不是市场收益。所有内容均为研究用途，不构成投资建议。
+
+## 安装
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install --no-deps -r requirements.lock
+.venv\Scripts\python -m pip install --no-deps --no-build-isolation -e .
+.venv\Scripts\python -m pip check
+```
+
+## 预览
+
+```powershell
+.venv\Scripts\python -m quant_studio preview a-share-four-factor --set rebalance_freq=weekly --set symbols_limit=30
+```
+
+`run` 默认也只预览。只有显式添加 `--execute` 才执行：
+
+```powershell
+.venv\Scripts\python -m quant_studio run paper-sim --set initial_capital=200000 --execute
+```
+
+## 合成运行
+
+合成模板不依赖外部仓库，会在 `runs/<id>/` 生成 `nav.csv` 和 `report.html`：
+
+```powershell
+.venv\Scripts\python -m quant_studio run synthetic-demo --set initial_capital=10000 --execute
+```
+
+## 本机页面
+
+```powershell
+.venv\Scripts\python -m quant_studio serve --host 127.0.0.1 --port 8770
+```
+
+打开 `http://127.0.0.1:8770/`。服务拒绝非回环地址；报告服务只允许读取单次运行目录内的 HTML 和 CSV 文件。
+
+合成样例会在运行目录写出净值页。A 股、港股和模拟盘模板默认只生成配置与命令；上游命令失败，或没有把 `report.html` 写进本次运行目录时，页面不嵌入净值。
+
+## 开发检查
+
+```powershell
+.venv\Scripts\python -m ruff check src tests
+.venv\Scripts\python -m ruff format --check src tests
+.venv\Scripts\python -m pytest -q
+```

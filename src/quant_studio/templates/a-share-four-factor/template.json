@@ -1,0 +1,19 @@
+{
+  "id": "a-share-four-factor",
+  "title": "A 股四类因子研究",
+  "summary": "使用估值、规模、预测、动量等四类因子运行上游回测。",
+  "kind": "external",
+  "workspace_repo": "a-share-multifactor",
+  "upstream_repo": "PureSaber/a-share-multifactor",
+  "upstream_ref": "v0.4.2",
+  "base_config": "base.yaml",
+  "config_format": "yaml",
+  "knobs": [
+    {"name": "rebalance_freq", "type": "enum", "choices": ["daily", "weekly", "monthly"], "default": "monthly", "path": "rebalance_freq"},
+    {"name": "initial_capital", "type": "number", "minimum": 10000, "maximum": 1000000000, "default": 100000, "path": "costs.initial_capital"},
+    {"name": "symbols_limit", "type": "int", "minimum": 1, "maximum": 300, "default": 50, "target": "cli"}
+  ],
+  "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
+  "report_name": "report.html",
+  "disclaimer": "研究用途，不构成投资建议。"
+}

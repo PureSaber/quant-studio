@@ -1,0 +1,16 @@
+{
+  "id": "paper-sim",
+  "title": "模拟盘步进研究",
+  "summary": "使用固定信号驱动上游模拟盘单步运行。",
+  "kind": "external",
+  "workspace_repo": "quant-paper-sim",
+  "upstream_ref": "v0.2.2",
+  "base_config": "base.yaml",
+  "config_format": "yaml",
+  "knobs": [
+    {"name": "initial_capital", "type": "number", "minimum": 10000, "maximum": 1000000000, "default": 100000, "path": "initial_capital"}
+  ],
+  "argv": ["quant-paper", "step", "--config", "{config}"],
+  "report_name": "report.html",
+  "disclaimer": "研究用途，不构成投资建议。"
+}
