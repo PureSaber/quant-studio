@@ -1,0 +1,17 @@
+{
+  "id": "hk-equity-daily",
+  "title": "港股日频研究",
+  "summary": "使用上游港股研究工具执行日频策略。",
+  "kind": "external",
+  "workspace_repo": "quant-hk-equity",
+  "upstream_ref": "M8",
+  "base_config": "base.json",
+  "config_format": "json",
+  "knobs": [
+    {"name": "initial_cash", "type": "decimal-string", "minimum_length": 4, "maximum_length": 12, "default": "1000000", "path": "initial_cash"},
+    {"name": "rebalance_sessions", "type": "int", "minimum": 1, "maximum": 5, "choices": [1, 5], "default": 5, "path": "rebalance_sessions"}
+  ],
+  "argv": ["quant-hk", "run", "--config", "{config}", "--snapshot", "{snapshot}", "--output", "{output}"],
+  "report_name": "report.html",
+  "disclaimer": "研究用途，不构成投资建议。"
+}

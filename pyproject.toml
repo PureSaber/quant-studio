@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-studio"
+version = "0.1.0"
+description = "本地量化研究模板预览与运行台"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = ["PyYAML"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+quant_studio = ["templates/*/*.json", "templates/*/*.yaml", "templates/*/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

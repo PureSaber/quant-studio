@@ -1,0 +1,15 @@
+{
+  "id": "synthetic-demo",
+  "title": "合成净值样例",
+  "summary": "用仓库内固定收益率演示完整运行和报告流程。",
+  "kind": "synthetic",
+  "upstream_ref": "local",
+  "base_config": "base.yaml",
+  "config_format": "yaml",
+  "knobs": [
+    {"name": "initial_capital", "type": "number", "minimum": 1000, "maximum": 1000000000, "default": 10000, "path": "initial_capital"}
+  ],
+  "argv": [],
+  "report_name": "report.html",
+  "disclaimer": "研究用途，不构成投资建议。合成样例，不是市场收益。"
+}
