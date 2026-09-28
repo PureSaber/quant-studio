@@ -25,14 +25,20 @@ def render_home() -> str:
         label = "合成样例" if card_kind == "synthetic" else "研究模板"
         cards.append(
             f"""<article class="template-card {card_kind}">
-<span>{label}</span><h2>{escape(template.title)}</h2>
+<span class="eyebrow">{label}</span>
+<h2>{escape(template.title)}</h2>
 <p>{escape(template.summary)}</p>
-<a href="/templates/{escape(template.id)}">打开模板</a>
+<a class="open" href="/templates/{escape(template.id)}">打开模板</a>
 </article>"""
         )
-    return _layout(
-        "quant-studio", "<h1>本地模板回测台</h1><main>" + "".join(cards) + "</main>"
-    )
+    body = f"""<header class="page-head">
+<p class="kicker">模板库</p>
+<h1>选择一个研究模板</h1>
+<p class="lede">只改允许的参数。研究模板先给出命令；
+合成样例会画出净值，并标明不是市场收益。</p>
+</header>
+<main class="card-grid">{"".join(cards)}</main>"""
+    return _layout("模板库", body)
 
 
 def render_template_page(template_id: str) -> str:
@@ -41,11 +47,12 @@ def render_template_page(template_id: str) -> str:
     for knob in template.knobs:
         name = escape(knob["name"])
         default = escape(str(knob["default"]))
+        label = escape(_LABELS.get(knob["name"], knob["name"]))
         if knob["type"] == "enum" or "choices" in knob:
             options = "".join(
                 f'<option value="{escape(str(choice))}"'
                 + (" selected" if choice == knob["default"] else "")
-                + f">{escape(str(choice))}</option>"
+                + f">{escape(_choice_label(knob['name'], choice))}</option>"
                 for choice in knob["choices"]
             )
             control = f'<select name="{name}">{options}</select>'
@@ -55,16 +62,25 @@ def render_template_page(template_id: str) -> str:
             control = (
                 f'<input type="{input_type}" name="{name}" value="{default}"{step}>'
             )
-        fields.append(f"<label>{name}{control}</label>")
-    body = f"""<a href="/">返回首页</a>
+        fields.append(
+            f"<label><span>{label}</span><small>{name}</small>{control}</label>"
+        )
+    kind = "合成样例" if template.kind == "synthetic" else "研究模板"
+    body = f"""<header class="page-head">
+<p class="kicker">{kind}</p>
 <h1>{escape(template.title)}</h1>
-<p>{escape(template.summary)}</p>
+<p class="lede">{escape(template.summary)}</p>
+</header>
+<section class="panel">
 <form method="post" action="/templates/{escape(template.id)}">
 {"".join(fields)}
-<button name="action" value="preview">预览</button>
-<button name="action" value="execute">执行</button>
+<div class="actions">
+<button class="btn" name="action" value="preview">仅预览</button>
+<button class="btn primary" name="action" value="execute">运行</button>
+</div>
 </form>
-<p>{escape(template.disclaimer)}</p>"""
+<p class="note">{escape(template.disclaimer)}</p>
+</section>"""
     return _layout(template.title, body)
 
 
@@ -82,15 +98,27 @@ def render_run(run_dir: str | Path) -> str:
                 f'<iframe title="运行报告" src="/runs/{escape(directory.name)}'
                 f'/files/{escape(result["report"])}"></iframe>'
             )
-    synthetic_notice = (
-        "<p><strong>合成样例，不是市场收益</strong></p>"
-        if template.kind == "synthetic"
-        else ""
-    )
-    body = f"""<a href="/">返回首页</a>
-<h1>运行结果：{escape(result["status"])}</h1>
-<h2>命令预览</h2><pre>{argv}</pre>
-{synthetic_notice}{report_html}"""
+    status = escape(str(result["status"]))
+    notice = ""
+    if template.kind == "synthetic":
+        notice = '<p class="banner">合成样例，不是市场收益</p>'
+    elif result["status"] != "succeeded":
+        notice = (
+            '<p class="banner quiet">这次没有嵌入净值。'
+            "研究模板只有在上游报告写入本次运行目录后才显示曲线。</p>"
+        )
+    body = f"""<header class="page-head">
+<p class="kicker">运行</p>
+<h1>{escape(template.title)}</h1>
+<p class="lede"><span class="status {status}">
+{_STATUS.get(result["status"], status)}</span></p>
+</header>
+{notice}
+<section class="panel command">
+<h2>命令预览</h2>
+<pre>{argv or "进程内合成样例，无外部命令"}</pre>
+</section>
+{report_html}"""
     return _layout("运行结果", body)
 
 
@@ -226,20 +254,191 @@ def _parse_form_knobs(
     return knobs
 
 
+_LABELS = {
+    "rebalance_freq": "调仓频率",
+    "initial_capital": "初始资金",
+    "symbols_limit": "股票数量",
+    "initial_cash": "初始资金（港币）",
+    "rebalance_sessions": "调仓间隔",
+}
+
+_CHOICES = {
+    "rebalance_freq": {"daily": "每个交易日", "weekly": "每周", "monthly": "每月"},
+    "rebalance_sessions": {"1": "1 个交易日", "5": "5 个交易日"},
+}
+
+_STATUS = {
+    "previewed": "仅预览",
+    "succeeded": "已完成",
+    "failed": "失败",
+    "blocked": "未执行",
+}
+
+
+def _choice_label(name: str, choice: object) -> str:
+    return _CHOICES.get(name, {}).get(str(choice), str(choice))
+
+
 def _layout(title: str, body: str) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{escape(title)}</title>
-<style>
-body{{font-family:system-ui,sans-serif;max-width:1100px;margin:2rem auto;
-padding:0 1rem;color:#18212f}}
-main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}}
-.template-card{{border:1px solid #ccd3df;border-radius:12px;padding:1rem}}
-.synthetic{{border-color:#9b6bda;background:#faf7ff}}
-label{{display:block;margin:.8rem 0}}
-input,select{{display:block;padding:.5rem;min-width:18rem}}
-button{{margin-right:.5rem;padding:.6rem 1rem}}
-pre{{white-space:pre-wrap;background:#f4f6f9;padding:1rem}}
-iframe{{width:100%;height:480px;border:1px solid #ccd3df}}
-</style></head><body>{body}</body></html>"""
+<title>{escape(title)} · Quant Studio</title>
+<style>{_CSS}</style></head>
+<body><div class="shell">
+<aside class="side">
+<a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
+<nav><a href="/">模板库</a></nav>
+<p class="side-note">不下真实订单。净值只来自合成样例，或上游已经写入的报告。</p>
+</aside>
+<div class="stage">{body}</div>
+</div></body></html>"""
+
+
+_CSS = """
+:root {
+  --ink: #101828;
+  --muted: #667085;
+  --line: #e6ebf2;
+  --blue: #1677ff;
+  --bg: #f3f6fb;
+  --card: #ffffff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.shell { display: flex; min-height: 100vh; }
+.side {
+  width: 232px;
+  flex: none;
+  padding: 28px 20px;
+  color: #d7e0ee;
+  background: #0b1220;
+}
+.brand {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.brand b { display: block; font-size: 18px; letter-spacing: 0.02em; }
+.brand span { color: #8ea0b8; font-size: 12px; }
+nav { margin-top: 32px; }
+nav a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: white;
+  background: #172033;
+  text-decoration: none;
+}
+.side-note { margin-top: 28px; color: #8ea0b8; font-size: 12px; line-height: 1.6; }
+.stage { flex: 1; min-width: 0; padding: 32px 28px 48px; }
+.page-head { max-width: 880px; margin-bottom: 24px; }
+.kicker {
+  margin: 0 0 8px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 650;
+}
+h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
+.lede { max-width: 640px; color: var(--muted); line-height: 1.6; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  max-width: 1080px;
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 210px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
+}
+.template-card.synthetic { background: #f7f3ff; border-color: #ddd0f5; }
+.eyebrow { color: var(--muted); font-size: 12px; }
+.template-card h2 { margin: 10px 0 8px; font-size: 20px; }
+.template-card p { margin: 0; color: #475467; line-height: 1.55; }
+.open { margin-top: auto; padding-top: 18px; color: var(--blue); font-weight: 650; }
+.panel {
+  max-width: 720px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
+}
+label { display: block; margin: 0 0 16px; }
+label span { display: block; font-weight: 650; }
+label small { color: var(--muted); }
+input, select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 12px;
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+.actions { display: flex; gap: 10px; }
+.btn {
+  padding: 10px 16px;
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  background: white;
+  font: inherit;
+  cursor: pointer;
+}
+.btn.primary { border-color: var(--blue); background: var(--blue); color: white; }
+.note, .banner {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff7e8;
+  color: #8a5a00;
+}
+.banner.quiet { background: #f2f4f7; color: var(--muted); }
+.status {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #175cd3;
+  font-size: 13px;
+}
+.status.failed, .status.blocked { background: #fdecec; color: #b42318; }
+.command { margin-bottom: 16px; }
+.command h2 { margin: 0 0 10px; font-size: 16px; }
+pre {
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e5eefc;
+  white-space: pre-wrap;
+}
+iframe {
+  width: min(960px, 100%);
+  height: 560px;
+  border: 0;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+}
+@media (max-width: 1100px) {
+  .shell { flex-direction: column; }
+  .side { width: auto; padding: 16px 20px 8px; }
+  nav { margin-top: 12px; }
+  .side-note { display: none; }
+  .stage { padding: 24px 20px 40px; }
+}
+"""
