@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from quant_studio import QuantStudioError
-from quant_studio.runner import run, safe_run_file
+from quant_studio.nav import chart_fragment, parse_nav_csv
+from quant_studio.runner import run, safe_run_file, template_readiness
 from quant_studio.templates import load_template, template_ids
 
 
@@ -23,11 +25,14 @@ def render_home() -> str:
         template = load_template(template_id)
         card_kind = "synthetic" if template.kind == "synthetic" else "research"
         label = "合成样例" if card_kind == "synthetic" else "研究模板"
+        ready = template_readiness(template)
+        state = "ready" if ready.runnable else "preview-only"
         cards.append(
             f"""<article class="template-card {card_kind}">
 <span class="eyebrow">{label}</span>
 <h2>{escape(template.title)}</h2>
 <p>{escape(template.summary)}</p>
+<p class="badge {state}">{escape(ready.message)}</p>
 <a class="open" href="/templates/{escape(template.id)}">打开模板</a>
 </article>"""
         )
@@ -41,17 +46,19 @@ def render_home() -> str:
     return _layout("模板库", body)
 
 
-def render_template_page(template_id: str) -> str:
+def render_template_page(template_id: str, preset_id: str | None = None) -> str:
     template = load_template(template_id)
+    selected = _preset_values(template, preset_id)
     fields = []
     for knob in template.knobs:
         name = escape(knob["name"])
-        default = escape(str(knob["default"]))
+        current = selected.get(knob["name"], knob["default"])
+        shown = escape(str(current))
         label = escape(_LABELS.get(knob["name"], knob["name"]))
         if knob["type"] == "enum" or "choices" in knob:
             options = "".join(
                 f'<option value="{escape(str(choice))}"'
-                + (" selected" if choice == knob["default"] else "")
+                + (" selected" if choice == current else "")
                 + f">{escape(_choice_label(knob['name'], choice))}</option>"
                 for choice in knob["choices"]
             )
@@ -59,24 +66,27 @@ def render_template_page(template_id: str) -> str:
         else:
             input_type = "text" if knob["type"] == "decimal-string" else "number"
             step = ' step="any"' if knob["type"] == "number" else ""
-            control = (
-                f'<input type="{input_type}" name="{name}" value="{default}"{step}>'
-            )
+            control = f'<input type="{input_type}" name="{name}" value="{shown}"{step}>'
         fields.append(
             f"<label><span>{label}</span><small>{name}</small>{control}</label>"
         )
     kind = "合成样例" if template.kind == "synthetic" else "研究模板"
+    ready = template_readiness(template)
+    disabled = "" if ready.runnable else " disabled"
+    hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
     body = f"""<header class="page-head">
 <p class="kicker">{kind}</p>
 <h1>{escape(template.title)}</h1>
 <p class="lede">{escape(template.summary)}</p>
 </header>
 <section class="panel">
+<div class="presets">{_preset_links(template, preset_id)}</div>
+{hint}
 <form method="post" action="/templates/{escape(template.id)}">
 {"".join(fields)}
 <div class="actions">
 <button class="btn" name="action" value="preview">仅预览</button>
-<button class="btn primary" name="action" value="execute">运行</button>
+<button class="btn primary" name="action" value="execute"{disabled}>运行</button>
 </div>
 </form>
 <p class="note">{escape(template.disclaimer)}</p>
@@ -99,13 +109,25 @@ def render_run(run_dir: str | Path) -> str:
                 f'/files/{escape(result["report"])}"></iframe>'
             )
     status = escape(str(result["status"]))
-    notice = ""
+    chart = ""
+    nav_path = directory / "nav.csv"
+    if nav_path.is_file():
+        series = parse_nav_csv(nav_path)
+        if series is not None:
+            chart = chart_fragment(series)
+    notices = []
     if template.kind == "synthetic":
-        notice = '<p class="banner">合成样例，不是市场收益</p>'
-    elif result["status"] != "succeeded":
-        notice = (
-            '<p class="banner quiet">这次没有嵌入净值。'
-            "研究模板只有在上游报告写入本次运行目录后才显示曲线。</p>"
+        notices.append('<p class="banner">合成样例，不是市场收益</p>')
+    if result.get("message"):
+        notices.append(f'<p class="banner">{escape(str(result["message"]))}</p>')
+    elif result["status"] == "failed":
+        stderr_path = directory / "stderr.txt"
+        if stderr_path.is_file():
+            detail = stderr_path.read_text(encoding="utf-8")[-800:]
+            notices.append(f"<pre>{escape(detail)}</pre>")
+    elif result["status"] == "succeeded" and not chart and not report_html:
+        notices.append(
+            '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
         )
     body = f"""<header class="page-head">
 <p class="kicker">运行</p>
@@ -113,13 +135,40 @@ def render_run(run_dir: str | Path) -> str:
 <p class="lede"><span class="status {status}">
 {_STATUS.get(result["status"], status)}</span></p>
 </header>
-{notice}
+{"".join(notices)}
 <section class="panel command">
 <h2>命令预览</h2>
 <pre>{argv or "进程内合成样例，无外部命令"}</pre>
 </section>
+{chart}
 {report_html}"""
     return _layout("运行结果", body)
+
+
+def render_environment() -> str:
+    root = os.environ.get("QUANT_WORKSPACE_ROOT") or "未设置"
+    rows = []
+    for template_id in template_ids():
+        template = load_template(template_id)
+        ready = template_readiness(template)
+        rows.append(
+            "<tr>"
+            f"<td>{escape(template.title)}</td>"
+            f"<td>{escape(ready.message)}</td>"
+            "</tr>"
+        )
+    body = f"""<header class="page-head">
+<p class="kicker">环境</p>
+<h1>工作区检查</h1>
+<p class="lede">QUANT_WORKSPACE_ROOT：{escape(root)}</p>
+</header>
+<section class="panel">
+<table>
+<tr><th>模板</th><th>状态</th></tr>
+{"".join(rows)}
+</table>
+</section>"""
+    return _layout("环境", body)
 
 
 def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) -> Path:
@@ -170,8 +219,12 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 self._send_html(render_home())
+            elif path == "/environment":
+                self._send_html(render_environment())
             elif path.startswith("/templates/"):
-                self._send_html(render_template_page(path.removeprefix("/templates/")))
+                preset = parse_qs(urlparse(self.path).query).get("preset", [None])[0]
+                template_id = path.removeprefix("/templates/")
+                self._send_html(render_template_page(template_id, preset))
             elif path.startswith("/runs/") and "/files/" in path:
                 remainder = path.removeprefix("/runs/")
                 run_id, relative = remainder.split("/files/", 1)
@@ -275,6 +328,27 @@ _STATUS = {
 }
 
 
+def _preset_values(template: object, preset_id: str | None) -> dict[str, object]:
+    if not preset_id:
+        return {}
+    for preset in getattr(template, "presets", []) or []:
+        if preset.get("id") == preset_id:
+            return dict(preset.get("values", {}))
+    return {}
+
+
+def _preset_links(template: object, preset_id: str | None) -> str:
+    default_on = "" if preset_id else " on"
+    links = [f'<a class="chip{default_on}" href="?">当前默认</a>']
+    for preset in getattr(template, "presets", []) or []:
+        active = " on" if preset.get("id") == preset_id else ""
+        links.append(
+            f'<a class="chip{active}" href="?preset={escape(str(preset["id"]))}">'
+            f"{escape(str(preset['label']))}</a>"
+        )
+    return "".join(links)
+
+
 def _choice_label(name: str, choice: object) -> str:
     return _CHOICES.get(name, {}).get(str(choice), str(choice))
 
@@ -288,7 +362,7 @@ def _layout(title: str, body: str) -> str:
 <body><div class="shell">
 <aside class="side">
 <a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
-<nav><a href="/">模板库</a></nav>
+<nav><a href="/">模板库</a><a href="/environment">环境</a></nav>
 <p class="side-note">不下真实订单。净值只来自合成样例，或上游已经写入的报告。</p>
 </aside>
 <div class="stage">{body}</div>
@@ -329,12 +403,57 @@ body {
 nav { margin-top: 32px; }
 nav a {
   display: block;
+  margin-top: 8px;
   padding: 10px 12px;
   border-radius: 8px;
   color: white;
   background: #172033;
   text-decoration: none;
 }
+.badge {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.badge.ready { color: #067647; }
+.presets { margin-bottom: 16px; }
+.chip {
+  display: inline-block;
+  margin: 0 8px 8px 0;
+  padding: 6px 12px;
+  border: 1px solid #d0d7e2;
+  border-radius: 999px;
+  color: inherit;
+  text-decoration: none;
+}
+.chip.on { border-color: var(--blue); background: #e8f1ff; color: #175cd3; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+table { width: 100%; border-collapse: collapse; }
+td, th {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.chart-card {
+  max-width: 960px;
+  margin-top: 16px;
+  padding: 8px 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+}
+.stats { display: flex; gap: 12px; margin: 12px 0 4px; }
+.stat {
+  min-width: 140px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f5f8fc;
+}
+.stat b { display: block; font-size: 20px; }
+.stat span { color: var(--muted); font-size: 12px; }
+.chart-card svg { width: 100%; height: auto; }
+.chart-card line { stroke: #e6ebf2; }
+.chart-card text { fill: #98a2b3; font-size: 12px; }
 .side-note { margin-top: 28px; color: #8ea0b8; font-size: 12px; line-height: 1.6; }
 .stage { flex: 1; min-width: 0; padding: 32px 28px 48px; }
 .page-head { max-width: 880px; margin-bottom: 24px; }

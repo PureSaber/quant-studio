@@ -101,3 +101,38 @@ def test_cli_preview_parses_declared_knob_types(monkeypatch, capsys, tmp_path):
     assert captured["knobs"] == {"symbols_limit": 8, "rebalance_freq": "weekly"}
     assert captured["kwargs"]["execute"] is False
     assert '"status": "previewed"' in capsys.readouterr().out
+
+
+def test_missing_workspace_is_preview_only(monkeypatch):
+    monkeypatch.delenv("QUANT_WORKSPACE_ROOT", raising=False)
+
+    home = render_home()
+    form = render_template_page("a-share-four-factor")
+
+    assert "可运行" in home
+    assert "a-share-multifactor 只能预览" in home
+    assert 'value="execute" disabled' in form
+
+
+def test_debug_preset_fills_declared_fields(monkeypatch):
+    monkeypatch.delenv("QUANT_WORKSPACE_ROOT", raising=False)
+
+    page = render_template_page("a-share-four-factor", "debug")
+
+    assert "调试" in page
+    assert 'value="weekly" selected' in page
+    assert 'name="symbols_limit" value="10"' in page
+    assert 'name="initial_capital" value="10000"' in page
+
+
+def test_imported_nav_is_charted_with_drawdown(tmp_path, monkeypatch):
+    from tests.test_runner import test_success_copies_upstream_nav_and_report
+
+    test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch)
+    run_dir = next((tmp_path / "runs").iterdir())
+    page = render_run(run_dir)
+
+    assert "<svg" in page
+    assert "最大回撤" in page
+    assert "期末净值" in page
+    assert "0.90" in page

@@ -12,6 +12,11 @@
     {"name": "rebalance_sessions", "type": "int", "minimum": 1, "maximum": 5, "choices": [1, 5], "default": 5, "path": "rebalance_sessions"}
   ],
   "argv": ["quant-hk", "run", "--config", "{config}", "--snapshot", "{snapshot}", "--output", "{output}"],
+  "output_dirs": ["{output}"],
+  "presets": [
+    {"id": "daily", "label": "日频", "values": {"rebalance_sessions": 1, "initial_cash": "1000000"}},
+    {"id": "weekly-small", "label": "周频小资金", "values": {"rebalance_sessions": 5, "initial_cash": "100000"}}
+  ],
   "report_name": "report.html",
   "disclaimer": "研究用途，不构成投资建议。"
 }

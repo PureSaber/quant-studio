@@ -11,6 +11,11 @@
     {"name": "initial_capital", "type": "number", "minimum": 10000, "maximum": 1000000000, "default": 100000, "path": "initial_capital"}
   ],
   "argv": ["quant-paper", "step", "--config", "{config}"],
+  "output_dirs": ["state"],
+  "presets": [
+    {"id": "small", "label": "小资金", "values": {"initial_capital": 10000}},
+    {"id": "standard", "label": "标准", "values": {"initial_capital": 100000}}
+  ],
   "report_name": "report.html",
   "disclaimer": "研究用途，不构成投资建议。"
 }

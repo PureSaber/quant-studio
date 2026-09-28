@@ -11,7 +11,26 @@ from typing import Any
 import yaml
 
 from quant_studio import QuantStudioError
+from quant_studio.nav import collect_outputs
 from quant_studio.templates import Template, load_template, render_template
+
+
+@dataclass(frozen=True)
+class Readiness:
+    runnable: bool
+    message: str
+
+
+def template_readiness(template: Template) -> Readiness:
+    if template.kind == "synthetic":
+        return Readiness(True, "可运行")
+    repo = str(template.workspace_repo)
+    root = os.environ.get("QUANT_WORKSPACE_ROOT")
+    if not root:
+        return Readiness(False, f"未设置 QUANT_WORKSPACE_ROOT，{repo} 只能预览")
+    if not (Path(root) / repo).is_dir():
+        return Readiness(False, f"工作区里没有 {repo}，只能预览")
+    return Readiness(True, "可运行")
 
 
 @dataclass
@@ -87,34 +106,28 @@ def run(
         _write_json(run_dir / "result.json", result.as_json())
         return result
 
-    report_path = safe_run_file(run_dir, loaded.report_name, {".html"})
+    safe_run_file(run_dir, loaded.report_name, {".html"})
     workspace_value = os.environ.get("QUANT_WORKSPACE_ROOT")
-    if not workspace_value:
+    if workspace_value:
+        workspace_root = Path(workspace_value).resolve()
+        cwd = (workspace_root / loaded.workspace_repo).resolve()
+        try:
+            cwd.relative_to(workspace_root)
+        except ValueError as exc:
+            raise QuantStudioError("workspace_repo 逃出 workspace root") from exc
+    readiness = template_readiness(loaded)
+    if not readiness.runnable:
         result = RunResult(
             "blocked",
             identifier,
             run_dir,
             argv,
-            message="QUANT_WORKSPACE_ROOT 未设置",
+            message=readiness.message,
         )
         _write_json(run_dir / "result.json", result.as_json())
         return result
-    workspace_root = Path(workspace_value).resolve()
+    workspace_root = Path(os.environ["QUANT_WORKSPACE_ROOT"]).resolve()
     cwd = (workspace_root / loaded.workspace_repo).resolve()
-    try:
-        cwd.relative_to(workspace_root)
-    except ValueError as exc:
-        raise QuantStudioError("workspace_repo 逃出 workspace root") from exc
-    if not cwd.is_dir():
-        result = RunResult(
-            "blocked",
-            identifier,
-            run_dir,
-            argv,
-            message=f"上游仓库目录不存在: {cwd}",
-        )
-        _write_json(run_dir / "result.json", result.as_json())
-        return result
 
     try:
         completed = subprocess.run(
@@ -136,13 +149,20 @@ def run(
     (run_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     succeeded = returncode == 0
+    if succeeded:
+        collect_outputs(cwd, run_dir, _output_dirs(loaded, rendered.config))
+    report = run_dir / loaded.report_name
+    message = None
+    if succeeded and not report.is_file() and not (run_dir / "nav.csv").is_file():
+        message = "命令已结束，但没有找到净值序列或 report.html"
     result = RunResult(
         "succeeded" if succeeded else "failed",
         identifier,
         run_dir,
         argv,
-        loaded.report_name if succeeded and report_path.is_file() else None,
+        loaded.report_name if succeeded and report.is_file() else None,
         returncode,
+        message,
     )
     _write_json(run_dir / "result.json", result.as_json())
     return result
@@ -204,6 +224,15 @@ def _render_argv(
         return [part.format_map(replacements) for part in argv]
     except KeyError as exc:
         raise QuantStudioError(f"命令占位符无效: {exc.args[0]}") from exc
+
+
+def _output_dirs(template: Template, config: dict[str, Any]) -> list[str]:
+    dirs = [str(item) for item in template.metadata.get("output_dirs", [])]
+    for key in ("outputs_dir", "state_dir"):
+        value = config.get(key)
+        if isinstance(value, str) and value not in dirs:
+            dirs.append(value)
+    return dirs
 
 
 def _write_config(path: Path, config_format: str, config: dict[str, Any]) -> None:

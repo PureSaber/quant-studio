@@ -14,6 +14,11 @@
     {"name": "symbols_limit", "type": "int", "minimum": 1, "maximum": 300, "default": 50, "target": "cli"}
   ],
   "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
+  "output_dirs": ["outputs/four_factors"],
+  "presets": [
+    {"id": "debug", "label": "调试", "values": {"symbols_limit": 10, "rebalance_freq": "weekly", "initial_capital": 10000}},
+    {"id": "weekly-small", "label": "周频小资金", "values": {"symbols_limit": 30, "rebalance_freq": "weekly", "initial_capital": 50000}}
+  ],
   "report_name": "report.html",
   "disclaimer": "研究用途，不构成投资建议。"
 }
