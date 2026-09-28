@@ -6,7 +6,10 @@ from quant_studio import QuantStudioError
 from quant_studio.__main__ import main
 from quant_studio.runner import preview, run
 from quant_studio.server import (
+    render_backtest,
+    render_data,
     render_home,
+    render_results,
     render_run,
     render_template_page,
     resolve_run_asset,
@@ -101,3 +104,60 @@ def test_cli_preview_parses_declared_knob_types(monkeypatch, capsys, tmp_path):
     assert captured["knobs"] == {"symbols_limit": 8, "rebalance_freq": "weekly"}
     assert captured["kwargs"]["execute"] is False
     assert '"status": "previewed"' in capsys.readouterr().out
+
+
+def test_missing_workspace_is_preview_only(monkeypatch):
+    monkeypatch.delenv("QUANT_WORKSPACE_ROOT", raising=False)
+
+    home = render_home()
+    form = render_template_page("a-share-four-factor")
+
+    assert "可运行" in home
+    assert "a-share-multifactor 只能预览" in home
+    assert 'value="execute" disabled' in form
+
+
+def test_debug_preset_fills_declared_fields(monkeypatch):
+    monkeypatch.delenv("QUANT_WORKSPACE_ROOT", raising=False)
+
+    page = render_template_page("a-share-four-factor", "debug")
+
+    assert "调试" in page
+    assert 'value="weekly" selected' in page
+    assert 'name="symbols_limit" value="10"' in page
+    assert 'name="initial_capital" value="10000"' in page
+
+
+def test_imported_nav_is_charted_with_drawdown(tmp_path, monkeypatch):
+    from tests.test_runner import test_success_copies_upstream_nav_and_report
+
+    test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch)
+    run_dir = next((tmp_path / "runs").iterdir())
+    page = render_run(run_dir)
+
+    assert "<svg" in page
+    assert "最大回撤" in page
+    assert "期末净值" in page
+    assert "0.90" in page
+    assert "持仓" in page
+    assert "回撤" in page
+    assert "未提供基准净值" in page
+
+
+def test_data_page_sees_local_snapshot_and_fetch_command(monkeypatch, tmp_path):
+    folder = tmp_path / "a-share-multifactor" / "data"
+    folder.mkdir(parents=True)
+    (folder / "prices.csv").write_text("date,close\n", encoding="utf-8")
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(tmp_path))
+
+    page = render_data()
+
+    assert "1 个数据文件" in page
+    assert "a_share_multifactor.fetch_data" in page
+
+
+def test_backtest_and_results_list_runs(tmp_path):
+    preview("synthetic-demo", {}, runs_root=tmp_path)
+
+    assert "synthetic-demo" in render_backtest(tmp_path)
+    assert "synthetic-demo" in render_results(tmp_path)

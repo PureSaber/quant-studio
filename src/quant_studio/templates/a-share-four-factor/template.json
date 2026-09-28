@@ -11,9 +11,26 @@
   "knobs": [
     {"name": "rebalance_freq", "type": "enum", "choices": ["daily", "weekly", "monthly"], "default": "monthly", "path": "rebalance_freq"},
     {"name": "initial_capital", "type": "number", "minimum": 10000, "maximum": 1000000000, "default": 100000, "path": "costs.initial_capital"},
-    {"name": "symbols_limit", "type": "int", "minimum": 1, "maximum": 300, "default": 50, "target": "cli"}
+    {"name": "symbols_limit", "type": "int", "minimum": 1, "maximum": 300, "default": 50, "target": "cli"},
+    {"name": "commission", "type": "number", "minimum": 0, "maximum": 0.01, "default": 0.0003, "path": "costs.commission"},
+    {"name": "slippage", "type": "number", "minimum": 0, "maximum": 0.05, "default": 0.001, "path": "costs.slippage"}
+  ],
+  "factor_catalog": [
+    {"name": "pe_ratio", "label": "市盈率", "group": "基本面", "direction": -1},
+    {"name": "pb_ratio", "label": "市净率", "group": "基本面", "direction": -1},
+    {"name": "market_cap", "label": "市值", "group": "基本面", "direction": -1},
+    {"name": "forecast_score", "label": "业绩预告", "group": "基本面", "direction": 1},
+    {"name": "momentum_20d", "label": "20日动量", "group": "技术面", "direction": 1},
+    {"name": "volatility_20d", "label": "20日波动", "group": "技术面", "direction": -1},
+    {"name": "northbound_chg_5d", "label": "北向变化", "group": "情绪面", "direction": 1},
+    {"name": "industry_rs_20d", "label": "行业相对强弱", "group": "宏观面", "direction": 1}
   ],
   "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
+  "output_dirs": ["outputs/four_factors"],
+  "presets": [
+    {"id": "debug", "label": "调试", "values": {"symbols_limit": 10, "rebalance_freq": "weekly", "initial_capital": 10000}},
+    {"id": "weekly-small", "label": "周频小资金", "values": {"symbols_limit": 30, "rebalance_freq": "weekly", "initial_capital": 50000}}
+  ],
   "report_name": "report.html",
   "disclaimer": "研究用途，不构成投资建议。"
 }

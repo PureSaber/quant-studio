@@ -44,6 +44,9 @@ def test_external_run_is_blocked_without_workspace(tmp_path, monkeypatch):
 
     assert result.status == "blocked"
     assert result.report is None
+    assert result.message is not None
+    assert "quant-paper-sim" in result.message
+    assert "只能预览" in result.message
 
 
 def test_external_failure_saves_output_and_has_no_report(tmp_path, monkeypatch):
@@ -161,3 +164,29 @@ def test_workspace_repo_cannot_escape_workspace_root(tmp_path, monkeypatch):
 
     with pytest.raises(QuantStudioError, match="workspace"):
         run(template, {}, execute=True, runs_root=tmp_path / "runs")
+
+
+def test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    output = workspace / "a-share-multifactor" / "outputs" / "four_factors" / "latest"
+    output.mkdir(parents=True)
+    (output / "cumulative_returns.csv").write_text(
+        ",Q5\n2024-01-02,1.00\n2024-01-03,1.10\n2024-01-04,0.90\n",
+        encoding="utf-8",
+    )
+    (output / "report.html").write_text("<p>upstream</p>", encoding="utf-8")
+    (output / "holdings.csv").write_text(
+        "symbol,weight\n000001,0.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    template = load_template("a-share-four-factor")
+    template.metadata["argv"] = [sys.executable, "-c", "raise SystemExit(0)"]
+
+    result = run(template, {}, execute=True, runs_root=tmp_path / "runs")
+
+    assert result.status == "succeeded"
+    assert result.report == "report.html"
+    assert "0.90" in (result.run_dir / "nav.csv").read_text(encoding="utf-8")
+    assert "upstream" in (result.run_dir / "report.html").read_text(encoding="utf-8")
+    assert "000001" in (result.run_dir / "holdings.csv").read_text(encoding="utf-8")

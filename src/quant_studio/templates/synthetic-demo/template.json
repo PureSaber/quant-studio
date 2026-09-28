@@ -10,6 +10,10 @@
     {"name": "initial_capital", "type": "number", "minimum": 1000, "maximum": 1000000000, "default": 10000, "path": "initial_capital"}
   ],
   "argv": [],
+  "presets": [
+    {"id": "debug", "label": "调试", "values": {"initial_capital": 1000}},
+    {"id": "ten-thousand", "label": "一万本金", "values": {"initial_capital": 10000}}
+  ],
   "report_name": "report.html",
   "disclaimer": "研究用途，不构成投资建议。合成样例，不是市场收益。"
 }

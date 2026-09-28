@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from quant_studio import QuantStudioError
-from quant_studio.runner import run, safe_run_file
+from quant_studio.desk import (
+    FETCH_COMMANDS,
+    html_table,
+    list_runs,
+    scan_datasets,
+    workspace_root,
+)
+from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
+from quant_studio.runner import run, safe_run_file, template_readiness
 from quant_studio.templates import load_template, template_ids
 
 
@@ -23,49 +32,160 @@ def render_home() -> str:
         template = load_template(template_id)
         card_kind = "synthetic" if template.kind == "synthetic" else "research"
         label = "合成样例" if card_kind == "synthetic" else "研究模板"
+        ready = template_readiness(template)
+        state = "ready" if ready.runnable else "preview-only"
         cards.append(
             f"""<article class="template-card {card_kind}">
-<span>{label}</span><h2>{escape(template.title)}</h2>
+<span class="eyebrow">{label}</span>
+<h2>{escape(template.title)}</h2>
 <p>{escape(template.summary)}</p>
-<a href="/templates/{escape(template.id)}">打开模板</a>
+<p class="badge {state}">{escape(ready.message)}</p>
+<a class="open" href="/templates/{escape(template.id)}">打开模板</a>
 </article>"""
         )
-    return _layout(
-        "quant-studio", "<h1>本地模板回测台</h1><main>" + "".join(cards) + "</main>"
+    body = f"""<header class="page-head">
+<p class="kicker">模板库</p>
+<h1>选择一个研究模板</h1>
+<p class="lede">只改允许的参数。研究模板先给出命令；
+合成样例会画出净值，并标明不是市场收益。</p>
+</header>
+<main class="card-grid">{"".join(cards)}</main>"""
+    return _layout("模板库", body, "strategy")
+
+
+def render_data() -> str:
+    root = workspace_root()
+    datasets = scan_datasets(root)
+    cards = []
+    for item in datasets:
+        cards.append(
+            f"""<article class="template-card research">
+<span class="eyebrow">{escape(item.market)}</span>
+<h2>{item.files} 个数据文件</h2>
+<p>{escape(str(item.path))}</p>
+</article>"""
+        )
+    if not cards:
+        cards.append(
+            """<article class="template-card research">
+<span class="eyebrow">空状态</span>
+<h2>还没有本地快照</h2>
+<p>设置 QUANT_WORKSPACE_ROOT 后，数据页只读取已有目录，不会自动下载。</p>
+</article>"""
+        )
+    commands = "".join(
+        f"<li><b>{escape(name)}</b><pre>{escape(command)}</pre></li>"
+        for name, command in FETCH_COMMANDS
     )
+    root_text = str(root) if root else "未设置"
+    body = f"""<header class="page-head">
+<p class="kicker">数据</p>
+<h1>本机行情</h1>
+<p class="lede">工作区：{escape(root_text)}</p>
+</header>
+<main class="card-grid">{"".join(cards)}</main>
+<section class="panel"><h2>拉取命令</h2>
+<ul class="commands">{commands}</ul></section>"""
+    return _layout("数据", body, "data")
 
 
-def render_template_page(template_id: str) -> str:
+def render_backtest(runs_root: Path) -> str:
+    rows = _run_rows(list_runs(runs_root), "/runs/")
+    body = f"""<header class="page-head">
+<p class="kicker">回测</p>
+<h1>运行任务</h1>
+<p class="lede">从策略页提交。这里查看状态和日志入口。</p>
+</header>
+<section class="panel"><table>
+<tr><th>模板</th><th>状态</th><th>净值</th></tr>
+{rows or "<tr><td colspan='3'>还没有运行</td></tr>"}
+</table></section>"""
+    return _layout("回测", body, "backtest")
+
+
+def render_results(runs_root: Path) -> str:
+    rows = _run_rows(list_runs(runs_root), "/runs/")
+    body = f"""<header class="page-head">
+<p class="kicker">结果</p>
+<h1>研究记录</h1>
+<p class="lede">有净值的记录可以打开曲线、回撤和持仓成交表。</p>
+</header>
+<section class="panel"><table>
+<tr><th>模板</th><th>状态</th><th>净值</th></tr>
+{rows or "<tr><td colspan='3'>还没有结果</td></tr>"}
+</table></section>"""
+    return _layout("结果", body, "results")
+
+
+def _run_rows(records: list[dict[str, str]], prefix: str) -> str:
+    lines = []
+    for record in records:
+        nav = "有" if record["has_nav"] == "1" else "无"
+        lines.append(
+            "<tr>"
+            f'<td><a href="{prefix}{escape(record["run_id"])}">'
+            f"{escape(record['template_id'])}</a></td>"
+            f"<td>{escape(record['status'])}</td>"
+            f"<td>{nav}</td></tr>"
+        )
+    return "".join(lines)
+
+
+def render_template_page(template_id: str, preset_id: str | None = None) -> str:
     template = load_template(template_id)
+    selected = _preset_values(template, preset_id)
     fields = []
     for knob in template.knobs:
         name = escape(knob["name"])
-        default = escape(str(knob["default"]))
+        current = selected.get(knob["name"], knob["default"])
+        shown = escape(str(current))
+        label = escape(_LABELS.get(knob["name"], knob["name"]))
         if knob["type"] == "enum" or "choices" in knob:
             options = "".join(
                 f'<option value="{escape(str(choice))}"'
-                + (" selected" if choice == knob["default"] else "")
-                + f">{escape(str(choice))}</option>"
+                + (" selected" if choice == current else "")
+                + f">{escape(_choice_label(knob['name'], choice))}</option>"
                 for choice in knob["choices"]
             )
             control = f'<select name="{name}">{options}</select>'
         else:
             input_type = "text" if knob["type"] == "decimal-string" else "number"
             step = ' step="any"' if knob["type"] == "number" else ""
-            control = (
-                f'<input type="{input_type}" name="{name}" value="{default}"{step}>'
-            )
-        fields.append(f"<label>{name}{control}</label>")
-    body = f"""<a href="/">返回首页</a>
+            control = f'<input type="{input_type}" name="{name}" value="{shown}"{step}>'
+        fields.append(
+            f"<label><span>{label}</span><small>{name}</small>{control}</label>"
+        )
+    kind = "合成样例" if template.kind == "synthetic" else "研究模板"
+    ready = template_readiness(template)
+    disabled = "" if ready.runnable else " disabled"
+    hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
+    factors = _factor_fields(template)
+    pool = ""
+    if template.id == "a-share-four-factor":
+        pool = (
+            '<p class="note">股票池固定为沪深300。'
+            "因子只能勾选这个模板已经实现的项。</p>"
+        )
+    body = f"""<header class="page-head">
+<p class="kicker">{kind}</p>
 <h1>{escape(template.title)}</h1>
-<p>{escape(template.summary)}</p>
+<p class="lede">{escape(template.summary)}</p>
+</header>
+<section class="panel">
+<div class="presets">{_preset_links(template, preset_id)}</div>
+{pool}
+{hint}
 <form method="post" action="/templates/{escape(template.id)}">
+{factors}
 {"".join(fields)}
-<button name="action" value="preview">预览</button>
-<button name="action" value="execute">执行</button>
+<div class="actions">
+<button class="btn" name="action" value="preview">仅预览</button>
+<button class="btn primary" name="action" value="execute"{disabled}>运行</button>
+</div>
 </form>
-<p>{escape(template.disclaimer)}</p>"""
-    return _layout(template.title, body)
+<p class="note">{escape(template.disclaimer)}</p>
+</section>"""
+    return _layout(template.title, body, "strategy")
 
 
 def render_run(run_dir: str | Path) -> str:
@@ -82,16 +202,79 @@ def render_run(run_dir: str | Path) -> str:
                 f'<iframe title="运行报告" src="/runs/{escape(directory.name)}'
                 f'/files/{escape(result["report"])}"></iframe>'
             )
-    synthetic_notice = (
-        "<p><strong>合成样例，不是市场收益</strong></p>"
-        if template.kind == "synthetic"
-        else ""
-    )
-    body = f"""<a href="/">返回首页</a>
-<h1>运行结果：{escape(result["status"])}</h1>
-<h2>命令预览</h2><pre>{argv}</pre>
-{synthetic_notice}{report_html}"""
-    return _layout("运行结果", body)
+    status = escape(str(result["status"]))
+    chart = ""
+    nav_path = directory / "nav.csv"
+    if nav_path.is_file():
+        series = parse_nav_csv(nav_path)
+        if series is not None:
+            chart = chart_fragment(series)
+    notices = []
+    if template.kind == "synthetic":
+        notices.append('<p class="banner">合成样例，不是市场收益</p>')
+    if result.get("message"):
+        notices.append(f'<p class="banner">{escape(str(result["message"]))}</p>')
+    elif result["status"] == "failed":
+        stderr_path = directory / "stderr.txt"
+        if stderr_path.is_file():
+            detail = stderr_path.read_text(encoding="utf-8")[-800:]
+            notices.append(f"<pre>{escape(detail)}</pre>")
+    elif result["status"] == "succeeded" and not chart and not report_html:
+        notices.append(
+            '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
+        )
+    tables = _artifact_tables(directory)
+    benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
+    drawdown = ""
+    if nav_path.is_file():
+        series = parse_nav_csv(nav_path)
+        if series is not None:
+            drawdown = drawdown_fragment(series)
+            if _has_benchmark(nav_path):
+                benchmark = '<p class="note">净值文件包含基准列，已画在主图。</p>'
+    body = f"""<header class="page-head">
+<p class="kicker">结果</p>
+<h1>{escape(template.title)}</h1>
+<p class="lede"><span class="status {status}">
+{_STATUS.get(result["status"], status)}</span></p>
+</header>
+{"".join(notices)}
+{benchmark}
+<section class="panel command">
+<h2>命令预览</h2>
+<pre>{argv or "进程内合成样例，无外部命令"}</pre>
+</section>
+{chart}
+{drawdown}
+{tables}
+{report_html}"""
+    return _layout("运行结果", body, "results")
+
+
+def render_environment() -> str:
+    root = os.environ.get("QUANT_WORKSPACE_ROOT") or "未设置"
+    rows = []
+    for template_id in template_ids():
+        template = load_template(template_id)
+        ready = template_readiness(template)
+        rows.append(
+            "<tr>"
+            f"<td>{escape(template.title)}</td>"
+            f"<td>{escape(ready.message)}</td>"
+            "</tr>"
+        )
+    body = f"""<header class="page-head">
+<p class="kicker">环境</p>
+<h1>工作区检查</h1>
+<p class="lede">QUANT_WORKSPACE_ROOT：{escape(root)}</p>
+</header>
+<section class="panel">
+<table>
+<tr><th>模板</th><th>状态</th></tr>
+{"".join(rows)}
+</table>
+</section>"""
+    return _layout("环境", body, "data")
 
 
 def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) -> Path:
@@ -140,10 +323,20 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = unquote(urlparse(self.path).path)
         try:
-            if path == "/":
+            if path in {"/", "/strategy"}:
                 self._send_html(render_home())
+            elif path == "/data":
+                self._send_html(render_data())
+            elif path == "/backtest":
+                self._send_html(render_backtest(self.runs_root))
+            elif path == "/results":
+                self._send_html(render_results(self.runs_root))
+            elif path == "/environment":
+                self._send_html(render_environment())
             elif path.startswith("/templates/"):
-                self._send_html(render_template_page(path.removeprefix("/templates/")))
+                preset = parse_qs(urlparse(self.path).query).get("preset", [None])[0]
+                template_id = path.removeprefix("/templates/")
+                self._send_html(render_template_page(template_id, preset))
             elif path.startswith("/runs/") and "/files/" in path:
                 remainder = path.removeprefix("/runs/")
                 run_id, relative = remainder.split("/files/", 1)
@@ -169,10 +362,14 @@ class _Handler(BaseHTTPRequestHandler):
             data = parse_qs(self.rfile.read(length).decode("utf-8"))
             template_id = path.removeprefix("/templates/")
             action = data.pop("action", ["preview"])[0]
+            factor_form = data.pop("factor_form", [None])[0]
+            chosen = data.pop("factor", None)
+            factors = list(chosen) if factor_form else None
             knobs = _parse_form_knobs(template_id, data)
             result = run(
                 template_id,
                 knobs,
+                factors=factors,
                 execute=action == "execute",
                 runs_root=self.runs_root,
             )
@@ -226,20 +423,311 @@ def _parse_form_knobs(
     return knobs
 
 
-def _layout(title: str, body: str) -> str:
+_LABELS = {
+    "rebalance_freq": "调仓频率",
+    "initial_capital": "初始资金",
+    "symbols_limit": "股票数量",
+    "commission": "佣金率",
+    "slippage": "滑点",
+    "initial_cash": "初始资金（港币）",
+    "rebalance_sessions": "调仓间隔",
+}
+
+_CHOICES = {
+    "rebalance_freq": {"daily": "每个交易日", "weekly": "每周", "monthly": "每月"},
+    "rebalance_sessions": {"1": "1 个交易日", "5": "5 个交易日"},
+}
+
+_STATUS = {
+    "previewed": "仅预览",
+    "succeeded": "已完成",
+    "failed": "失败",
+    "blocked": "未执行",
+}
+
+
+def _factor_fields(template: object) -> str:
+    catalog = list(template.metadata.get("factor_catalog") or [])
+    if not catalog:
+        return ""
+    boxes = ['<input type="hidden" name="factor_form" value="1">']
+    group = None
+    for item in catalog:
+        if item["group"] != group:
+            group = item["group"]
+            boxes.append(f'<p class="eyebrow">{escape(str(group))}</p>')
+        boxes.append(
+            '<label class="check"><input type="checkbox" name="factor" '
+            f'value="{escape(item["name"])}" checked>'
+            f"<span>{escape(item['label'])}</span></label>"
+        )
+    return "".join(boxes)
+
+
+def _artifact_tables(directory: Path) -> str:
+    titles = {
+        "positions.csv": "持仓",
+        "holdings.csv": "持仓",
+        "orders.csv": "委托",
+        "fills.csv": "成交",
+        "trades.csv": "成交",
+    }
+    parts = []
+    for name, title in titles.items():
+        path = directory / name
+        if path.is_file():
+            parts.append(html_table(path, title))
+    return "".join(parts)
+
+
+def _has_benchmark(path: Path) -> bool:
+    header = path.read_text(encoding="utf-8").splitlines()[:1]
+    return bool(header) and "benchmark" in header[0]
+
+
+def _preset_values(template: object, preset_id: str | None) -> dict[str, object]:
+    if not preset_id:
+        return {}
+    for preset in getattr(template, "presets", []) or []:
+        if preset.get("id") == preset_id:
+            return dict(preset.get("values", {}))
+    return {}
+
+
+def _preset_links(template: object, preset_id: str | None) -> str:
+    default_on = "" if preset_id else " on"
+    links = [f'<a class="chip{default_on}" href="?">当前默认</a>']
+    for preset in getattr(template, "presets", []) or []:
+        active = " on" if preset.get("id") == preset_id else ""
+        links.append(
+            f'<a class="chip{active}" href="?preset={escape(str(preset["id"]))}">'
+            f"{escape(str(preset['label']))}</a>"
+        )
+    return "".join(links)
+
+
+def _choice_label(name: str, choice: object) -> str:
+    return _CHOICES.get(name, {}).get(str(choice), str(choice))
+
+
+def _layout(title: str, body: str, active: str = "strategy") -> str:
+    links = []
+    for key, label, href in (
+        ("data", "数据", "/data"),
+        ("strategy", "策略", "/strategy"),
+        ("backtest", "回测", "/backtest"),
+        ("results", "结果", "/results"),
+    ):
+        mark = " on" if key == active else ""
+        links.append(f'<a class="nav{mark}" href="{href}">{label}</a>')
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{escape(title)}</title>
-<style>
-body{{font-family:system-ui,sans-serif;max-width:1100px;margin:2rem auto;
-padding:0 1rem;color:#18212f}}
-main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}}
-.template-card{{border:1px solid #ccd3df;border-radius:12px;padding:1rem}}
-.synthetic{{border-color:#9b6bda;background:#faf7ff}}
-label{{display:block;margin:.8rem 0}}
-input,select{{display:block;padding:.5rem;min-width:18rem}}
-button{{margin-right:.5rem;padding:.6rem 1rem}}
-pre{{white-space:pre-wrap;background:#f4f6f9;padding:1rem}}
-iframe{{width:100%;height:480px;border:1px solid #ccd3df}}
-</style></head><body>{body}</body></html>"""
+<title>{escape(title)} · Quant Studio</title>
+<style>{_CSS}</style></head>
+<body><div class="shell">
+<aside class="side">
+<a class="brand" href="/strategy"><b>Quant Studio</b><span>本地研究台</span></a>
+<nav>{"".join(links)}</nav>
+<p class="side-note">不下真实订单。曲线只来自合成样例，或上游已经交出的净值。</p>
+</aside>
+<div class="stage">{body}</div>
+</div></body></html>"""
+
+
+_CSS = """
+:root {
+  --ink: #101828;
+  --muted: #667085;
+  --line: #e6ebf2;
+  --blue: #1677ff;
+  --bg: #f3f6fb;
+  --card: #ffffff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.shell { display: flex; min-height: 100vh; }
+.side {
+  width: 232px;
+  flex: none;
+  padding: 28px 20px;
+  color: #d7e0ee;
+  background: #0b1220;
+}
+.brand {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.brand b { display: block; font-size: 18px; letter-spacing: 0.02em; }
+.brand span { color: #8ea0b8; font-size: 12px; }
+nav { margin-top: 32px; }
+nav a {
+  display: block;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: white;
+  background: #172033;
+  text-decoration: none;
+}
+nav a.on { background: #24406e; }
+label.check { display: flex; align-items: center; gap: 8px; }
+label.check input { width: auto; margin: 0; }
+ul.commands { padding-left: 18px; }
+.badge {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.badge.ready { color: #067647; }
+.presets { margin-bottom: 16px; }
+.chip {
+  display: inline-block;
+  margin: 0 8px 8px 0;
+  padding: 6px 12px;
+  border: 1px solid #d0d7e2;
+  border-radius: 999px;
+  color: inherit;
+  text-decoration: none;
+}
+.chip.on { border-color: var(--blue); background: #e8f1ff; color: #175cd3; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+table { width: 100%; border-collapse: collapse; }
+td, th {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.chart-card {
+  max-width: 960px;
+  margin-top: 16px;
+  padding: 8px 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+}
+.stats { display: flex; gap: 12px; margin: 12px 0 4px; }
+.stat {
+  min-width: 140px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f5f8fc;
+}
+.stat b { display: block; font-size: 20px; }
+.stat span { color: var(--muted); font-size: 12px; }
+.chart-card svg { width: 100%; height: auto; }
+.chart-card line { stroke: #e6ebf2; }
+.chart-card text { fill: #98a2b3; font-size: 12px; }
+.side-note { margin-top: 28px; color: #8ea0b8; font-size: 12px; line-height: 1.6; }
+.stage { flex: 1; min-width: 0; padding: 32px 28px 48px; }
+.page-head { max-width: 880px; margin-bottom: 24px; }
+.kicker {
+  margin: 0 0 8px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 650;
+}
+h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
+.lede { max-width: 640px; color: var(--muted); line-height: 1.6; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  max-width: 1080px;
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 210px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
+}
+.template-card.synthetic { background: #f7f3ff; border-color: #ddd0f5; }
+.eyebrow { color: var(--muted); font-size: 12px; }
+.template-card h2 { margin: 10px 0 8px; font-size: 20px; }
+.template-card p { margin: 0; color: #475467; line-height: 1.55; }
+.open { margin-top: auto; padding-top: 18px; color: var(--blue); font-weight: 650; }
+.panel {
+  max-width: 720px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
+}
+label { display: block; margin: 0 0 16px; }
+label span { display: block; font-weight: 650; }
+label small { color: var(--muted); }
+input, select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 12px;
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+.actions { display: flex; gap: 10px; }
+.btn {
+  padding: 10px 16px;
+  border: 1px solid #d0d7e2;
+  border-radius: 10px;
+  background: white;
+  font: inherit;
+  cursor: pointer;
+}
+.btn.primary { border-color: var(--blue); background: var(--blue); color: white; }
+.note, .banner {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff7e8;
+  color: #8a5a00;
+}
+.banner.quiet { background: #f2f4f7; color: var(--muted); }
+.status {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #175cd3;
+  font-size: 13px;
+}
+.status.failed, .status.blocked { background: #fdecec; color: #b42318; }
+.command { margin-bottom: 16px; }
+.command h2 { margin: 0 0 10px; font-size: 16px; }
+pre {
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e5eefc;
+  white-space: pre-wrap;
+}
+iframe {
+  width: min(960px, 100%);
+  height: 560px;
+  border: 0;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+}
+@media (max-width: 1100px) {
+  .shell { flex-direction: column; }
+  .side { width: auto; padding: 16px 20px 8px; }
+  nav { margin-top: 12px; }
+  .side-note { display: none; }
+  .stage { padding: 24px 20px 40px; }
+}
+"""

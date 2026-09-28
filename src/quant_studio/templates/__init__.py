@@ -77,6 +77,29 @@ def render_template(
     return RenderedTemplate(config, values)
 
 
+def apply_factor_selection(
+    config: dict[str, Any], template: Template, names: list[str]
+) -> None:
+    catalog = list(template.metadata.get("factor_catalog") or [])
+    if not catalog:
+        raise QuantStudioError("该模板不能选择因子")
+    known = {item["name"]: item for item in catalog}
+    if not names:
+        raise QuantStudioError("至少选择一个因子")
+    selected: list[str] = []
+    directions: dict[str, int] = {}
+    for name in names:
+        if name not in known:
+            raise QuantStudioError(f"未知因子 {name}")
+        if name in selected:
+            continue
+        selected.append(name)
+        directions[name] = int(known[name]["direction"])
+    config["factors"] = selected
+    if "factor_directions" in config:
+        config["factor_directions"] = directions
+
+
 def _validate_knob(name: str, value: Any, knob: dict[str, Any]) -> None:
     kind = knob["type"]
     valid = True
@@ -124,4 +147,5 @@ __all__ = [
     "load_template",
     "render_template",
     "template_ids",
+    "apply_factor_selection",
 ]
