@@ -4,7 +4,7 @@
   "summary": "使用上游港股研究工具执行日频策略。",
   "kind": "external",
   "workspace_repo": "quant-hk-equity",
-  "upstream_ref": "M8",
+  "upstream_ref": "0.1.0",
   "base_config": "base.json",
   "config_format": "json",
   "knobs": [

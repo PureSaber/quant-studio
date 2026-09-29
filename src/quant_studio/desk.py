@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape
 from pathlib import Path
 
@@ -22,6 +23,11 @@ FETCH_COMMANDS = (
         "quant-hk fetch --config configs/baseline.json --snapshot data/hk-snapshot",
     ),
 )
+
+FETCH_BY_REPO = {
+    "a-share-multifactor": FETCH_COMMANDS[0][1],
+    "quant-hk-equity": FETCH_COMMANDS[1][1],
+}
 
 
 @dataclass(frozen=True)
@@ -52,7 +58,7 @@ def scan_datasets(root: Path | None = None) -> list[Dataset]:
         if not path.is_dir():
             continue
         count = 0
-        newest = ""
+        newest_stamp = 0.0
         for directory, dirnames, filenames in os.walk(path):
             dirnames[:] = [
                 name
@@ -66,13 +72,12 @@ def scan_datasets(root: Path | None = None) -> list[Dataset]:
                 if count > 200:
                     break
                 stamp = (Path(directory) / name).stat().st_mtime
-                text = str(int(stamp))
-                if text > newest:
-                    newest = text
+                if stamp > newest_stamp:
+                    newest_stamp = stamp
             if count > 200:
                 break
         if count:
-            found.append(Dataset(market, path, count, newest))
+            found.append(Dataset(market, path, count, _format_time(newest_stamp)))
     return found
 
 
@@ -91,17 +96,28 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
             )
         except (OSError, json.JSONDecodeError):
             continue
+        report_name = str(result.get("report") or "")
+        has_report = (
+            report_name == "report.html" and (directory / "report.html").is_file()
+        )
+        stamp = result_path.stat().st_mtime
         records.append(
             {
                 "run_id": directory.name,
                 "template_id": str(request.get("template_id", "")),
                 "status": str(result.get("status", "")),
                 "has_nav": "1" if (directory / "nav.csv").is_file() else "0",
-                "mtime": str(int(result_path.stat().st_mtime)),
+                "has_report": "1" if has_report else "0",
+                "when": _format_time(stamp),
+                "mtime": str(int(stamp)),
             }
         )
     records.sort(key=lambda item: item["mtime"], reverse=True)
     return records[:40]
+
+
+def _format_time(stamp: float) -> str:
+    return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
 
 
 def html_table(path: Path, title: str, limit: int = 12) -> str:

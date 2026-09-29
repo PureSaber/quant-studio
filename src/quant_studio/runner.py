@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from quant_studio import QuantStudioError
+from quant_studio.flow import format_argv
 from quant_studio.nav import collect_outputs
 from quant_studio.templates import (
     Template,
@@ -236,16 +237,13 @@ def _render_argv(
     run_dir: Path,
     config_path: Path,
 ) -> list[str]:
-    replacements = {
-        **{name: str(value) for name, value in values.items()},
-        "config": str(config_path),
-        "snapshot": str(run_dir / "snapshot"),
-        "output": str(run_dir / "strategy-output"),
-    }
-    try:
-        return [part.format_map(replacements) for part in argv]
-    except KeyError as exc:
-        raise QuantStudioError(f"命令占位符无效: {exc.args[0]}") from exc
+    return format_argv(
+        argv,
+        values,
+        config=str(config_path),
+        snapshot=str(run_dir / "snapshot"),
+        output=str(run_dir / "strategy-output"),
+    )
 
 
 def _output_dirs(template: Template, config: dict[str, Any]) -> list[str]:
