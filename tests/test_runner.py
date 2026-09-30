@@ -166,7 +166,7 @@ def test_workspace_repo_cannot_escape_workspace_root(tmp_path, monkeypatch):
         run(template, {}, execute=True, runs_root=tmp_path / "runs")
 
 
-def test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch):
+def test_old_workspace_outputs_are_never_used(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     output = workspace / "a-share-multifactor" / "outputs" / "four_factors" / "latest"
     output.mkdir(parents=True)
@@ -185,8 +185,75 @@ def test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch):
 
     result = run(template, {}, execute=True, runs_root=tmp_path / "runs")
 
+    assert result.status == "failed"
+    assert result.report is None
+    assert not (result.run_dir / "nav.csv").exists()
+    assert not (result.run_dir / "holdings.csv").exists()
+
+
+def test_current_run_outputs_are_isolated_and_collected(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    (workspace / "a-share-multifactor").mkdir(parents=True)
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    template = load_template("a-share-four-factor")
+    template.metadata["argv"] = [
+        sys.executable,
+        "-c",
+        "from pathlib import Path; import sys, yaml; "
+        "p=Path(yaml.safe_load(Path(sys.argv[1]).read_text())['outputs_dir'])/'new'; "
+        "p.mkdir(parents=True); "
+        "(p/'nav.csv').write_text('date,nav\\n2026-01-01,1.0040\\n"
+        "2026-01-02,1.0049\\n'); "
+        "(p/'report.html').write_text('current'); "
+        "(p/'holdings.csv').write_text('symbol,weight\\nABC,0.5\\n')",
+        "{config}",
+    ]
+    result = run(template, execute=True, runs_root=tmp_path / "runs")
     assert result.status == "succeeded"
-    assert result.report == "report.html"
-    assert "0.90" in (result.run_dir / "nav.csv").read_text(encoding="utf-8")
-    assert "upstream" in (result.run_dir / "report.html").read_text(encoding="utf-8")
-    assert "000001" in (result.run_dir / "holdings.csv").read_text(encoding="utf-8")
+    assert "1.0049" in (result.run_dir / "nav.csv").read_text()
+    assert (result.run_dir / "report.html").read_text() == "current"
+    assert "ABC" in (result.run_dir / "holdings.csv").read_text()
+
+
+def test_missing_executable_blocks_before_start(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    (workspace / "quant-paper-sim").mkdir(parents=True)
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    template = load_template("paper-sim")
+    template.metadata["argv"] = ["nonexistent-quant-command-12345"]
+    result = run(template, execute=True, runs_root=tmp_path / "runs")
+    assert result.status == "blocked"
+    assert "nonexistent-quant-command" in result.message
+    assert (result.run_dir / "result.json").is_file()
+
+
+def test_startup_oserror_is_recorded(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    (workspace / "quant-paper-sim").mkdir(parents=True)
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    template = load_template("paper-sim")
+    template.metadata["argv"] = [sys.executable, "-c", "pass"]
+
+    def fail(*args, **kwargs):
+        raise FileNotFoundError("executable disappeared")
+
+    monkeypatch.setattr("subprocess.run", fail)
+    result = run(template, execute=True, runs_root=tmp_path / "runs")
+    assert result.status == "failed"
+    assert "executable disappeared" in (result.run_dir / "stderr.txt").read_text(
+        "utf-8"
+    )
+    assert (
+        json.loads((result.run_dir / "result.json").read_text())["status"] == "failed"
+    )
+
+
+def test_missing_python_module_blocks(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    (workspace / "quant-paper-sim").mkdir(parents=True)
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    template = load_template("paper-sim")
+    template.metadata["argv"] = ["python", "-m", "nonexistent_quant_module_12345"]
+    result = run(template, execute=True, runs_root=tmp_path / "runs")
+    assert result.status == "blocked"
+    assert result.argv[0] == sys.executable

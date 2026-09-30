@@ -129,16 +129,16 @@ def test_debug_preset_fills_declared_fields(monkeypatch):
 
 
 def test_imported_nav_is_charted_with_drawdown(tmp_path, monkeypatch):
-    from tests.test_runner import test_success_copies_upstream_nav_and_report
+    from tests.test_runner import test_current_run_outputs_are_isolated_and_collected
 
-    test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch)
+    test_current_run_outputs_are_isolated_and_collected(tmp_path, monkeypatch)
     run_dir = next((tmp_path / "runs").iterdir())
     page = render_run(run_dir)
 
     assert "<svg" in page
     assert "最大回撤" in page
     assert "期末净值" in page
-    assert "0.90" in page
+    assert "+0.09%" in page
     assert "持仓" in page
     assert "回撤" in page
     assert "未提供基准净值" in page
