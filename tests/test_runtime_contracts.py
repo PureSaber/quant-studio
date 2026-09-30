@@ -49,7 +49,7 @@ def test_explicit_upstream_result_bundle_accepts_timestamp_and_latest(tmp_path):
         )
         (bundle / "report.html").write_text("actual upstream report")
     template = load_template("a-share-four-factor")
-    collect_outputs(
+    report = collect_outputs(
         tmp_path,
         run_dir,
         ["{output}"],
@@ -57,7 +57,8 @@ def test_explicit_upstream_result_bundle_accepts_timestamp_and_latest(tmp_path):
         nav_column=template.metadata["nav_column"],
     )
     assert parse_nav_csv(run_dir / "nav.csv").period_return == Decimal("0.1")
-    assert (run_dir / "report.html").read_text() == "actual upstream report"
+    assert report == "strategy-output/latest/report.html"
+    assert (run_dir / report).read_text() == "actual upstream report"
 
 
 def test_declared_result_path_cannot_escape_run(tmp_path):

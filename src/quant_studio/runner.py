@@ -219,20 +219,24 @@ def run(
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     succeeded = returncode == 0
     message = None
+    report_name = loaded.report_name
     if succeeded:
         try:
-            collect_outputs(
+            opening_key = loaded.metadata.get("nav_initial_value_key")
+            collected_report = collect_outputs(
                 cwd,
                 run_dir,
                 _output_dirs(loaded, rendered.config),
                 result_files=loaded.metadata.get("result_files"),
                 nav_column=loaded.metadata.get("nav_column"),
                 nav_strategy=loaded.metadata.get("nav_strategy"),
+                initial_nav=rendered.config[opening_key] if opening_key else None,
             )
+            report_name = collected_report or report_name
         except (OSError, ValueError, QuantStudioError) as exc:
             succeeded = False
             message = f"无法收集本次运行结果: {exc}"
-    report = run_dir / loaded.report_name
+    report = run_dir / report_name
     if succeeded and not report.is_file() and not (run_dir / "nav.csv").is_file():
         message = "命令已结束，但没有找到净值序列或 report.html"
         succeeded = False
@@ -241,7 +245,7 @@ def run(
         identifier,
         run_dir,
         argv,
-        loaded.report_name if succeeded and report.is_file() else None,
+        report_name if succeeded and report.is_file() else None,
         returncode,
         message,
     )

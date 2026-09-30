@@ -7,6 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import yaml
+
 from quant_studio import QuantStudioError
 from quant_studio.desk import (
     FETCH_COMMANDS,
@@ -203,17 +205,37 @@ def render_run(run_dir: str | Path) -> str:
     argv = " ".join(escape(str(item)) for item in result["argv"])
     report_html = ""
     if result.get("report"):
-        report = safe_run_file(directory, result["report"], {".html"})
+        report_name = result["report"]
+        declared = (template.metadata.get("result_files") or {}).get("report.html")
+        if report_name == "report.html" and declared:
+            original = safe_run_file(
+                directory, f"strategy-output/{declared}", {".html"}
+            )
+            if original.is_file():
+                report_name = f"strategy-output/{declared}"
+        report = safe_run_file(directory, report_name, {".html"})
         if report.is_file():
             report_html = (
                 f'<iframe title="运行报告" src="/runs/{escape(directory.name)}'
-                f'/files/{escape(result["report"])}"></iframe>'
+                f'/files/{escape(report_name)}"></iframe>'
             )
     status = escape(str(result["status"]))
     chart = ""
     nav_path = directory / "nav.csv"
+    series = None
     if nav_path.is_file():
-        series = parse_nav_csv(nav_path)
+        opening_key = template.metadata.get("nav_initial_value_key")
+        opening = None
+        if opening_key:
+            config = yaml.safe_load(
+                (directory / f"config.{template.config_format}").read_text(
+                    encoding="utf-8"
+                )
+            )
+            opening = config[opening_key]
+        # Older runs lack the initial_nav CSV column; their frozen config still
+        # establishes the basis. Reading it never rewrites historical evidence.
+        series = parse_nav_csv(nav_path, initial_nav=opening)
         if series is not None:
             chart = chart_fragment(series)
     notices = []
@@ -233,12 +255,10 @@ def render_run(run_dir: str | Path) -> str:
     tables = _artifact_tables(directory)
     benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
     drawdown = ""
-    if nav_path.is_file():
-        series = parse_nav_csv(nav_path)
-        if series is not None:
-            drawdown = drawdown_fragment(series)
-            if _has_benchmark(nav_path):
-                benchmark = '<p class="note">净值文件包含基准列，已画在主图。</p>'
+    if series is not None:
+        drawdown = drawdown_fragment(series)
+        if _has_benchmark(nav_path):
+            benchmark = '<p class="note">净值文件包含基准列，已画在主图。</p>'
     body = f"""<header class="page-head">
 <p class="kicker">结果</p>
 <h1>{escape(template.title)}</h1>
@@ -291,7 +311,11 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
         run_dir.relative_to(root)
     except ValueError as exc:
         raise QuantStudioError(f"非法运行 id: {run_id}") from exc
-    path = safe_run_file(run_dir, relative_path, {".html", ".csv"})
+    path = safe_run_file(run_dir, relative_path, {".html", ".csv", ".json"})
+    if path.suffix.lower() == ".json" and not path.is_relative_to(
+        run_dir / "strategy-output"
+    ):
+        raise QuantStudioError("仅允许读取上游结果包内的 JSON 证据")
     if not path.is_file():
         raise QuantStudioError(f"运行文件不存在: {relative_path}")
     return path
@@ -399,11 +423,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send_asset(self, path: Path) -> None:
         body = path.read_bytes()
-        content_type = (
-            "text/html; charset=utf-8"
-            if path.suffix.lower() == ".html"
-            else "text/csv; charset=utf-8"
-        )
+        content_type = {
+            ".html": "text/html; charset=utf-8",
+            ".csv": "text/csv; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+        }[path.suffix.lower()]
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))

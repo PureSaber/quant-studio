@@ -214,7 +214,8 @@ def test_current_run_outputs_are_isolated_and_collected(tmp_path, monkeypatch):
     result = run(template, execute=True, runs_root=tmp_path / "runs")
     assert result.status == "succeeded"
     assert "1.0049" in (result.run_dir / "nav.csv").read_text()
-    assert (result.run_dir / "report.html").read_text() == "current"
+    assert result.report == "strategy-output/new/report.html"
+    assert (result.run_dir / result.report).read_text() == "current"
     assert "ABC" in (result.run_dir / "holdings.csv").read_text()
 
 

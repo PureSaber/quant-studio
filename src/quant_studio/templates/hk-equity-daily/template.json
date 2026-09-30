@@ -14,6 +14,7 @@
   "argv": ["quant-hk", "run", "--config", "{config}", "--snapshot", "{snapshot}", "--output", "{output}"],
   "output_dirs": ["{output}"],
   "requires_snapshot": true,
+  "nav_initial_value_key": "initial_cash",
   "result_files": {"nav.csv": "holdout/standard/returns.csv", "report.html": "report.html", "positions.csv": "holdout/standard/positions.csv", "orders.csv": "holdout/standard/orders.csv"},
   "presets": [
     {"id": "daily", "label": "日频", "values": {"rebalance_sessions": 1, "initial_cash": "1000000"}},
