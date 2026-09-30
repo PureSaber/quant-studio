@@ -27,9 +27,12 @@ from quant_studio.templates import (
 class Readiness:
     runnable: bool
     message: str
+    needs_input: bool = False
 
 
-def template_readiness(template: Template) -> Readiness:
+def template_readiness(
+    template: Template, *, snapshot: str | Path | None = None
+) -> Readiness:
     if template.kind == "synthetic":
         return Readiness(True, "可运行")
     repo = str(template.workspace_repo)
@@ -49,6 +52,10 @@ def template_readiness(template: Template) -> Readiness:
             available = False
         if not available:
             return Readiness(False, f"当前 Python 环境缺少模块 {module}")
+    if template.metadata.get("requires_snapshot"):
+        selected = _snapshot_path(template, snapshot)
+        if selected is None or not (selected / "manifest.json").is_file():
+            return Readiness(False, "请选择已有港股快照（需包含 manifest.json）", True)
     return Readiness(True, "可运行")
 
 
@@ -75,6 +82,7 @@ def preview(
     factors: list[str] | None = None,
     runs_root: str | Path | None = None,
     run_id: str | None = None,
+    snapshot: str | Path | None = None,
 ) -> RunResult:
     loaded = load_template(template) if isinstance(template, str) else template
     rendered = render_template(loaded, knobs)
@@ -82,12 +90,21 @@ def preview(
         apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
     _isolate_outputs(loaded, rendered.config, run_dir)
+    _resolve_input_paths(loaded, rendered.config)
+    selected_snapshot = _snapshot_path(loaded, snapshot)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
-    argv = _render_argv(loaded.argv, rendered.values, run_dir, config_path)
+    argv = _render_argv(
+        loaded.argv, rendered.values, run_dir, config_path, selected_snapshot
+    )
     _write_json(
         run_dir / "request.json",
-        {"template_id": loaded.id, "knobs": knobs or {}, "factors": factors},
+        {
+            "template_id": loaded.id,
+            "knobs": knobs or {},
+            "factors": factors,
+            "snapshot": str(selected_snapshot) if selected_snapshot else None,
+        },
     )
     _write_json(run_dir / "command.json", {"argv": argv})
     result = RunResult("previewed", identifier, run_dir, argv)
@@ -104,6 +121,7 @@ def run(
     runs_root: str | Path | None = None,
     run_id: str | None = None,
     timeout: float = 300,
+    snapshot: str | Path | None = None,
 ) -> RunResult:
     loaded = load_template(template) if isinstance(template, str) else template
     if not execute:
@@ -113,6 +131,7 @@ def run(
             factors=factors,
             runs_root=runs_root,
             run_id=run_id,
+            snapshot=snapshot,
         )
 
     rendered = render_template(loaded, knobs)
@@ -120,9 +139,13 @@ def run(
         apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
     _isolate_outputs(loaded, rendered.config, run_dir)
+    _resolve_input_paths(loaded, rendered.config)
+    selected_snapshot = _snapshot_path(loaded, snapshot)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
-    argv = _render_argv(loaded.argv, rendered.values, run_dir, config_path)
+    argv = _render_argv(
+        loaded.argv, rendered.values, run_dir, config_path, selected_snapshot
+    )
     _write_json(
         run_dir / "request.json",
         {
@@ -130,6 +153,7 @@ def run(
             "knobs": knobs or {},
             "factors": factors,
             "execute": True,
+            "snapshot": str(selected_snapshot) if selected_snapshot else None,
         },
     )
     _write_json(run_dir / "command.json", {"argv": argv})
@@ -153,7 +177,7 @@ def run(
             cwd.relative_to(workspace_root)
         except ValueError as exc:
             raise QuantStudioError("workspace_repo 逃出 workspace root") from exc
-    readiness = template_readiness(loaded)
+    readiness = template_readiness(loaded, snapshot=selected_snapshot)
     if not readiness.runnable:
         result = RunResult(
             "blocked",
@@ -174,6 +198,9 @@ def run(
             shell=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
             timeout=timeout,
             check=False,
         )
@@ -194,7 +221,14 @@ def run(
     message = None
     if succeeded:
         try:
-            collect_outputs(cwd, run_dir, _output_dirs(loaded, rendered.config))
+            collect_outputs(
+                cwd,
+                run_dir,
+                _output_dirs(loaded, rendered.config),
+                result_files=loaded.metadata.get("result_files"),
+                nav_column=loaded.metadata.get("nav_column"),
+                nav_strategy=loaded.metadata.get("nav_strategy"),
+            )
         except (OSError, ValueError, QuantStudioError) as exc:
             succeeded = False
             message = f"无法收集本次运行结果: {exc}"
@@ -260,11 +294,12 @@ def _render_argv(
     values: dict[str, Any],
     run_dir: Path,
     config_path: Path,
+    snapshot: Path | None = None,
 ) -> list[str]:
     replacements = {
         **{name: str(value) for name, value in values.items()},
         "config": str(config_path),
-        "snapshot": str(run_dir / "snapshot"),
+        "snapshot": str(snapshot or run_dir / "snapshot"),
         "output": str(run_dir / "strategy-output"),
     }
     try:
@@ -290,6 +325,35 @@ def _isolate_outputs(template: Template, config: dict[str, Any], run_dir: Path) 
         for key in ("outputs_dir", "state_dir"):
             if key in config:
                 config[key] = str(run_dir / "strategy-output")
+
+
+def _snapshot_path(template: Template, snapshot: str | Path | None) -> Path | None:
+    if not template.metadata.get("requires_snapshot"):
+        if snapshot:
+            raise QuantStudioError("该模板不使用港股快照")
+        return None
+    chosen = snapshot or os.environ.get("QUANT_HK_SNAPSHOT")
+    if chosen:
+        return Path(chosen).expanduser().resolve()
+    root = os.environ.get("QUANT_WORKSPACE_ROOT")
+    if root:
+        return (Path(root) / template.workspace_repo / "data" / "hk-snapshot").resolve()
+    return None
+
+
+def _resolve_input_paths(template: Template, config: dict[str, Any]) -> None:
+    workspace = os.environ.get("QUANT_WORKSPACE_ROOT")
+    fields = template.metadata.get("input_paths", [])
+    if not workspace or not fields:
+        return
+    repo = Path(workspace).resolve() / template.workspace_repo
+    for field in fields:
+        parts = field.split(".")
+        node = config
+        for part in parts[:-1]:
+            node = node[part]
+        source = Path(node[parts[-1]])
+        node[parts[-1]] = str((repo / source).resolve())
 
 
 def _output_dirs(template: Template, config: dict[str, Any]) -> list[str]:

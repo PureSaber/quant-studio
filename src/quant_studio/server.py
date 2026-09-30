@@ -157,9 +157,15 @@ def render_template_page(template_id: str, preset_id: str | None = None) -> str:
         )
     kind = "合成样例" if template.kind == "synthetic" else "研究模板"
     ready = template_readiness(template)
-    disabled = "" if ready.runnable else " disabled"
+    disabled = "" if ready.runnable or ready.needs_input else " disabled"
     hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
     factors = _factor_fields(template)
+    snapshot_field = ""
+    if template.metadata.get("requires_snapshot"):
+        snapshot_field = (
+            "<label><span>已有港股快照目录</span>"
+            '<input type="text" name="snapshot" placeholder="留空使用默认快照"></label>'
+        )
     pool = ""
     if template.id == "a-share-four-factor":
         pool = (
@@ -177,6 +183,7 @@ def render_template_page(template_id: str, preset_id: str | None = None) -> str:
 {hint}
 <form method="post" action="/templates/{escape(template.id)}">
 {factors}
+{snapshot_field}
 {"".join(fields)}
 <div class="actions">
 <button class="btn" name="action" value="preview">仅预览</button>
@@ -364,6 +371,7 @@ class _Handler(BaseHTTPRequestHandler):
             action = data.pop("action", ["preview"])[0]
             factor_form = data.pop("factor_form", [None])[0]
             chosen = data.pop("factor", None)
+            snapshot = data.pop("snapshot", [None])[0] or None
             factors = list(chosen) if factor_form else None
             knobs = _parse_form_knobs(template_id, data)
             result = run(
@@ -372,6 +380,7 @@ class _Handler(BaseHTTPRequestHandler):
                 factors=factors,
                 execute=action == "execute",
                 runs_root=self.runs_root,
+                snapshot=snapshot,
             )
             self.send_response(303)
             self.send_header("Location", f"/runs/{result.run_id}")

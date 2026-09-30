@@ -12,6 +12,7 @@
   ],
   "argv": ["quant-paper", "step", "--config", "{config}"],
   "output_dirs": ["state"],
+  "input_paths": ["signals.path", "regime.path"],
   "presets": [
     {"id": "small", "label": "小资金", "values": {"initial_capital": 10000}},
     {"id": "standard", "label": "标准", "values": {"initial_capital": 100000}}

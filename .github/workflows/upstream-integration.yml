@@ -1,0 +1,53 @@
+name: Upstream integration
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+        upstream:
+          - {repo: quant-paper-sim, ref: 1a022b50a3ff1eecae545c17d17a4a2fd47b63c9, test: paper}
+          - {repo: quant-hk-equity, ref: 37a9314e63038b8a89afcbbec2f5936953c0c62b, test: hk}
+          - {repo: a-share-multifactor, ref: 042e73704fc9702f8769c05a453e9149c448a1f0, test: ashare}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: quant-studio
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/${{ matrix.upstream.repo }}
+          ref: ${{ matrix.upstream.ref }}
+          path: ${{ matrix.upstream.repo }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install frozen upstream dependencies
+        working-directory: ${{ matrix.upstream.repo }}
+        shell: bash
+        run: |
+          if [ -f stack.lock ]; then
+            python -m pip install -r requirements.lock
+            python -m pip install --no-deps -r stack.lock
+          else
+            python -m pip install --no-deps -r requirements.lock
+          fi
+          python -m pip install --no-deps --no-build-isolation -e .
+      - name: Install Studio and verify dependency closure
+        run: |
+          python -m pip install --no-deps --no-build-isolation -e quant-studio
+          python -m pip check
+      - name: Exercise actual upstream output and CLI contracts
+        env:
+          QUANT_UPSTREAM_REPO: ${{ github.workspace }}/${{ matrix.upstream.repo }}
+        run: python -m pytest quant-studio/integration/test_upstream.py -k ${{ matrix.upstream.test }} -q

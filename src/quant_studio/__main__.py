@@ -20,9 +20,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         knobs = _parse_sets(args.template_id, args.settings)
         execute = args.command == "run" and args.execute
-        result = run(args.template_id, knobs, execute=execute)
+        result = run(args.template_id, knobs, execute=execute, snapshot=args.snapshot)
         print(json.dumps(result.as_json(), ensure_ascii=False, indent=2))
-        return 0
+        return {"failed": 1, "blocked": 2}.get(result.status, 0)
     except (QuantStudioError, ValueError) as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
@@ -38,6 +38,7 @@ def _parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("template_id")
         command.add_argument("--set", dest="settings", action="append", default=[])
+        command.add_argument("--snapshot", help="已有港股快照目录")
         if name == "run":
             command.add_argument("--execute", action="store_true")
     return parser

@@ -196,6 +196,9 @@ def test_current_run_outputs_are_isolated_and_collected(tmp_path, monkeypatch):
     (workspace / "a-share-multifactor").mkdir(parents=True)
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
     template = load_template("a-share-four-factor")
+    # Generic external-output discovery; the real A-share contract is tested separately.
+    template.metadata.pop("result_files")
+    template.metadata.pop("nav_column")
     template.metadata["argv"] = [
         sys.executable,
         "-c",

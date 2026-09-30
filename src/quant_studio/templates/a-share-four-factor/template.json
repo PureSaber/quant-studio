@@ -27,6 +27,8 @@
   ],
   "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
   "output_dirs": ["outputs/four_factors"],
+  "result_files": {"nav.csv": "latest/cumulative_returns.csv", "report.html": "latest/report.html"},
+  "nav_column": "Q5",
   "presets": [
     {"id": "debug", "label": "调试", "values": {"symbols_limit": 10, "rebalance_freq": "weekly", "initial_capital": 10000}},
     {"id": "weekly-small", "label": "周频小资金", "values": {"symbols_limit": 30, "rebalance_freq": "weekly", "initial_capital": 50000}}
