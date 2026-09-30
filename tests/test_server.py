@@ -6,6 +6,7 @@ from quant_studio import QuantStudioError
 from quant_studio.__main__ import main
 from quant_studio.runner import preview, run
 from quant_studio.server import (
+    compiled_from_form,
     render_backtest,
     render_data,
     render_home,
@@ -53,6 +54,7 @@ def test_preview_page_shows_argv_without_nav_chart(tmp_path):
 
     assert "a_share_multifactor.backtest" in page
     assert "--symbols-limit" in page
+    assert "生成的配置" in page
     assert "<svg" not in page
     assert "<iframe" not in page
 
@@ -182,11 +184,84 @@ def test_data_page_sees_local_snapshot_and_fetch_command(monkeypatch, tmp_path):
     page = render_data()
 
     assert "1 个数据文件" in page
+    assert "最近更新" in page
+    assert 'href="/environment"' in page
     assert "a_share_multifactor.fetch_data" in page
 
 
-def test_backtest_and_results_list_runs(tmp_path):
-    preview("synthetic-demo", {}, runs_root=tmp_path)
+def test_template_flows_compile_declared_config():
+    share = render_template_page("a-share-four-factor", "debug")
+    hong_kong = render_template_page("hk-equity-daily")
+    paper = render_template_page("paper-sim")
+    synthetic = render_template_page("synthetic-demo")
 
-    assert "synthetic-demo" in render_backtest(tmp_path)
-    assert "synthetic-demo" in render_results(tmp_path)
+    assert 'id="factors"' in share
+    assert "rebalance_freq: weekly" in share
+    assert "--symbols-limit\n10" in share
+    assert 'id="factors"' not in hong_kong
+    assert "quant-hk" in hong_kong
+    assert "quant-paper" in paper
+    assert "固定收益率" in synthetic
+    assert "进程内合成样例，无外部命令" in synthetic
+    for page in (share, hong_kong, paper, synthetic):
+        assert 'id="data"' in page
+        assert 'id="trade"' in page
+        assert 'id="run"' in page
+        assert 'id="code"' in page
+        assert "手写代码" in page
+
+
+def test_hk_compiled_form_preserves_selected_snapshot_without_running(monkeypatch):
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("editing the code preview must not run a template")
+
+    monkeypatch.setattr("quant_studio.server.run", unexpected_run)
+    snapshot = "C:/research snapshots/hong kong"
+    text = compiled_from_form("hk-equity-daily", {"snapshot": [snapshot]})
+
+    assert f"--snapshot\n{snapshot}\n" in text
+    assert "<本次运行>/snapshot" not in text
+
+
+def test_compiled_form_keeps_only_submitted_factors():
+    text = compiled_from_form(
+        "a-share-four-factor",
+        {
+            "factor_form": ["1"],
+            "factor": ["pe_ratio"],
+            "rebalance_freq": ["weekly"],
+            "initial_capital": ["20000"],
+            "symbols_limit": ["12"],
+            "commission": ["0.0003"],
+            "slippage": ["0.001"],
+        },
+    )
+
+    assert "pe_ratio" in text
+    assert "momentum_20d" not in text
+    assert "--symbols-limit\n12" in text
+    assert "<本次运行>/config.yaml" in text
+
+
+def test_backtest_lists_previews_and_results_keep_finished_runs(tmp_path):
+    previewed = preview(
+        "a-share-four-factor",
+        {"symbols_limit": 20},
+        runs_root=tmp_path,
+    )
+    finished = run("synthetic-demo", {}, execute=True, runs_root=tmp_path)
+
+    backtest = render_backtest(tmp_path)
+    results = render_results(tmp_path)
+    detail = render_run(previewed.run_dir)
+    assert "已完成" in render_run(finished.run_dir)
+
+    assert backtest.count("synthetic-demo") == 1
+    assert "a-share-four-factor" in backtest
+    assert "仅预览" in backtest
+    assert "已完成" in results
+    assert "a-share-four-factor" not in results
+    assert "symbols_limit=20" in detail
+    assert "参数：模板默认" in render_run(
+        preview("synthetic-demo", {}, runs_root=tmp_path).run_dir
+    )

@@ -2,7 +2,7 @@
 
 ## Objective
 
-本地模板回测台。代码不熟的人打开本机页面，选择已经存在的研究模板，只改允许的少数参数，预览将要写给上游仓的配置和命令。确认后才执行。成功的上游运行嵌入该仓自己的报告；失败不画净值。另有一个明确标注的合成样例，不依赖其余量化仓库，用来走通「改参数 → 运行 → 净值页」。
+本地模板回测台。代码不熟的人打开本机页面，选择已经存在的研究模板。模板在页面上排成数据、因子（若模板声明了因子）、交易和回测几块积木，只改允许的参数。代码区展示将要写给上游仓的配置和命令，不执行手写代码。确认后才执行。成功的上游运行嵌入该仓自己的报告；失败不画净值。另有一个明确标注的合成样例，不依赖其余量化仓库，用来走通「改参数 → 运行 → 净值页」。
 
 本仓库是应用层，不属于 M8 的 14 仓不可变清单。不实现因子、撮合、账本或通用绘图库。
 
@@ -10,7 +10,7 @@
 
 1. 仓库公开在 `https://github.com/PureSaber/quant-studio`，开发走功能分支和 PR。
 2. 只监听 `127.0.0.1`。
-3. A 股、港股、模拟盘模板只覆盖上游已经读取的字段，并记录 M8 时期的上游 tag 作为说明，不在本仓库安装那些包。
+3. A 股、港股、模拟盘模板只覆盖上游已经读取的字段，并在模板里记录上游 tag 或版本作为说明，不在本仓库安装那些包。
 4. 合成样例的曲线来自仓库内固定收益率序列，页面标明「合成样例，不是市场收益」。
 5. 执行外部模板时使用参数列表调用进程，工作目录必须落在 `QUANT_WORKSPACE_ROOT` 下的指定仓库内。
 
@@ -62,8 +62,8 @@ def overlay_config(base: dict, knobs: dict, fields: list[Knob]) -> dict:
 
 | id | 上游 | 允许旋钮 | 命令 |
 |---|---|---|---|
-| `a-share-four-factor` | `a-share-multifactor` tag `v0.4.2` | `rebalance_freq`=`daily\|weekly\|monthly`；`costs.initial_capital`；CLI `--symbols-limit` 1–300 | `python -m a_share_multifactor.backtest --config {config} --symbols-limit {symbols_limit}` |
-| `hk-equity-daily` | `quant-hk-equity`，配置形态 `quant-hk-study/v1` | `initial_cash` 十进制字符串；`rebalance_sessions` 只允许 1 或 5 | `quant-hk run --config {config} --snapshot {snapshot} --output {output}` |
+| `a-share-four-factor` | `a-share-multifactor` tag `v0.4.2` | `rebalance_freq`=`daily\|weekly\|monthly`；`costs.initial_capital`；`costs.commission`；`costs.slippage`；CLI `--symbols-limit` 1–300；已声明因子可勾选 | `python -m a_share_multifactor.backtest --config {config} --symbols-limit {symbols_limit}` |
+| `hk-equity-daily` | `quant-hk-equity` `0.1.0`（尚无 tag），配置形态 `quant-hk-study/v1` | `initial_cash` 十进制字符串；`rebalance_sessions` 只允许 1 或 5 | `quant-hk run --config {config} --snapshot {snapshot} --output {output}` |
 | `paper-sim` | `quant-paper-sim` tag `v0.2.2` | `initial_capital` | `quant-paper step --config {config}` |
 | `synthetic-demo` | 本仓库固定日收益 | `initial_capital` | 进程内生成 `nav.csv` 与 `report.html` |
 

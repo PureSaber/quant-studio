@@ -11,12 +11,14 @@ import yaml
 
 from quant_studio import QuantStudioError
 from quant_studio.desk import (
+    FETCH_BY_REPO,
     FETCH_COMMANDS,
     html_table,
     list_runs,
     scan_datasets,
     workspace_root,
 )
+from quant_studio.flow import compile_document, flow_steps
 from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
 from quant_studio.runner import run, safe_run_file, template_readiness
 from quant_studio.templates import load_template, template_ids
@@ -36,20 +38,22 @@ def render_home() -> str:
         label = "合成样例" if card_kind == "synthetic" else "研究模板"
         ready = template_readiness(template)
         state = "ready" if ready.runnable else "preview-only"
+        trail = " · ".join(title for _, title in flow_steps(template))
         cards.append(
             f"""<article class="template-card {card_kind}">
 <span class="eyebrow">{label}</span>
 <h2>{escape(template.title)}</h2>
 <p>{escape(template.summary)}</p>
+<p class="trail">{escape(trail)}</p>
 <p class="badge {state}">{escape(ready.message)}</p>
-<a class="open" href="/templates/{escape(template.id)}">打开模板</a>
+<a class="open" href="/templates/{escape(template.id)}">打开积木</a>
 </article>"""
         )
     body = f"""<header class="page-head">
 <p class="kicker">模板库</p>
 <h1>选择一个研究模板</h1>
-<p class="lede">只改允许的参数。研究模板先给出命令；
-合成样例会画出净值，并标明不是市场收益。</p>
+<p class="lede">每个模板是一组固定积木。只改允许的参数，旁边显示将要生成的配置和命令。
+研究模板确认后才执行；合成样例会画出净值，并标明不是市场收益。</p>
 </header>
 <main class="card-grid">{"".join(cards)}</main>"""
     return _layout("模板库", body, "strategy")
@@ -64,6 +68,7 @@ def render_data() -> str:
             f"""<article class="template-card research">
 <span class="eyebrow">{escape(item.market)}</span>
 <h2>{item.files} 个数据文件</h2>
+<p>最近更新 {escape(item.newest)}</p>
 <p>{escape(str(item.path))}</p>
 </article>"""
         )
@@ -87,7 +92,9 @@ def render_data() -> str:
 </header>
 <main class="card-grid">{"".join(cards)}</main>
 <section class="panel"><h2>拉取命令</h2>
-<ul class="commands">{commands}</ul></section>"""
+<ul class="commands">{commands}</ul>
+<p class="note"><a href="/environment">查看各模板是否可运行</a></p>
+</section>"""
     return _layout("数据", body, "data")
 
 
@@ -96,25 +103,31 @@ def render_backtest(runs_root: Path) -> str:
     body = f"""<header class="page-head">
 <p class="kicker">回测</p>
 <h1>运行任务</h1>
-<p class="lede">从策略页提交。这里查看状态和日志入口。</p>
+<p class="lede">从策略页提交。打开一条记录可看命令；失败时能看到输出。</p>
 </header>
 <section class="panel"><table>
-<tr><th>模板</th><th>状态</th><th>净值</th></tr>
-{rows or "<tr><td colspan='3'>还没有运行</td></tr>"}
+<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+{rows or "<tr><td colspan='4'>还没有运行</td></tr>"}
 </table></section>"""
     return _layout("回测", body, "backtest")
 
 
 def render_results(runs_root: Path) -> str:
-    rows = _run_rows(list_runs(runs_root), "/runs/")
+    finished = [
+        record
+        for record in list_runs(runs_root)
+        if record["has_nav"] == "1" or record["has_report"] == "1"
+    ]
+    rows = _run_rows(finished, "/runs/")
     body = f"""<header class="page-head">
 <p class="kicker">结果</p>
 <h1>研究记录</h1>
-<p class="lede">有净值的记录可以打开曲线、回撤和持仓成交表。</p>
+<p class="lede">这里只保留已经交出净值或报告的运行。
+打开后可看曲线、回撤和持仓成交表。</p>
 </header>
 <section class="panel"><table>
-<tr><th>模板</th><th>状态</th><th>净值</th></tr>
-{rows or "<tr><td colspan='3'>还没有结果</td></tr>"}
+<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+{rows or "<tr><td colspan='4'>还没有带净值或报告的结果</td></tr>"}
 </table></section>"""
     return _layout("结果", body, "results")
 
@@ -123,11 +136,13 @@ def _run_rows(records: list[dict[str, str]], prefix: str) -> str:
     lines = []
     for record in records:
         nav = "有" if record["has_nav"] == "1" else "无"
+        status = _STATUS.get(record["status"], record["status"])
         lines.append(
             "<tr>"
             f'<td><a href="{prefix}{escape(record["run_id"])}">'
             f"{escape(record['template_id'])}</a></td>"
-            f"<td>{escape(record['status'])}</td>"
+            f"<td>{escape(status)}</td>"
+            f"<td>{escape(record['when'])}</td>"
             f"<td>{nav}</td></tr>"
         )
     return "".join(lines)
@@ -136,64 +151,51 @@ def _run_rows(records: list[dict[str, str]], prefix: str) -> str:
 def render_template_page(template_id: str, preset_id: str | None = None) -> str:
     template = load_template(template_id)
     selected = _preset_values(template, preset_id)
-    fields = []
-    for knob in template.knobs:
-        name = escape(knob["name"])
-        current = selected.get(knob["name"], knob["default"])
-        shown = escape(str(current))
-        label = escape(_LABELS.get(knob["name"], knob["name"]))
-        if knob["type"] == "enum" or "choices" in knob:
-            options = "".join(
-                f'<option value="{escape(str(choice))}"'
-                + (" selected" if choice == current else "")
-                + f">{escape(_choice_label(knob['name'], choice))}</option>"
-                for choice in knob["choices"]
-            )
-            control = f'<select name="{name}">{options}</select>'
-        else:
-            input_type = "text" if knob["type"] == "decimal-string" else "number"
-            step = ' step="any"' if knob["type"] == "number" else ""
-            control = f'<input type="{input_type}" name="{name}" value="{shown}"{step}>'
-        fields.append(
-            f"<label><span>{label}</span><small>{name}</small>{control}</label>"
-        )
+    catalog = list(template.metadata.get("factor_catalog") or [])
+    factors = [item["name"] for item in catalog] or None
+    document = compile_document(template, selected, factors)
+    steps = []
+    index = 1
+    bodies = {
+        "data": _data_step(template),
+        "factors": _factor_fields(template),
+        "trade": (
+            f'<div class="fields">{"".join(_knob_fields(template, selected))}</div>'
+        ),
+        "run": _run_step(template),
+    }
+    summaries = {
+        "data": "只读取工作区里已经存在的快照，不在这里下载。",
+        "factors": "股票池和因子实现都来自上游模板，页面不能新增因子。",
+        "trade": "这些字段写入上游配置，或成为命令参数。",
+        "run": "先生成配置和参数列表。确认后才执行。",
+    }
+    for key, title in flow_steps(template):
+        if key == "code":
+            continue
+        steps.append(_step(index, key, title, summaries[key], bodies[key]))
+        index += 1
     kind = "合成样例" if template.kind == "synthetic" else "研究模板"
-    ready = template_readiness(template)
-    disabled = "" if ready.runnable or ready.needs_input else " disabled"
-    hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
-    factors = _factor_fields(template)
-    snapshot_field = ""
-    if template.metadata.get("requires_snapshot"):
-        snapshot_field = (
-            "<label><span>已有港股快照目录</span>"
-            '<input type="text" name="snapshot" placeholder="留空使用默认快照"></label>'
-        )
-    pool = ""
-    if template.id == "a-share-four-factor":
-        pool = (
-            '<p class="note">股票池固定为沪深300。'
-            "因子只能勾选这个模板已经实现的项。</p>"
-        )
+    template_ref = escape(template.id)
     body = f"""<header class="page-head">
 <p class="kicker">{kind}</p>
 <h1>{escape(template.title)}</h1>
 <p class="lede">{escape(template.summary)}</p>
-</header>
-<section class="panel">
 <div class="presets">{_preset_links(template, preset_id)}</div>
-{pool}
-{hint}
-<form method="post" action="/templates/{escape(template.id)}">
-{factors}
-{snapshot_field}
-{"".join(fields)}
-<div class="actions">
-<button class="btn" name="action" value="preview">仅预览</button>
-<button class="btn primary" name="action" value="execute"{disabled}>运行</button>
-</div>
+</header>
+<div class="studio-grid">
+<form class="flow" method="post" action="/templates/{template_ref}"
+ data-code="/templates/{template_ref}/code">
+<ol class="steps">{"".join(steps)}</ol>
 </form>
-<p class="note">{escape(template.disclaimer)}</p>
-</section>"""
+<aside class="code-card" id="code">
+<p class="eyebrow">代码</p>
+<h2>生成结果</h2>
+<p class="step-copy">改参数后这里跟着更新。页面不执行手写代码。</p>
+<pre id="compiled">{escape(document)}</pre>
+</aside>
+</div>
+<script>{_CODE_SCRIPT}</script>"""
     return _layout(template.title, body, "strategy")
 
 
@@ -263,12 +265,14 @@ def render_run(run_dir: str | Path) -> str:
 <p class="kicker">结果</p>
 <h1>{escape(template.title)}</h1>
 <p class="lede"><span class="status {status}">
-{_STATUS.get(result["status"], status)}</span></p>
+{_STATUS.get(result["status"], status)}</span>
+{_request_summary(request)}</p>
 </header>
 {"".join(notices)}
 {benchmark}
+{_saved_config(directory)}
 <section class="panel command">
-<h2>命令预览</h2>
+<h2>参数列表</h2>
 <pre>{argv or "进程内合成样例，无外部命令"}</pre>
 </section>
 {chart}
@@ -383,6 +387,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = unquote(urlparse(self.path).path)
+        code_view = False
         if not path.startswith("/templates/"):
             self.send_error(404)
             return
@@ -391,7 +396,12 @@ class _Handler(BaseHTTPRequestHandler):
             if length > 64_000:
                 raise QuantStudioError("请求过大")
             data = parse_qs(self.rfile.read(length).decode("utf-8"))
+            code_view = path.endswith("/code")
             template_id = path.removeprefix("/templates/")
+            if code_view:
+                template_id = template_id.removesuffix("/code")
+                self._send_text(compiled_from_form(template_id, data))
+                return
             action = data.pop("action", ["preview"])[0]
             factor_form = data.pop("factor_form", [None])[0]
             chosen = data.pop("factor", None)
@@ -410,12 +420,24 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Location", f"/runs/{result.run_id}")
             self.end_headers()
         except (QuantStudioError, UnicodeDecodeError, ValueError) as exc:
+            if code_view:
+                self._send_text(f"错误: {exc}", status=400)
+                return
             self.send_error(400, str(exc))
 
     def _send_html(self, content: str) -> None:
+        self._send_text(content, content_type="text/html; charset=utf-8")
+
+    def _send_text(
+        self,
+        content: str,
+        *,
+        status: int = 200,
+        content_type: str = "text/plain; charset=utf-8",
+    ) -> None:
         body = content.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
@@ -478,23 +500,177 @@ _STATUS = {
     "blocked": "未执行",
 }
 
+_CODE_SCRIPT = """
+const form = document.querySelector("form.flow");
+const compiled = document.querySelector("#compiled");
+let pending = 0;
+async function refreshCode() {
+  const ticket = ++pending;
+  const body = new URLSearchParams(new FormData(form));
+  const response = await fetch(form.dataset.code, {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body
+  });
+  const text = await response.text();
+  if (ticket === pending) compiled.textContent = text;
+}
+form.addEventListener("input", refreshCode);
+form.addEventListener("change", refreshCode);
+"""
+
+
+def _request_summary(request: dict[str, object]) -> str:
+    knobs = request.get("knobs")
+    factors = request.get("factors")
+    parts = []
+    if isinstance(knobs, dict) and knobs:
+        text = "，".join(f"{key}={value}" for key, value in knobs.items())
+        parts.append(f"参数：{text}")
+    else:
+        parts.append("参数：模板默认")
+    if isinstance(factors, list) and factors:
+        names = "、".join(str(name) for name in factors)
+        parts.append(f"因子：{names}")
+    return f'<span class="meta">{escape(" · ".join(parts))}</span>'
+
+
+def compiled_from_form(template_id: str, form: dict[str, list[str]]) -> str:
+    data = dict(form)
+    factor_form = data.pop("factor_form", [None])[0]
+    chosen = data.pop("factor", None)
+    data.pop("action", None)
+    snapshot = data.pop("snapshot", [None])[0] or None
+    factors = list(chosen) if factor_form else None
+    knobs = _parse_form_knobs(template_id, data)
+    return compile_document(
+        load_template(template_id), knobs, factors, snapshot=snapshot
+    )
+
+
+def _knob_fields(template: object, selected: dict[str, object]) -> list[str]:
+    fields = []
+    for knob in template.knobs:
+        name = escape(knob["name"])
+        current = selected.get(knob["name"], knob["default"])
+        shown = escape(str(current))
+        label = escape(_LABELS.get(knob["name"], knob["name"]))
+        if knob["type"] == "enum" or "choices" in knob:
+            options = "".join(
+                f'<option value="{escape(str(choice))}"'
+                + (" selected" if choice == current else "")
+                + f">{escape(_choice_label(knob['name'], choice))}</option>"
+                for choice in knob["choices"]
+            )
+            control = f'<select name="{name}">{options}</select>'
+        else:
+            input_type = "text" if knob["type"] == "decimal-string" else "number"
+            step = ' step="any"' if knob["type"] == "number" else ""
+            control = f'<input type="{input_type}" name="{name}" value="{shown}"{step}>'
+        fields.append(
+            f"<label><span>{label}</span><small>{name}</small>{control}</label>"
+        )
+    return fields
+
+
+def _data_step(template: object) -> str:
+    if template.kind == "synthetic":
+        return "<p>使用仓库内固定收益率，不读取行情。</p>"
+    repo = str(template.workspace_repo)
+    dataset = next(
+        (item for item in scan_datasets() if repo in item.path.parts),
+        None,
+    )
+    parts = [f"<p>{escape(template_readiness(template).message)}</p>"]
+    if template.metadata.get("requires_snapshot"):
+        parts.append(
+            "<label><span>已有港股快照目录</span>"
+            '<input type="text" name="snapshot" placeholder="留空使用默认快照"></label>'
+        )
+    if dataset:
+        parts.append(
+            f"<p>{dataset.files} 个数据文件，最近更新 {escape(dataset.newest)}</p>"
+            f'<p class="path">{escape(str(dataset.path))}</p>'
+        )
+    else:
+        parts.append("<p>还没有读到这个仓库的数据目录。</p>")
+    command = FETCH_BY_REPO.get(repo)
+    if command:
+        parts.append(f"<pre>{escape(command)}</pre>")
+    data = template.base_config.get("data")
+    if isinstance(data, dict):
+        rows = "".join(
+            f"<li><b>{escape(str(key))}</b> {escape(str(value))}</li>"
+            for key, value in data.items()
+        )
+        parts.append(f'<ul class="data-keys">{rows}</ul>')
+    return "".join(parts)
+
+
+def _run_step(template: object) -> str:
+    ready = template_readiness(template)
+    disabled = "" if ready.runnable or ready.needs_input else " disabled"
+    hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
+    return (
+        f"{hint}"
+        '<div class="actions">'
+        '<button class="btn" name="action" value="preview">仅预览</button>'
+        '<button class="btn primary" name="action" value="execute"'
+        f"{disabled}>运行</button>"
+        "</div>"
+        f'<p class="note">{escape(template.disclaimer)}</p>'
+    )
+
+
+def _step(index: int, key: str, title: str, summary: str, body: str) -> str:
+    return (
+        f'<li class="step" id="{key}">'
+        f'<div class="step-index">{index}</div>'
+        '<section class="step-card">'
+        f"<h2>{escape(title)}</h2>"
+        f'<p class="step-copy">{escape(summary)}</p>'
+        f"{body}</section></li>"
+    )
+
 
 def _factor_fields(template: object) -> str:
     catalog = list(template.metadata.get("factor_catalog") or [])
     if not catalog:
         return ""
     boxes = ['<input type="hidden" name="factor_form" value="1">']
+    if template.id == "a-share-four-factor":
+        boxes.append(
+            '<p class="note">股票池固定为沪深300。'
+            "因子只能勾选这个模板已经实现的项。</p>"
+        )
     group = None
     for item in catalog:
         if item["group"] != group:
+            if group is not None:
+                boxes.append("</div>")
             group = item["group"]
-            boxes.append(f'<p class="eyebrow">{escape(str(group))}</p>')
+            boxes.append(
+                f'<p class="eyebrow">{escape(str(group))}</p><div class="factor-grid">'
+            )
         boxes.append(
             '<label class="check"><input type="checkbox" name="factor" '
             f'value="{escape(item["name"])}" checked>'
             f"<span>{escape(item['label'])}</span></label>"
         )
+    boxes.append("</div>")
     return "".join(boxes)
+
+
+def _saved_config(directory: Path) -> str:
+    for name in ("config.yaml", "config.json"):
+        path = directory / name
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            return (
+                '<section class="panel command"><h2>生成的配置</h2>'
+                f"<pre>{escape(text)}</pre></section>"
+            )
+    return ""
 
 
 def _artifact_tables(directory: Path) -> str:
@@ -668,21 +844,28 @@ td, th {
 }
 h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
 .lede { max-width: 640px; color: var(--muted); line-height: 1.6; }
+.meta { display: block; margin-top: 8px; }
+.note a { color: inherit; }
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
   max-width: 1080px;
 }
+.trail {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
 .template-card {
   display: flex;
   flex-direction: column;
-  min-height: 210px;
+  min-height: 220px;
   padding: 20px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--card);
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
 }
 .template-card.synthetic { background: #f7f3ff; border-color: #ddd0f5; }
 .eyebrow { color: var(--muted); font-size: 12px; }
@@ -690,13 +873,78 @@ h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
 .template-card p { margin: 0; color: #475467; line-height: 1.55; }
 .open { margin-top: auto; padding-top: 18px; color: var(--blue); font-weight: 650; }
 .panel {
-  max-width: 720px;
+  max-width: 880px;
   padding: 24px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--card);
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.04);
 }
+.studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+  max-width: 1120px;
+}
+.code-card {
+  position: sticky;
+  top: 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+.code-card h2 { margin: 0 0 8px; font-size: 16px; }
+.code-card pre { max-height: 70vh; }
+.steps { list-style: none; margin: 0; padding: 0; }
+.step {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  position: relative;
+  margin-bottom: 14px;
+}
+.step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 28px;
+  bottom: -14px;
+  width: 1px;
+  background: var(--line);
+}
+.fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 12px;
+}
+.factor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.factor-grid .check { margin: 0; }
+.step-index {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #0b1220;
+  color: white;
+  font-size: 13px;
+  line-height: 28px;
+  text-align: center;
+}
+.step-card {
+  padding: 16px 18px 4px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+}
+.step-card h2 { margin: 0; font-size: 16px; }
+.step-copy { margin: 6px 0 14px; color: var(--muted); font-size: 13px; }
+.path, .data-keys { color: var(--muted); font-size: 13px; }
+.data-keys { padding-left: 18px; }
 label { display: block; margin: 0 0 16px; }
 label span { display: block; font-weight: 650; }
 label small { color: var(--muted); }
@@ -751,10 +999,9 @@ pre {
 iframe {
   width: min(960px, 100%);
   height: 560px;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 16px;
   background: white;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
 }
 @media (max-width: 1100px) {
   .shell { flex-direction: column; }
@@ -762,5 +1009,8 @@ iframe {
   nav { margin-top: 12px; }
   .side-note { display: none; }
   .stage { padding: 24px 20px 40px; }
+  .studio-grid { grid-template-columns: 1fr; }
+  .code-card { position: static; }
+  .fields, .factor-grid { grid-template-columns: 1fr; }
 }
 """
