@@ -1,12 +1,21 @@
 """Run against pinned real upstream packages; no broker or network market-data calls."""
 
 import importlib.util
+import json
 import os
+import re
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.parse import urljoin
+from urllib.request import urlopen
+
+import pytest
 
 from quant_studio.nav import collect_outputs, parse_nav_csv
 from quant_studio.runner import run
-from quant_studio.server import render_run
+from quant_studio.server import _Handler, render_run
 from quant_studio.templates import Template, load_template
 
 
@@ -30,7 +39,8 @@ def test_paper_cli(tmp_path, monkeypatch):
     assert "单次观测" in render_run(result.run_dir)
 
 
-def test_hk_cli(tmp_path, monkeypatch):
+@pytest.mark.parametrize("first_close_ratio", [0.5, 1.1, 1.0])
+def test_hk_cli(tmp_path, monkeypatch, first_close_ratio):
     repo = Path(os.environ["QUANT_UPSTREAM_REPO"]).resolve()
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(repo.parent))
     spec = importlib.util.spec_from_file_location(
@@ -39,6 +49,11 @@ def test_hk_cli(tmp_path, monkeypatch):
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     case = fixture.case.__wrapped__()
+    config, bars, _ = case
+    first = bars.date.eq(config["test_start"])
+    bars.loc[first, "close"] = bars.loc[first, "open"] * first_close_ratio
+    bars.loc[first, "low"] = bars.loc[first, ["open", "close"]].min(axis=1) * 0.99
+    bars.loc[first, "high"] = bars.loc[first, ["open", "close"]].max(axis=1) * 1.01
     snapshot = fixture.snapshot(tmp_path, case)
     original = load_template("hk-equity-daily")
     template = Template(original.metadata, case[0], original.directory)
@@ -54,6 +69,51 @@ def test_hk_cli(tmp_path, monkeypatch):
     assert len(parse_nav_csv(result.run_dir / "nav.csv").rows) > 20
     assert (result.run_dir / "positions.csv").is_file()
     assert "<iframe" in render_run(result.run_dir)
+    nav = parse_nav_csv(result.run_dir / "nav.csv")
+    summary = json.loads(
+        (result.run_dir / "strategy-output/summary.json").read_text(encoding="utf-8")
+    )["holdout"]
+    assert float(nav.initial_nav) == float(config["initial_cash"])
+    assert float(nav.period_return) == pytest.approx(summary["total_return"], abs=1e-12)
+    assert float(nav.max_drawdown) == pytest.approx(-summary["max_drawdown"], abs=1e-12)
+    assert result.report == "strategy-output/report.html"
+    _verify_report_http(result)
+
+
+def _verify_report_http(result):
+    class Handler(_Handler):
+        runs_root = result.run_dir.parent
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}/runs/{result.run_id}/files/"
+    try:
+        report_url = base + result.report
+        with urlopen(report_url, timeout=5) as response:
+            report = response.read().decode("utf-8")
+        links = re.findall(r'href="([^"]+)"', report)
+        assert len(links) == 7
+        for href in links:
+            with urlopen(urljoin(report_url, href), timeout=5) as response:
+                expected_type = (
+                    "application/json" if href.endswith(".json") else "text/csv"
+                )
+                assert response.headers.get_content_type() == expected_type
+                original = result.run_dir / Path(result.report).parent / href
+                assert response.read() == original.read_bytes()
+        for forbidden in (
+            "result.json",
+            "../result.json",
+            "strategy-output/../../result.json",
+        ):
+            with pytest.raises(HTTPError) as error:
+                urlopen(base + forbidden, timeout=5)
+            assert error.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_ashare_real_output_contract(tmp_path):
@@ -77,7 +137,7 @@ def test_ashare_real_output_contract(tmp_path):
     )
     assert len([p for p in output.iterdir() if p.is_dir()]) == 2
     template = load_template("a-share-four-factor")
-    collect_outputs(
+    report = collect_outputs(
         tmp_path,
         tmp_path,
         ["{output}"],
@@ -85,4 +145,5 @@ def test_ashare_real_output_contract(tmp_path):
         nav_column=template.metadata["nav_column"],
     )
     assert parse_nav_csv(tmp_path / "nav.csv").label == "Q5"
-    assert (tmp_path / "report.html").is_file()
+    assert report == "strategy-output/latest/report.html"
+    assert (tmp_path / report).is_file()
