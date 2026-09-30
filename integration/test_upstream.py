@@ -10,11 +10,19 @@ from quant_studio.server import render_run
 from quant_studio.templates import Template, load_template
 
 
+def diagnostics(result):
+    stderr = result.run_dir / "stderr.txt"
+    return (
+        result.as_json(),
+        stderr.read_text(encoding="utf-8") if stderr.exists() else "",
+    )
+
+
 def test_paper_cli(tmp_path, monkeypatch):
     repo = Path(os.environ["QUANT_UPSTREAM_REPO"]).resolve()
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(repo.parent))
     result = run("paper-sim", execute=True, runs_root=tmp_path, timeout=90)
-    assert result.status == "succeeded", result.as_json()
+    assert result.status == "succeeded", diagnostics(result)
     assert result.returncode == 0
     nav = parse_nav_csv(result.run_dir / "nav.csv")
     assert len(nav.rows) == 1 and nav.period_return is None
@@ -41,7 +49,7 @@ def test_hk_cli(tmp_path, monkeypatch):
         runs_root=tmp_path / "runs",
         timeout=90,
     )
-    assert result.status == "succeeded", result.as_json()
+    assert result.status == "succeeded", diagnostics(result)
     assert result.returncode == 0
     assert len(parse_nav_csv(result.run_dir / "nav.csv").rows) > 20
     assert (result.run_dir / "positions.csv").is_file()

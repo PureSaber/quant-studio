@@ -21,6 +21,24 @@ def test_synthetic_template_runs_with_workspace_configured(tmp_path, monkeypatch
     )
 
 
+def test_child_logs_use_utf8_even_with_ascii_parent_environment(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    (workspace / "quant-paper-sim").mkdir(parents=True)
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("PYTHONIOENCODING", "ascii")
+    template = load_template("paper-sim")
+    template.metadata["argv"] = [
+        sys.executable,
+        "-c",
+        "from pathlib import Path; import sys; print('\\u7814\\u7a76'); "
+        "Path(sys.argv[1]).parent.joinpath('report.html').write_text('ok')",
+        "{config}",
+    ]
+    result = run(template, execute=True, runs_root=tmp_path / "runs")
+    assert result.status == "succeeded"
+    assert (result.run_dir / "stdout.txt").read_text(encoding="utf-8").strip() == "研究"
+
+
 def test_explicit_upstream_result_bundle_accepts_timestamp_and_latest(tmp_path):
     run_dir = tmp_path / "run"
     for name in ("20260930_120000", "latest"):

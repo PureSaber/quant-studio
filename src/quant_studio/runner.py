@@ -200,6 +200,7 @@ def run(
             text=True,
             encoding="utf-8",
             errors="replace",
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
             timeout=timeout,
             check=False,
         )
