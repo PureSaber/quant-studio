@@ -3,9 +3,12 @@ from __future__ import annotations
 import csv
 import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from html import escape
 from pathlib import Path
+
+from quant_studio import QuantStudioError
 
 DATE_COLUMNS = ("date", "trade_date", "datetime", "dt")
 VALUE_COLUMNS = ("nav", "equity", "capital", "net_value", "value")
@@ -39,21 +42,34 @@ _CHART_CSS = """
 @dataclass(frozen=True)
 class NavSeries:
     rows: list[tuple[str, Decimal]]
+    label: str | None = None
+    initial_nav: Decimal | None = None
+
+    @property
+    def plot_rows(self) -> list[tuple[str, Decimal]]:
+        # An explicit opening balance is not another closing observation/date.
+        if self.initial_nav is not None:
+            return [("期初", self.initial_nav), *self.rows]
+        return self.rows
 
     @property
     def ending(self) -> Decimal:
         return self.rows[-1][1]
 
     @property
-    def period_return(self) -> Decimal:
-        start = self.rows[0][1]
+    def period_return(self) -> Decimal | None:
+        if len(self.plot_rows) < 2:
+            return None
+        start = self.plot_rows[0][1]
         if start == 0:
             return Decimal(0)
         return self.ending / start - 1
 
     @property
-    def max_drawdown(self) -> Decimal:
-        peak = self.rows[0][1]
+    def max_drawdown(self) -> Decimal | None:
+        if len(self.plot_rows) < 2:
+            return None
+        peak = self.plot_rows[0][1]
         worst = Decimal(0)
         for _, value in self.rows:
             if value > peak:
@@ -63,7 +79,13 @@ class NavSeries:
         return worst
 
 
-def parse_nav_csv(path: Path) -> NavSeries | None:
+def parse_nav_csv(
+    path: Path,
+    *,
+    strategy: str | None = None,
+    value_column: str | None = None,
+    initial_nav: Decimal | str | None = None,
+) -> NavSeries | None:
     with path.open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream)
         fields = list(reader.fieldnames or [])
@@ -71,38 +93,87 @@ def parse_nav_csv(path: Path) -> NavSeries | None:
     if not fields or not raw_rows:
         return None
     date_key = _date_key(fields)
-    value_key = _value_key(fields, path.name)
+    value_key = value_column or _value_key(fields, path.name)
     if date_key is None or value_key is None:
         return None
+    if value_key not in fields:
+        raise QuantStudioError(f"净值列不存在: {value_key}")
+    label = value_key if value_key not in VALUE_COLUMNS else None
     if "strategy" in fields and value_key == "nav":
-        chosen = raw_rows[-1].get("strategy")
+        strategies = {row.get("strategy") for row in raw_rows}
+        if strategy is None and len(strategies) != 1:
+            raise QuantStudioError("净值文件包含多个策略，请显式选择策略")
+        chosen = strategy if strategy is not None else next(iter(strategies))
+        if chosen not in strategies or not chosen:
+            raise QuantStudioError(f"净值策略不存在: {chosen}")
         raw_rows = [row for row in raw_rows if row.get("strategy") == chosen]
-    parsed: list[tuple[str, Decimal]] = []
+        label = chosen
+    elif strategy is not None:
+        raise QuantStudioError("净值文件没有策略列")
+    opening = _opening_value(initial_nav) if initial_nav is not None else None
+    if "initial_nav" in fields:
+        openings = {_opening_value(row.get("initial_nav")) for row in raw_rows}
+        if len(openings) != 1 or (opening is not None and opening not in openings):
+            raise QuantStudioError("期初净值不一致")
+        opening = openings.pop()
+    parsed: dict[datetime, tuple[str, Decimal]] = {}
     for row in raw_rows:
         raw_date = (row.get(date_key) or "").strip()
         raw_value = (row.get(value_key) or "").strip()
-        if not raw_date or not raw_value:
-            continue
         try:
             value = Decimal(raw_value)
-        except InvalidOperation:
-            continue
-        if not value.is_finite():
-            continue
-        parsed.append((raw_date[:10], value))
-    if len(parsed) < 2:
-        return None
-    return NavSeries(parsed)
+            day = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        except (InvalidOperation, ValueError) as exc:
+            raise QuantStudioError("净值日期或数值无效") from exc
+        if not value.is_finite() or value < 0:
+            raise QuantStudioError("净值必须是有限的非负数值")
+        day = day.replace(tzinfo=UTC) if day.tzinfo is None else day.astimezone(UTC)
+        if day in parsed:
+            raise QuantStudioError(f"净值日期重复: {raw_date}")
+        parsed[day] = (raw_date, value)
+    rows = [parsed[day] for day in sorted(parsed)]
+    if not rows or (opening is None and rows[0][1] <= 0):
+        raise QuantStudioError("初始净值必须大于零")
+    return NavSeries(rows, label, opening)
+
+
+def _opening_value(raw: object) -> Decimal:
+    try:
+        value = Decimal(str(raw))
+    except InvalidOperation as exc:
+        raise QuantStudioError("期初净值无效") from exc
+    if not value.is_finite() or value <= 0:
+        raise QuantStudioError("期初净值必须是有限正数")
+    return value
 
 
 def write_nav_csv(path: Path, series: NavSeries) -> None:
-    lines = ["date,nav"]
-    lines.extend(f"{date},{value:.2f}" for date, value in series.rows)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        fields = ["date", "nav"]
+        if series.label:
+            fields.append("strategy")
+        if series.initial_nav is not None:
+            fields.append("initial_nav")
+        writer.writerow(fields)
+        for date, value in series.rows:
+            row = [date, value]
+            if series.label:
+                row.append(series.label)
+            if series.initial_nav is not None:
+                row.append(series.initial_nav)
+            writer.writerow(row)
 
 
 def chart_fragment(series: NavSeries) -> str:
-    values = [value for _, value in series.rows]
+    if len(series.plot_rows) == 1:
+        date, value = series.rows[0]
+        return (
+            '<section class="chart-card"><h2>净值快照</h2>'
+            f"<p>{escape(date)} · {value}</p>"
+            "<p>单次观测，尚无区间收益或最大回撤。</p></section>"
+        )
+    values = [value for _, value in series.plot_rows]
     low = min(values)
     high = max(values)
     pad = (high - low) * Decimal("0.18") or Decimal("1")
@@ -112,7 +183,7 @@ def chart_fragment(series: NavSeries) -> str:
     left, top, right, bottom = 78, 24, 900, 300
     plot_w = Decimal(right - left)
     plot_h = Decimal(bottom - top)
-    step = Decimal(max(len(series.rows) - 1, 1))
+    step = Decimal(max(len(series.plot_rows) - 1, 1))
     coords = []
     for index, value in enumerate(values):
         x = Decimal(left) + plot_w * Decimal(index) / step
@@ -129,13 +200,13 @@ def chart_fragment(series: NavSeries) -> str:
             f'<line x1="{left}" y1="{y:.1f}" x2="{right}" y2="{y:.1f}"/>'
             f'<text x="70" y="{y + 4:.1f}">{_level(level, span)}</text>'
         )
-    dates = [date for date, _ in series.rows]
+    dates = [date for date, _ in series.plot_rows]
     axis = _date_axis(dates, left, right)
     ending = series.ending
     change = series.period_return * Decimal(100)
     drawdown = series.max_drawdown * Decimal(100)
     return f"""<section class="chart-card"><style>{_CHART_CSS}</style>
-<h2>净值曲线</h2>
+<h2>净值曲线{f" · {escape(series.label)}" if series.label else ""}</h2>
 <div class="stats">
 <div class="stat"><span>期末净值</span><b>{ending:.2f}</b></div>
 <div class="stat"><span>区间涨跌</span><b>{change:+.2f}%</b></div>
@@ -161,22 +232,38 @@ def collect_outputs(
     cwd: Path,
     run_dir: Path,
     output_dirs: list[str],
-) -> None:
+    *,
+    result_files: dict[str, str] | None = None,
+    nav_column: str | None = None,
+    nav_strategy: str | None = None,
+    initial_nav: Decimal | str | None = None,
+) -> str | None:
+    if result_files is not None:
+        return _collect_declared(
+            run_dir, result_files, nav_column, nav_strategy, initial_nav
+        )
     roots = _output_roots(cwd, run_dir, output_dirs)
     files: list[Path] = []
     for root in roots:
         files.extend(_walk(root))
+    files = sorted(
+        {path.resolve() for path in files if _allowed(path.resolve(), cwd, run_dir)}
+    )
     nav_source = _best_nav(files)
+    # A result is one bundle. Never combine a curve with another run's tables/report.
+    parents = {path.parent for path in files}
+    if len(parents) > 1:
+        raise QuantStudioError("输出目录包含多个结果集合，无法确定本次结果")
     if nav_source is not None:
-        series = parse_nav_csv(nav_source)
+        series = parse_nav_csv(
+            nav_source,
+            value_column=nav_column,
+            strategy=nav_strategy,
+            initial_nav=initial_nav,
+        )
         if series is not None:
             write_nav_csv(run_dir / "nav.csv", series)
     report = _best_report(files, nav_source)
-    destination = (run_dir / "report.html").resolve()
-    if report is None or report.resolve() == destination:
-        pass
-    elif _allowed(report.resolve(), cwd, run_dir):
-        destination.write_bytes(report.read_bytes())
     for path in files:
         if path.name not in TABLE_FILES:
             continue
@@ -184,6 +271,39 @@ def collect_outputs(
         if path.resolve() == target or not _allowed(path.resolve(), cwd, run_dir):
             continue
         target.write_bytes(path.read_bytes())
+    # Keep the report beside its evidence so every relative link retains its base.
+    return report.relative_to(run_dir.resolve()).as_posix() if report else None
+
+
+def _collect_declared(run_dir, result_files, nav_column, nav_strategy, initial_nav):
+    root = (run_dir / "strategy-output").resolve()
+    if not _allowed(root, run_dir, run_dir):
+        raise QuantStudioError("结果目录逃出本次运行")
+    sources = {}
+    for target, relative in result_files.items():
+        source = (root / relative).resolve()
+        if target not in {"nav.csv", "report.html", *TABLE_FILES}:
+            raise QuantStudioError(f"未知结果类型: {target}")
+        if root not in source.parents or not source.is_file():
+            raise QuantStudioError(f"本次运行结果缺失或路径非法: {relative}")
+        sources[target] = source
+    series = None
+    if "nav.csv" in sources:
+        series = parse_nav_csv(
+            sources["nav.csv"],
+            value_column=nav_column,
+            strategy=nav_strategy,
+            initial_nav=initial_nav,
+        )
+        if series is None:
+            raise QuantStudioError("本次运行没有可识别的净值")
+    for target, source in sources.items():
+        if target == "nav.csv":
+            write_nav_csv(run_dir / target, series)
+        elif target != "report.html":
+            (run_dir / target).write_bytes(source.read_bytes())
+    report = sources.get("report.html")
+    return report.relative_to(run_dir.resolve()).as_posix() if report else None
 
 
 def _output_roots(cwd: Path, run_dir: Path, output_dirs: list[str]) -> list[Path]:
@@ -199,7 +319,7 @@ def _output_roots(cwd: Path, run_dir: Path, output_dirs: list[str]) -> list[Path
 
 
 def _allowed(path: Path, cwd: Path, run_dir: Path) -> bool:
-    for root in (cwd.resolve(), run_dir.resolve()):
+    for root in (run_dir.resolve(),):
         try:
             path.relative_to(root)
         except ValueError:
@@ -269,9 +389,16 @@ def _value_key(fields: list[str], filename: str) -> str | None:
         if name in fields:
             return name
     if filename == "cumulative_returns.csv":
-        for name in reversed(fields):
-            if name not in DATE_COLUMNS and name not in {"", "index", "strategy"}:
-                return name
+        values = [
+            name
+            for name in fields
+            if name not in DATE_COLUMNS
+            and name not in {"", "index", "strategy", "initial_nav"}
+        ]
+        if len(values) > 1:
+            raise QuantStudioError("净值文件包含多个组合，请显式选择净值列")
+        if values:
+            return values[0]
     return None
 
 
@@ -306,9 +433,11 @@ def _date_axis(dates: list[str], left: int, right: int) -> str:
 
 
 def drawdown_fragment(series: NavSeries) -> str:
-    peak = series.rows[0][1]
+    if len(series.plot_rows) < 2:
+        return ""
+    peak = series.plot_rows[0][1]
     points: list[tuple[str, Decimal]] = []
-    for date, value in series.rows:
+    for date, value in series.plot_rows:
         if value > peak:
             peak = value
         drop = (value / peak - 1) if peak else Decimal(0)

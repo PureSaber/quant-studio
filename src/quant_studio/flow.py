@@ -29,6 +29,8 @@ def compile_document(
     template: Template,
     knobs: dict[str, Any] | None = None,
     factors: list[str] | None = None,
+    *,
+    snapshot: str | None = None,
 ) -> str:
     rendered = render_template(template, knobs)
     if factors is not None:
@@ -38,7 +40,7 @@ def compile_document(
         list(template.argv),
         rendered.values,
         config=f"{PREVIEW_CONFIG}.{template.config_format}",
-        snapshot=PREVIEW_SNAPSHOT,
+        snapshot=snapshot or PREVIEW_SNAPSHOT,
         output=PREVIEW_OUTPUT,
     )
     command = "\n".join(argv) if argv else "进程内合成样例，无外部命令"

@@ -68,13 +68,42 @@ def test_synthetic_result_embeds_report_and_shows_disclaimer(tmp_path):
     assert f"/runs/{result.run_id}/files/report.html" in page
 
 
-def test_only_html_and_csv_inside_run_directory_can_be_served(tmp_path):
+def test_legacy_hk_results_use_frozen_opening_and_original_report_without_rewriting(
+    tmp_path,
+):
+    result = preview("hk-equity-daily", runs_root=tmp_path)
+    directory = result.run_dir
+    output = directory / "strategy-output"
+    output.mkdir()
+    (output / "report.html").write_text('<a href="summary.json">evidence</a>')
+    (directory / "report.html").write_text("old copied report")
+    (directory / "nav.csv").write_text(
+        "date,nav\n2026-09-28,500000\n2026-09-29,1010000\n"
+    )
+    payload = result.as_json()
+    payload.update(status="succeeded", report="report.html")
+    (directory / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+    before = {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+    page = render_run(directory)
+    assert "+1.00%" in page and "50.00%" in page
+    assert f"/runs/{result.run_id}/files/strategy-output/report.html" in page
+    assert before == {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
+
+
+def test_only_run_html_csv_and_upstream_json_evidence_can_be_served(tmp_path):
     run_dir = tmp_path / "safe-run"
     run_dir.mkdir()
     (run_dir / "report.html").write_text("ok", encoding="utf-8")
     (run_dir / "result.json").write_text(json.dumps({}), encoding="utf-8")
+    evidence = run_dir / "strategy-output" / "holdout" / "ledger.json"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text("{}", encoding="utf-8")
 
     assert resolve_run_asset(tmp_path, "safe-run", "report.html").is_file()
+    assert (
+        resolve_run_asset(tmp_path, "safe-run", "strategy-output/holdout/ledger.json")
+        == evidence
+    )
     with pytest.raises(QuantStudioError):
         resolve_run_asset(tmp_path, "safe-run", "../outside.html")
     with pytest.raises(QuantStudioError):
@@ -131,16 +160,16 @@ def test_debug_preset_fills_declared_fields(monkeypatch):
 
 
 def test_imported_nav_is_charted_with_drawdown(tmp_path, monkeypatch):
-    from tests.test_runner import test_success_copies_upstream_nav_and_report
+    from tests.test_runner import test_current_run_outputs_are_isolated_and_collected
 
-    test_success_copies_upstream_nav_and_report(tmp_path, monkeypatch)
+    test_current_run_outputs_are_isolated_and_collected(tmp_path, monkeypatch)
     run_dir = next((tmp_path / "runs").iterdir())
     page = render_run(run_dir)
 
     assert "<svg" in page
     assert "最大回撤" in page
     assert "期末净值" in page
-    assert "0.90" in page
+    assert "+0.09%" in page
     assert "持仓" in page
     assert "回撤" in page
     assert "未提供基准净值" in page
@@ -180,6 +209,18 @@ def test_template_flows_compile_declared_config():
         assert 'id="run"' in page
         assert 'id="code"' in page
         assert "手写代码" in page
+
+
+def test_hk_compiled_form_preserves_selected_snapshot_without_running(monkeypatch):
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("editing the code preview must not run a template")
+
+    monkeypatch.setattr("quant_studio.server.run", unexpected_run)
+    snapshot = "C:/research snapshots/hong kong"
+    text = compiled_from_form("hk-equity-daily", {"snapshot": [snapshot]})
+
+    assert f"--snapshot\n{snapshot}\n" in text
+    assert "<本次运行>/snapshot" not in text
 
 
 def test_compiled_form_keeps_only_submitted_factors():
