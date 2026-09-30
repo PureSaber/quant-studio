@@ -7,6 +7,8 @@ from decimal import Decimal, InvalidOperation
 from html import escape
 from pathlib import Path
 
+from quant_studio import QuantStudioError
+
 DATE_COLUMNS = ("date", "trade_date", "datetime", "dt")
 VALUE_COLUMNS = ("nav", "equity", "capital", "net_value", "value")
 TABLE_FILES = {
@@ -97,7 +99,7 @@ def parse_nav_csv(path: Path) -> NavSeries | None:
 
 def write_nav_csv(path: Path, series: NavSeries) -> None:
     lines = ["date,nav"]
-    lines.extend(f"{date},{value:.2f}" for date, value in series.rows)
+    lines.extend(f"{date},{value}" for date, value in series.rows)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
 
@@ -166,7 +168,14 @@ def collect_outputs(
     files: list[Path] = []
     for root in roots:
         files.extend(_walk(root))
+    files = sorted(
+        {path.resolve() for path in files if _allowed(path.resolve(), cwd, run_dir)}
+    )
     nav_source = _best_nav(files)
+    # A result is one bundle. Never combine a curve with another run's tables/report.
+    parents = {path.parent for path in files}
+    if len(parents) > 1:
+        raise QuantStudioError("输出目录包含多个结果集合，无法确定本次结果")
     if nav_source is not None:
         series = parse_nav_csv(nav_source)
         if series is not None:
@@ -199,7 +208,7 @@ def _output_roots(cwd: Path, run_dir: Path, output_dirs: list[str]) -> list[Path
 
 
 def _allowed(path: Path, cwd: Path, run_dir: Path) -> bool:
-    for root in (cwd.resolve(), run_dir.resolve()):
+    for root in (run_dir.resolve(),):
         try:
             path.relative_to(root)
         except ValueError:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import shutil
 import subprocess
+import sys
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -35,6 +38,17 @@ def template_readiness(template: Template) -> Readiness:
         return Readiness(False, f"未设置 QUANT_WORKSPACE_ROOT，{repo} 只能预览")
     if not (Path(root) / repo).is_dir():
         return Readiness(False, f"工作区里没有 {repo}，只能预览")
+    executable = _executable(template.argv[0])
+    if executable is None:
+        return Readiness(False, f"找不到命令 {template.argv[0]}，请安装对应环境后运行")
+    if executable == sys.executable and template.argv[1:2] == ["-m"]:
+        module = template.argv[2]
+        try:
+            available = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            available = False
+        if not available:
+            return Readiness(False, f"当前 Python 环境缺少模块 {module}")
     return Readiness(True, "可运行")
 
 
@@ -67,6 +81,7 @@ def preview(
     if factors is not None:
         apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
+    _isolate_outputs(loaded, rendered.config, run_dir)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(loaded.argv, rendered.values, run_dir, config_path)
@@ -104,6 +119,7 @@ def run(
     if factors is not None:
         apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
+    _isolate_outputs(loaded, rendered.config, run_dir)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(loaded.argv, rendered.values, run_dir, config_path)
@@ -168,15 +184,24 @@ def run(
         returncode = None
         stdout = _text(exc.stdout)
         stderr = _text(exc.stderr) + f"\n运行超时（{timeout} 秒）"
+    except OSError as exc:
+        returncode = None
+        stdout = ""
+        stderr = f"无法启动命令: {exc}"
     (run_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     succeeded = returncode == 0
-    if succeeded:
-        collect_outputs(cwd, run_dir, _output_dirs(loaded, rendered.config))
-    report = run_dir / loaded.report_name
     message = None
+    if succeeded:
+        try:
+            collect_outputs(cwd, run_dir, _output_dirs(loaded, rendered.config))
+        except (OSError, ValueError, QuantStudioError) as exc:
+            succeeded = False
+            message = f"无法收集本次运行结果: {exc}"
+    report = run_dir / loaded.report_name
     if succeeded and not report.is_file() and not (run_dir / "nav.csv").is_file():
         message = "命令已结束，但没有找到净值序列或 report.html"
+        succeeded = False
     result = RunResult(
         "succeeded" if succeeded else "failed",
         identifier,
@@ -243,9 +268,28 @@ def _render_argv(
         "output": str(run_dir / "strategy-output"),
     }
     try:
-        return [part.format_map(replacements) for part in argv]
+        rendered = [part.format_map(replacements) for part in argv]
+        if rendered:
+            rendered[0] = _executable(rendered[0]) or rendered[0]
+        return rendered
     except KeyError as exc:
         raise QuantStudioError(f"命令占位符无效: {exc.args[0]}") from exc
+
+
+def _executable(command: str) -> str | None:
+    if command in {"python", "python3"}:
+        return sys.executable
+    search_path = (
+        str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
+    )
+    return shutil.which(command, path=search_path)
+
+
+def _isolate_outputs(template: Template, config: dict[str, Any], run_dir: Path) -> None:
+    if template.kind != "synthetic":
+        for key in ("outputs_dir", "state_dir"):
+            if key in config:
+                config[key] = str(run_dir / "strategy-output")
 
 
 def _output_dirs(template: Template, config: dict[str, Any]) -> list[str]:
