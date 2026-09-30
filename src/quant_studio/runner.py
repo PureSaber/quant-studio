@@ -342,10 +342,11 @@ def _snapshot_path(template: Template, snapshot: str | Path | None) -> Path | No
 
 def _resolve_input_paths(template: Template, config: dict[str, Any]) -> None:
     workspace = os.environ.get("QUANT_WORKSPACE_ROOT")
-    if not workspace:
+    fields = template.metadata.get("input_paths", [])
+    if not workspace or not fields:
         return
     repo = Path(workspace).resolve() / template.workspace_repo
-    for field in template.metadata.get("input_paths", []):
+    for field in fields:
         parts = field.split(".")
         node = config
         for part in parts[:-1]:

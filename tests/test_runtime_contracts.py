@@ -13,6 +13,14 @@ from quant_studio.server import render_template_page
 from quant_studio.templates import load_template
 
 
+def test_synthetic_template_runs_with_workspace_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    assert (
+        run("synthetic-demo", execute=True, runs_root=tmp_path / "runs").status
+        == "succeeded"
+    )
+
+
 def test_explicit_upstream_result_bundle_accepts_timestamp_and_latest(tmp_path):
     run_dir = tmp_path / "run"
     for name in ("20260930_120000", "latest"):

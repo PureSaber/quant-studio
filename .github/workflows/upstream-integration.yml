@@ -36,8 +36,12 @@ jobs:
         working-directory: ${{ matrix.upstream.repo }}
         shell: bash
         run: |
-          python -m pip install --no-deps -r requirements.lock
-          if [ -f stack.lock ]; then python -m pip install --no-deps -r stack.lock; fi
+          if [ -f stack.lock ]; then
+            python -m pip install -r requirements.lock
+            python -m pip install --no-deps -r stack.lock
+          else
+            python -m pip install --no-deps -r requirements.lock
+          fi
           python -m pip install --no-deps --no-build-isolation -e .
       - name: Install Studio and verify dependency closure
         run: |
