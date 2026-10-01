@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 
 import yaml
 
@@ -148,7 +149,9 @@ def _run_rows(records: list[dict[str, str]], prefix: str) -> str:
     return "".join(lines)
 
 
-def render_template_page(template_id: str, preset_id: str | None = None) -> str:
+def render_template_page(
+    template_id: str, preset_id: str | None = None, *, csrf_token: str = ""
+) -> str:
     template = load_template(template_id)
     selected = _preset_values(template, preset_id)
     catalog = list(template.metadata.get("factor_catalog") or [])
@@ -186,6 +189,7 @@ def render_template_page(template_id: str, preset_id: str | None = None) -> str:
 <div class="studio-grid">
 <form class="flow" method="post" action="/templates/{template_ref}"
  data-code="/templates/{template_ref}/code">
+<input type="hidden" name="_csrf_token" value="{escape(csrf_token)}">
 <ol class="steps">{"".join(steps)}</ol>
 </form>
 <aside class="code-card" id="code">
@@ -343,6 +347,7 @@ def serve(
         pass
 
     Handler.runs_root = root
+    Handler.csrf_token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((host, port), Handler)
     try:
         server.serve_forever()
@@ -354,8 +359,12 @@ def serve(
 
 class _Handler(BaseHTTPRequestHandler):
     runs_root = Path("runs")
+    csrf_token = ""
 
     def do_GET(self) -> None:
+        self._frame_policy = "DENY"
+        if not self._allow_request():
+            return
         path = unquote(urlparse(self.path).path)
         try:
             if path in {"/", "/strategy"}:
@@ -371,7 +380,11 @@ class _Handler(BaseHTTPRequestHandler):
             elif path.startswith("/templates/"):
                 preset = parse_qs(urlparse(self.path).query).get("preset", [None])[0]
                 template_id = path.removeprefix("/templates/")
-                self._send_html(render_template_page(template_id, preset))
+                self._send_html(
+                    render_template_page(
+                        template_id, preset, csrf_token=self.csrf_token
+                    )
+                )
             elif path.startswith("/runs/") and "/files/" in path:
                 remainder = path.removeprefix("/runs/")
                 run_id, relative = remainder.split("/files/", 1)
@@ -386,16 +399,34 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
+        self._frame_policy = "DENY"
+        if not self._allow_request(require_origin=True):
+            return
         path = unquote(urlparse(self.path).path)
         code_view = False
         if not path.startswith("/templates/"):
             self.send_error(404)
             return
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length > 64_000:
+            content_types = self.headers.get_all("Content-Type") or []
+            lengths = self.headers.get_all("Content-Length") or []
+            if (
+                len(content_types) != 1
+                or len(lengths) != 1
+                or self.headers.get_all("Transfer-Encoding")
+            ):
+                raise QuantStudioError("请求编码不明确")
+            content_type = content_types[0].partition(";")[0].strip()
+            if content_type.lower() != "application/x-www-form-urlencoded":
+                raise QuantStudioError("请求类型不受支持")
+            length = int(lengths[0])
+            if length < 0 or length > 64_000:
                 raise QuantStudioError("请求过大")
             data = parse_qs(self.rfile.read(length).decode("utf-8"))
+            submitted_token = data.pop("_csrf_token", [])
+            if not self._valid_csrf_token(submitted_token):
+                self.send_error(403)
+                return
             code_view = path.endswith("/code")
             template_id = path.removeprefix("/templates/")
             if code_view:
@@ -425,6 +456,82 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self.send_error(400, str(exc))
 
+    def _allow_request(self, *, require_origin: bool = False) -> bool:
+        try:
+            hostname, port = self._loopback_authority()
+            if require_origin:
+                origins = self.headers.get_all("Origin") or []
+                if len(origins) != 1:
+                    raise QuantStudioError("需要唯一 Origin")
+                origin = origins[0]
+                parsed = urlsplit(origin)
+                try:
+                    origin_port = parsed.port
+                except ValueError as exc:
+                    raise QuantStudioError("非法 Origin") from exc
+                if origin_port is None:
+                    origin_port = 80 if parsed.scheme == "http" else -1
+                if (
+                    parsed.scheme != "http"
+                    or parsed.hostname is None
+                    or parsed.hostname.lower() != hostname
+                    or origin_port != port
+                    or parsed.username is not None
+                    or parsed.password is not None
+                    or parsed.path
+                    or parsed.query
+                    or parsed.fragment
+                ):
+                    raise QuantStudioError("Origin 与本机服务不匹配")
+        except (QuantStudioError, ValueError):
+            self.send_error(403)
+            return False
+        return True
+
+    def _valid_csrf_token(self, submitted: list[str]) -> bool:
+        if len(submitted) != 1 or not self.csrf_token:
+            return False
+        try:
+            supplied = submitted[0].encode("ascii")
+            expected = self.csrf_token.encode("ascii")
+        except UnicodeEncodeError:
+            return False
+        return secrets.compare_digest(supplied, expected)
+
+    def _loopback_authority(self) -> tuple[str, int]:
+        hosts = self.headers.get_all("Host") or []
+        if len(hosts) != 1:
+            raise QuantStudioError("需要唯一 Host")
+        raw = hosts[0]
+        if not raw or any(ord(char) < 33 or ord(char) == 127 for char in raw):
+            raise QuantStudioError("缺少合法 Host")
+        parsed = urlsplit(f"//{raw}")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise QuantStudioError("非法 Host") from exc
+        hostname = parsed.hostname.lower() if parsed.hostname else ""
+        if (
+            hostname not in {"127.0.0.1", "localhost"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise QuantStudioError("Host 不是本机回环地址")
+        port = 80 if port is None else port
+        if port != self.server.server_port:
+            raise QuantStudioError("Host 端口与服务不匹配")
+        return hostname, port
+
+    def end_headers(self) -> None:
+        policy = getattr(self, "_frame_policy", "DENY")
+        ancestors = "'self'" if policy == "SAMEORIGIN" else "'none'"
+        self.send_header("Content-Security-Policy", f"frame-ancestors {ancestors}")
+        self.send_header("X-Frame-Options", policy)
+        super().end_headers()
+
     def _send_html(self, content: str) -> None:
         self._send_text(content, content_type="text/html; charset=utf-8")
 
@@ -450,6 +557,8 @@ class _Handler(BaseHTTPRequestHandler):
             ".csv": "text/csv; charset=utf-8",
             ".json": "application/json; charset=utf-8",
         }[path.suffix.lower()]
+        if path.suffix.lower() == ".html":
+            self._frame_policy = "SAMEORIGIN"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -537,6 +646,7 @@ def _request_summary(request: dict[str, object]) -> str:
 
 def compiled_from_form(template_id: str, form: dict[str, list[str]]) -> str:
     data = dict(form)
+    data.pop("_csrf_token", None)
     factor_form = data.pop("factor_form", [None])[0]
     chosen = data.pop("factor", None)
     data.pop("action", None)

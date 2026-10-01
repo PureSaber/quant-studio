@@ -1,4 +1,8 @@
 import json
+import threading
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+from urllib.parse import urlencode
 
 import pytest
 
@@ -6,6 +10,7 @@ from quant_studio import QuantStudioError
 from quant_studio.__main__ import main
 from quant_studio.runner import preview, run
 from quant_studio.server import (
+    _Handler,
     compiled_from_form,
     render_backtest,
     render_data,
@@ -16,6 +21,47 @@ from quant_studio.server import (
     resolve_run_asset,
     validate_host,
 )
+
+
+def _start_http_server(tmp_path):
+    class Handler(_Handler):
+        pass
+
+    Handler.runs_root = tmp_path
+    Handler.csrf_token = "test-only-csrf-token"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _request(server, method, path, *, host, origin=None, fields=None):
+    body = urlencode(fields or {})
+    headers = [("Host", host)]
+    if method == "POST":
+        headers.extend(
+            [
+                ("Content-Type", "application/x-www-form-urlencoded"),
+                ("Content-Length", str(len(body.encode("utf-8")))),
+            ]
+        )
+    if origin is not None:
+        headers.append(("Origin", origin))
+    return _raw_request(
+        server, method, path, headers=headers, body=body if method == "POST" else ""
+    )
+
+
+def _raw_request(server, method, path, *, headers, body=""):
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    connection.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+    for name, value in headers:
+        connection.putheader(name, value)
+    connection.endheaders(body.encode("utf-8"))
+    response = connection.getresponse()
+    payload = response.read()
+    connection.close()
+    return response.status, dict(response.getheaders()), payload
 
 
 def test_home_has_three_research_cards_and_one_synthetic_card():
@@ -41,6 +87,200 @@ def test_template_page_contains_knob_form():
 def test_non_loopback_host_is_rejected(host):
     with pytest.raises(QuantStudioError, match="host"):
         validate_host(host)
+
+
+def test_http_rejects_dns_rebinding_host(tmp_path):
+    server, thread = _start_http_server(tmp_path)
+    try:
+        status, _, body = _request(
+            server,
+            "GET",
+            "/templates/synthetic-demo",
+            host=f"attacker.example:{server.server_port}",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert status == 403
+    assert b"test-only-csrf-token" not in body
+
+
+def test_http_execute_requires_same_origin_and_csrf_token(tmp_path):
+    server, thread = _start_http_server(tmp_path)
+    authority = f"localhost:{server.server_port}"
+    origin = f"http://{authority}"
+    try:
+        status, headers, page = _request(
+            server, "GET", "/templates/synthetic-demo", host=authority
+        )
+        assert status == 200
+        assert b"test-only-csrf-token" in page
+        assert headers["Content-Security-Policy"] == "frame-ancestors 'none'"
+        assert headers["X-Frame-Options"] == "DENY"
+
+        status, _, _ = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            host=authority,
+            origin="http://attacker.example",
+            fields={"_csrf_token": "test-only-csrf-token", "action": "execute"},
+        )
+        assert status == 403
+        assert not list(tmp_path.iterdir())
+
+        status, _, _ = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            host=authority,
+            origin=origin,
+            fields={"action": "execute"},
+        )
+        assert status == 403
+        assert not list(tmp_path.iterdir())
+
+        status, code_headers, compiled = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo/code",
+            host=authority,
+            origin=origin,
+            fields={"_csrf_token": "test-only-csrf-token"},
+        )
+        assert status == 200
+        assert b"initial_capital: 10000" in compiled
+        assert code_headers["X-Frame-Options"] == "DENY"
+        assert not list(tmp_path.iterdir())
+
+        status, headers, _ = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            host=authority,
+            origin=origin,
+            fields={"_csrf_token": "test-only-csrf-token", "action": "execute"},
+        )
+        assert status == 303
+        assert headers["Location"].startswith("/runs/")
+        assert headers["X-Frame-Options"] == "DENY"
+        assert len(list(tmp_path.iterdir())) == 1
+
+        status, report_headers, _ = _request(
+            server,
+            "GET",
+            f"{headers['Location']}/files/report.html",
+            host=authority,
+        )
+        assert status == 200
+        assert report_headers["Content-Security-Policy"] == "frame-ancestors 'self'"
+        assert report_headers["X-Frame-Options"] == "SAMEORIGIN"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.parametrize(
+    ("headers", "body", "expected"),
+    [
+        (
+            [
+                ("Host", "{authority}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            "_csrf_token=test-only-csrf-token&action=execute",
+            403,
+        ),
+        (
+            [
+                ("Host", "{authority}"),
+                ("Origin", "{origin}"),
+                ("Origin", "{origin}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            "_csrf_token=test-only-csrf-token&action=execute",
+            403,
+        ),
+        (
+            [
+                ("Host", "{authority}"),
+                ("Host", "{authority}"),
+                ("Origin", "{origin}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            "_csrf_token=test-only-csrf-token&action=execute",
+            403,
+        ),
+        (
+            [
+                ("Host", "{authority}"),
+                ("Origin", "{origin}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            "_csrf_token=wrong&action=execute",
+            403,
+        ),
+        (
+            [
+                ("Host", "{authority}"),
+                ("Origin", "{origin}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            "_csrf_token=%E4%BB%A4%E7%89%8C&action=execute",
+            403,
+        ),
+        (
+            [
+                ("Host", "{authority}"),
+                ("Origin", "{origin}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            "_csrf_token=test-only-csrf-token&_csrf_token=duplicate&action=execute",
+            403,
+        ),
+        (
+            [
+                ("Host", "{authority}"),
+                ("Origin", "{origin}"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+                ("Content-Length", "not-a-number"),
+            ],
+            "_csrf_token=test-only-csrf-token&action=execute",
+            400,
+        ),
+    ],
+)
+def test_http_rejects_ambiguous_or_malformed_action_requests(
+    tmp_path, headers, body, expected
+):
+    server, thread = _start_http_server(tmp_path)
+    authority = f"localhost:{server.server_port}"
+    origin = f"http://{authority}"
+    prepared = [
+        (name, value.format(authority=authority, origin=origin))
+        for name, value in headers
+    ]
+    if not any(name.lower() == "content-length" for name, _ in prepared):
+        prepared.append(("Content-Length", str(len(body.encode("utf-8")))))
+    try:
+        status, response_headers, _ = _raw_request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            headers=prepared,
+            body=body,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert status == expected
+    assert response_headers["X-Frame-Options"] == "DENY"
+    assert not list(tmp_path.iterdir())
 
 
 def test_preview_page_shows_argv_without_nav_chart(tmp_path):
