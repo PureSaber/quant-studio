@@ -362,6 +362,7 @@ class _Handler(BaseHTTPRequestHandler):
     csrf_token = ""
 
     def do_GET(self) -> None:
+        self._frame_policy = "DENY"
         if not self._allow_request():
             return
         path = unquote(urlparse(self.path).path)
@@ -398,6 +399,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
+        self._frame_policy = "DENY"
         if not self._allow_request(require_origin=True):
             return
         path = unquote(urlparse(self.path).path)
@@ -406,21 +408,23 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
-            content_type = (
-                self.headers.get("Content-Type", "").partition(";")[0].strip()
-            )
+            content_types = self.headers.get_all("Content-Type") or []
+            lengths = self.headers.get_all("Content-Length") or []
+            if (
+                len(content_types) != 1
+                or len(lengths) != 1
+                or self.headers.get_all("Transfer-Encoding")
+            ):
+                raise QuantStudioError("请求编码不明确")
+            content_type = content_types[0].partition(";")[0].strip()
             if content_type.lower() != "application/x-www-form-urlencoded":
                 raise QuantStudioError("请求类型不受支持")
-            length = int(self.headers.get("Content-Length", "0"))
+            length = int(lengths[0])
             if length < 0 or length > 64_000:
                 raise QuantStudioError("请求过大")
             data = parse_qs(self.rfile.read(length).decode("utf-8"))
             submitted_token = data.pop("_csrf_token", [])
-            if (
-                len(submitted_token) != 1
-                or not self.csrf_token
-                or not secrets.compare_digest(submitted_token[0], self.csrf_token)
-            ):
+            if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
                 return
             code_view = path.endswith("/code")
@@ -456,7 +460,10 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             hostname, port = self._loopback_authority()
             if require_origin:
-                origin = self.headers.get("Origin", "")
+                origins = self.headers.get_all("Origin") or []
+                if len(origins) != 1:
+                    raise QuantStudioError("需要唯一 Origin")
+                origin = origins[0]
                 parsed = urlsplit(origin)
                 try:
                     origin_port = parsed.port
@@ -481,8 +488,21 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _valid_csrf_token(self, submitted: list[str]) -> bool:
+        if len(submitted) != 1 or not self.csrf_token:
+            return False
+        try:
+            supplied = submitted[0].encode("ascii")
+            expected = self.csrf_token.encode("ascii")
+        except UnicodeEncodeError:
+            return False
+        return secrets.compare_digest(supplied, expected)
+
     def _loopback_authority(self) -> tuple[str, int]:
-        raw = self.headers.get("Host", "")
+        hosts = self.headers.get_all("Host") or []
+        if len(hosts) != 1:
+            raise QuantStudioError("需要唯一 Host")
+        raw = hosts[0]
         if not raw or any(ord(char) < 33 or ord(char) == 127 for char in raw):
             raise QuantStudioError("缺少合法 Host")
         parsed = urlsplit(f"//{raw}")
@@ -504,6 +524,13 @@ class _Handler(BaseHTTPRequestHandler):
         if port != self.server.server_port:
             raise QuantStudioError("Host 端口与服务不匹配")
         return hostname, port
+
+    def end_headers(self) -> None:
+        policy = getattr(self, "_frame_policy", "DENY")
+        ancestors = "'self'" if policy == "SAMEORIGIN" else "'none'"
+        self.send_header("Content-Security-Policy", f"frame-ancestors {ancestors}")
+        self.send_header("X-Frame-Options", policy)
+        super().end_headers()
 
     def _send_html(self, content: str) -> None:
         self._send_text(content, content_type="text/html; charset=utf-8")
@@ -530,6 +557,8 @@ class _Handler(BaseHTTPRequestHandler):
             ".csv": "text/csv; charset=utf-8",
             ".json": "application/json; charset=utf-8",
         }[path.suffix.lower()]
+        if path.suffix.lower() == ".html":
+            self._frame_policy = "SAMEORIGIN"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
