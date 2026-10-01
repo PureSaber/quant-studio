@@ -1,4 +1,8 @@
 import json
+import threading
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+from urllib.parse import urlencode
 
 import pytest
 
@@ -6,6 +10,7 @@ from quant_studio import QuantStudioError
 from quant_studio.__main__ import main
 from quant_studio.runner import preview, run
 from quant_studio.server import (
+    _Handler,
     compiled_from_form,
     render_backtest,
     render_data,
@@ -16,6 +21,40 @@ from quant_studio.server import (
     resolve_run_asset,
     validate_host,
 )
+
+
+def _start_http_server(tmp_path):
+    class Handler(_Handler):
+        pass
+
+    Handler.runs_root = tmp_path
+    Handler.csrf_token = "test-only-csrf-token"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _request(server, method, path, *, host, origin=None, fields=None):
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    body = urlencode(fields or {})
+    headers = {"Host": host}
+    if method == "POST":
+        headers.update(
+            {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Length": str(len(body.encode("utf-8"))),
+            }
+        )
+    if origin is not None:
+        headers["Origin"] = origin
+    connection.request(
+        method, path, body=body if method == "POST" else None, headers=headers
+    )
+    response = connection.getresponse()
+    payload = response.read()
+    connection.close()
+    return response.status, dict(response.getheaders()), payload
 
 
 def test_home_has_three_research_cards_and_one_synthetic_card():
@@ -41,6 +80,86 @@ def test_template_page_contains_knob_form():
 def test_non_loopback_host_is_rejected(host):
     with pytest.raises(QuantStudioError, match="host"):
         validate_host(host)
+
+
+def test_http_rejects_dns_rebinding_host(tmp_path):
+    server, thread = _start_http_server(tmp_path)
+    try:
+        status, _, body = _request(
+            server,
+            "GET",
+            "/templates/synthetic-demo",
+            host=f"attacker.example:{server.server_port}",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert status == 403
+    assert b"test-only-csrf-token" not in body
+
+
+def test_http_execute_requires_same_origin_and_csrf_token(tmp_path):
+    server, thread = _start_http_server(tmp_path)
+    authority = f"localhost:{server.server_port}"
+    origin = f"http://{authority}"
+    try:
+        status, _, page = _request(
+            server, "GET", "/templates/synthetic-demo", host=authority
+        )
+        assert status == 200
+        assert b"test-only-csrf-token" in page
+
+        status, _, _ = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            host=authority,
+            origin="http://attacker.example",
+            fields={"_csrf_token": "test-only-csrf-token", "action": "execute"},
+        )
+        assert status == 403
+        assert not list(tmp_path.iterdir())
+
+        status, _, _ = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            host=authority,
+            origin=origin,
+            fields={"action": "execute"},
+        )
+        assert status == 403
+        assert not list(tmp_path.iterdir())
+
+        status, _, compiled = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo/code",
+            host=authority,
+            origin=origin,
+            fields={"_csrf_token": "test-only-csrf-token"},
+        )
+        assert status == 200
+        assert b"initial_capital: 10000" in compiled
+        assert not list(tmp_path.iterdir())
+
+        status, headers, _ = _request(
+            server,
+            "POST",
+            "/templates/synthetic-demo",
+            host=authority,
+            origin=origin,
+            fields={"_csrf_token": "test-only-csrf-token", "action": "execute"},
+        )
+        assert status == 303
+        assert headers["Location"].startswith("/runs/")
+        assert len(list(tmp_path.iterdir())) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_preview_page_shows_argv_without_nav_chart(tmp_path):
