@@ -7,6 +7,9 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
+from quant_studio import QuantStudioError
+from quant_studio.runner import safe_run_file
+
 DATA_ROOTS = (
     ("A股", "a-share-multifactor", "data"),
     ("港股", "quant-hk-equity", "data"),
@@ -97,9 +100,13 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
         except (OSError, json.JSONDecodeError):
             continue
         report_name = str(result.get("report") or "")
-        has_report = (
-            report_name == "report.html" and (directory / "report.html").is_file()
-        )
+        try:
+            has_report = (
+                bool(report_name)
+                and safe_run_file(directory, report_name, {".html"}).is_file()
+            )
+        except QuantStudioError:
+            has_report = False
         stamp = result_path.stat().st_mtime
         records.append(
             {

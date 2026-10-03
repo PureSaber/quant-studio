@@ -295,6 +295,93 @@ def run(
     return result
 
 
+def preflight(
+    template: str | Template,
+    knobs: dict[str, Any] | None = None,
+    *,
+    factors: list[str] | None = None,
+    snapshot: str | Path | None = None,
+    runs_root: str | Path | None = None,
+    timeout: float = 60,
+) -> RunResult:
+    """Run an explicitly declared upstream data check; never substitute a backtest."""
+    loaded = load_template(template) if isinstance(template, str) else template
+    declared = loaded.metadata.get("preflight_argv")
+    if not declared:
+        raise QuantStudioError("该模板尚未接入独立的数据预检，请查看模板的数据要求。")
+    prepared = preview(
+        loaded, knobs, factors=factors, snapshot=snapshot, runs_root=runs_root
+    )
+    selected = _snapshot_path(loaded, snapshot)
+    ready = template_readiness(loaded, snapshot=selected)
+    argv = _render_argv(
+        declared,
+        render_template(loaded, knobs).values,
+        prepared.run_dir,
+        prepared.run_dir / f"config.{loaded.config_format}",
+        selected,
+        python=configured_python(loaded.metadata.get("workspace_repo")),
+    )
+    _write_json(prepared.run_dir / "command.json", {"argv": argv})
+    result = RunResult("blocked", prepared.run_id, prepared.run_dir, argv)
+    result.message = ready.message
+    if ready.runnable:
+        if argv[0] != ready.executable:
+            raise QuantStudioError("运行环境配置在预检期间改变，请重新预览")
+        cwd = Path(os.environ["QUANT_WORKSPACE_ROOT"]).resolve() / loaded.workspace_repo
+        try:
+            completed = subprocess.run(
+                argv,
+                cwd=cwd,
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+                timeout=timeout,
+                check=False,
+            )
+            (prepared.run_dir / "stdout.txt").write_text(
+                completed.stdout, encoding="utf-8"
+            )
+            (prepared.run_dir / "stderr.txt").write_text(
+                completed.stderr, encoding="utf-8"
+            )
+            result.returncode = completed.returncode
+            if completed.returncode:
+                lines = completed.stderr.strip().splitlines()
+                raise QuantStudioError(lines[-1][-1600:] if lines else "上游预检失败")
+            evidence = json.loads(completed.stdout)
+            if (
+                not isinstance(evidence, dict)
+                or evidence.get("software_preflight") != "pass"
+            ):
+                raise QuantStudioError("上游未返回通过的数据预检证据")
+            _write_json(prepared.run_dir / "preflight.json", evidence)
+            result.status = "checked"
+            result.message = (
+                "数据与配置预检通过；没有执行策略。投资适用性以原始证据为准。"
+            )
+        except (
+            OSError,
+            ValueError,
+            QuantStudioError,
+            subprocess.SubprocessError,
+        ) as exc:
+            if isinstance(exc, subprocess.TimeoutExpired):
+                (prepared.run_dir / "stdout.txt").write_text(
+                    _text(exc.stdout), encoding="utf-8"
+                )
+                (prepared.run_dir / "stderr.txt").write_text(
+                    _text(exc.stderr), encoding="utf-8"
+                )
+            result.status = "check_failed"
+            result.message = f"数据预检未通过：{exc}"
+    _write_json(prepared.run_dir / "result.json", result.as_json())
+    return result
+
+
 def safe_run_file(
     run_dir: str | Path, relative_path: str, suffixes: set[str] | None = None
 ) -> Path:

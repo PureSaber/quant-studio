@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 from html import escape
@@ -11,6 +12,7 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 import yaml
 
 from quant_studio import QuantStudioError
+from quant_studio.accounts import account_sources, inspect_source
 from quant_studio.desk import (
     FETCH_BY_REPO,
     FETCH_COMMANDS,
@@ -21,7 +23,7 @@ from quant_studio.desk import (
 )
 from quant_studio.flow import compile_document, flow_steps
 from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
-from quant_studio.runner import run, safe_run_file, template_readiness
+from quant_studio.runner import preflight, run, safe_run_file, template_readiness
 from quant_studio.templates import load_template, template_ids
 
 
@@ -60,6 +62,200 @@ def render_home() -> str:
     return _layout("模板库", body, "strategy")
 
 
+def render_overview(runs_root: Path) -> str:
+    records = list_runs(runs_root)
+    results = [r for r in records if r["has_nav"] == "1" or r["has_report"] == "1"]
+    datasets = scan_datasets()
+    templates = [load_template(key) for key in template_ids()]
+    ready = [(template, template_readiness(template)) for template in templates]
+    configured = sum(state.runnable for _, state in ready)
+    account_error = ""
+    try:
+        accounts = account_sources()
+    except QuantStudioError as exc:
+        accounts = []
+        account_error = f'<p class="banner">{escape(str(exc))}</p>'
+    cards = []
+    for label, value, description, href in (
+        (
+            "环境",
+            f"{configured}/{len(templates)}",
+            "模板环境就绪；数据另行核验",
+            "/environment",
+        ),
+        (
+            "本地数据",
+            str(len(datasets)),
+            "已发现的数据目录；文件时间不等于行情截止",
+            "/data",
+        ),
+        (
+            "研究记录",
+            str(len(records)),
+            "最近最多40条预览、运行及失败记录",
+            "/backtest",
+        ),
+        (
+            "前向账户",
+            str(len(accounts)),
+            "已配置入口；打开后只读核验保存证据",
+            "/accounts",
+        ),
+        ("结果与报告", str(len(results)), "最近记录中带净值或报告的结果", "/results"),
+    ):
+        cards.append(
+            f'<a class="overview-card" href="{href}"><span>{label}</span>'
+            f"<strong>{value}</strong><small>{description}</small></a>"
+        )
+    blockers = "".join(
+        f'<li><a href="/templates/{escape(template.id)}">{escape(template.title)}</a>'
+        f'：{escape(state.message)}。<a href="/environment">查看环境配置</a></li>'
+        for template, state in ready
+        if not state.runnable
+    )
+    account_links = "".join(
+        f'<a class="chip" href="/accounts/{escape(source.id)}">'
+        f"{escape(source.label)}</a>"
+        for source in accounts
+    )
+    body = f"""<header class="page-head"><p class="kicker">总览</p>
+<h1>研究工作台</h1>
+<p class="lede">从数据到研究结果，再查看已登记账户的前向观察。</p></header>
+<section class="overview-grid">{"".join(cards)}</section>
+{account_error}
+<section class="panel"><h2>开始一项研究</h2>
+<ol class="onboarding"><li><a href="/environment">检查运行环境</a>：
+确认每个应用使用的Python。</li>
+<li><a href="/data">查看本地数据</a>：核对输入来源，再进入模板。</li>
+<li><a href="/strategy">选择模板</a>：调整参数、检查配置，显式运行。</li>
+<li><a href="/results">查看结果</a>：核对净值、回撤、持仓和原始报告。</li></ol>
+<a class="chip" href="/templates/synthetic-demo">先用合成样例熟悉流程</a>
+<p class="note">合成样例仅验证软件。环境就绪不代表数据完整或策略有效。</p></section>
+<section class="panel"><h2>需要处理</h2>
+<ul>{blockers or "<li>环境检查通过；请继续核验数据和研究条件。</li>"}</ul></section>
+<section class="panel"><h2>最近研究</h2><table>
+<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+{_run_rows(records[:6], "/runs/") or '<tr><td colspan="4">还没有研究记录</td></tr>'}
+</table></section>
+<section class="panel"><h2>前向账户</h2>
+{account_links or '<p>尚未连接账户。<a href="/accounts">查看连接方法</a></p>'}
+<p class="note">这里只读取明确配置的账户，不登记、观察或封存账户。</p></section>"""
+    return _layout("总览", body, "overview")
+
+
+def render_accounts(account_id: str | None = None) -> str:
+    body = (
+        '<header class="page-head"><p class="kicker">账户</p>'
+        "<h1>前向观察账户</h1></header>"
+    )
+    try:
+        sources = account_sources()
+        if account_id is None:
+            rows = "".join(
+                f'<tr><td><a href="/accounts/{escape(source.id)}">'
+                f"{escape(source.label)}</a></td><td>{escape(str(source.path))}</td>"
+                "<td>打开后核验</td></tr>"
+                for source in sources
+            )
+            body += (
+                '<section class="panel"><p>打开账户时重新核验登记及已完成观测的产物。'
+                "未连接账户不会自动扫描或创建。</p><table>"
+                "<tr><th>账户</th><th>目录</th><th>状态</th></tr>"
+                + (rows or '<tr><td colspan="3">尚未配置账户</td></tr>')
+                + "</table></section>"
+                '<section class="panel"><h2>连接已有账户</h2>'
+                "<p>将QUANT_STUDIO_ACCOUNTS指向本地JSON配置。路径须为已有账户的绝对目录。</p>"
+                '<pre>{"schema_version":"quant-studio.accounts/v1", "accounts":['
+                '{"id":"etf-forward", "label":"ETF前向观察", '
+                '"path":"账户绝对目录"}]}</pre>'
+                "<p>核验使用QUANT_STUDIO_RUNTIMES中quant-pipeline对应的维护Python；"
+                "未指定时使用Studio的Python。该环境须支持paper inspect命令。</p>"
+                "<p>账户原执行环境保持冻结，核验不会改变其版本或登记。</p></section>"
+            )
+        else:
+            source = next((s for s in sources if s.id == account_id), None)
+            if source is None:
+                raise QuantStudioError("账户未配置；请从账户列表选择已连接的账户。")
+            result = inspect_source(source)
+            body += _account_view(source.label, result)
+    except (QuantStudioError, KeyError, TypeError, ValueError) as exc:
+        body += (
+            '<section class="panel"><h2>账户核验未完成</h2>'
+            f"<pre>{escape(str(exc))}</pre>"
+            '<a href="/accounts">返回账户配置</a></section>'
+        )
+    return _layout("账户", body, "accounts")
+
+
+def _account_view(label: str, result: dict) -> str:
+    states = {
+        "pending": "尚未到观察起点",
+        "awaiting_observation": "观察窗口内，尚无已完成观测",
+        "observing": "观察中",
+        "ended_unsealed": "观察窗口已结束，尚未封存",
+        "sealed": "已有封存评价",
+    }
+    window = result["window"]
+    latest = result.get("latest")
+    metrics = '<p class="banner">尚无已完成观测，收益与回撤不可用。</p>'
+    if latest is not None:
+        values = latest["metrics"]
+        cells = []
+        for key, title, percentage in (
+            ("total_return", "累计净收益", True),
+            ("max_drawdown", "最大回撤", True),
+            ("sessions", "交易日数", False),
+        ):
+            value = values.get(key)
+            shown = "不可用"
+            if isinstance(value, (int, float)) and math.isfinite(value):
+                shown = f"{value:.2%}" if percentage else str(value)
+            cells.append(
+                f'<div class="overview-card"><span>{title}</span>'
+                f"<strong>{shown}</strong></div>"
+            )
+        metrics = (
+            f"<h3>最近观测：{escape(latest['as_of'])}</h3>"
+            f'<div class="overview-grid">{"".join(cells)}</div>'
+            '<p class="note">日常指标用于运行检查，不是终期评价。</p>'
+            "<details><summary>原始指标与诊断</summary><pre>"
+            + escape(json.dumps(latest, ensure_ascii=False, indent=2))
+            + "</pre></details>"
+        )
+    attempts = "".join(
+        f"<tr><td>{escape(str(row.get('as_of') or '未记录'))}</td>"
+        f"<td>{escape(str(row['status']))}</td>"
+        f"<td>{escape(str(row.get('error') or '—'))}</td></tr>"
+        for row in result["attempts"]
+    )
+    evidence = {
+        key: result.get(key)
+        for key in (
+            "definition_sha256",
+            "created_at",
+            "source_scope",
+            "code_identity",
+            "evaluation",
+        )
+    }
+    return f"""<section class="panel"><h2>{escape(label)}</h2>
+<p class="badge ready">已核验保存的登记与观测产物</p>
+<p><b>{states[result["state"]]}</b> · {len(result["observations"])}次已完成观测</p>
+<p>账户：{escape(result["account_id"])} ·
+候选：{escape(str(result.get("candidate", "")))}</p>
+<p>登记窗口：{escape(window["start"])}至{escape(window["end"])}</p>
+<p class="note">核验时刻：{escape(str(result.get("checked_at", "")))}</p>
+{metrics}</section>
+<section class="panel"><h2>全部尝试</h2><table>
+<tr><th>观测日期</th><th>状态</th><th>失败或中断原因</th></tr>
+{attempts or '<tr><td colspan="3">没有运行尝试</td></tr>'}</table></section>
+<details class="panel"><summary>冻结身份与核验证据</summary>
+<pre>{escape(json.dumps(evidence, ensure_ascii=False, indent=2))}</pre>
+<p>核验环境：{escape(result["inspection_python"])}</p></details>
+<p class="note">此页不刷新输入或运行策略；
+一致性核验不替代真实数据、观察完整性或投资有效性评价。</p>"""
+
+
 def render_data() -> str:
     root = workspace_root()
     datasets = scan_datasets(root)
@@ -85,6 +281,18 @@ def render_data() -> str:
         f"<li><b>{escape(name)}</b><pre>{escape(command)}</pre></li>"
         for name, command in FETCH_COMMANDS
     )
+    checks = "".join(
+        f'<li><a href="/templates/{escape(key)}">'
+        f"{escape(load_template(key).title)}</a>："
+        + (
+            "可按所选参数运行上游数据预检"
+            if load_template(key).metadata.get("preflight_argv")
+            else "独立数据预检尚未接入；运行条件仍由上游校验"
+        )
+        + "</li>"
+        for key in template_ids()
+        if load_template(key).kind != "synthetic"
+    )
     root_text = str(root) if root else "未设置"
     body = f"""<header class="page-head">
 <p class="kicker">数据</p>
@@ -92,6 +300,9 @@ def render_data() -> str:
 <p class="lede">工作区：{escape(root_text)}</p>
 </header>
 <main class="card-grid">{"".join(cards)}</main>
+<section class="panel"><h2>数据与配置预检</h2><ul>{checks}</ul>
+<p class="note">进入模板设置参数后预检。
+文件存在、环境就绪与业务数据通过分别展示。</p></section>
 <section class="panel"><h2>拉取命令</h2>
 <ul class="commands">{commands}</ul>
 <p class="note"><a href="/environment">查看各模板是否可运行</a></p>
@@ -208,7 +419,7 @@ def render_template_page(
     return _layout(template.title, body, "strategy")
 
 
-def render_run(run_dir: str | Path) -> str:
+def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     directory = Path(run_dir)
     result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
@@ -271,6 +482,48 @@ def render_run(run_dir: str | Path) -> str:
         if _has_benchmark(nav_path):
             benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
     evidence_open = "" if result["status"] == "succeeded" else " open"
+    preflight_view = ""
+    if result["status"] == "checked":
+        checked = json.loads((directory / "preflight.json").read_text(encoding="utf-8"))
+        fields = [("_csrf_token", csrf_token), ("action", "execute")]
+        fields.extend(
+            (str(key), str(value)) for key, value in request.get("knobs", {}).items()
+        )
+        if request.get("snapshot"):
+            fields.append(("snapshot", request["snapshot"]))
+        if request.get("factors") is not None:
+            fields.append(("factor_form", "1"))
+            fields.extend(("factor", factor) for factor in request["factors"])
+        inputs = "".join(
+            f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
+            for key, value in fields
+        )
+        preflight_view = (
+            '<section class="panel"><h2>数据预检证据</h2>'
+            f"<p>标的数：{escape(str(checked.get('symbols', '未提供')))} · "
+            f"数据行数：{escape(str(checked.get('rows', '未提供')))}</p>"
+            "<p>公司行动证据："
+            + (
+                "上游声明完整"
+                if checked.get("corporate_actions_complete") is True
+                else "未确认完整"
+            )
+            + "；投资适用性："
+            + ("以上游证据为准" if checked.get("investable") is True else "尚未认证")
+            + "</p><details><summary>上游原始证据</summary><pre>"
+            + escape(json.dumps(checked, ensure_ascii=False, indent=2))
+            + "</pre></details>"
+            + f'<form method="post" action="/templates/{escape(template.id)}">'
+            + inputs
+            + '<button class="btn primary">使用相同参数运行</button></form>'
+            '<p class="note">运行时上游会重新校验数据；预检不锁定输入。</p></section>'
+        )
+    elif result["status"] in {"check_failed", "blocked"}:
+        preflight_view = (
+            '<section class="panel"><h2>下一步</h2>'
+            "<p>核对快照目录、源文件及对应环境；保留失败记录，修正输入后重新检查。</p>"
+            f'<a href="/templates/{escape(template.id)}">返回模板</a></section>'
+        )
     body = f"""<header class="page-head">
 <p class="kicker">结果</p>
 <h1>{escape(template.title)}</h1>
@@ -279,6 +532,7 @@ def render_run(run_dir: str | Path) -> str:
 {_request_summary(request)}</p>
 </header>
 {"".join(notices)}
+{preflight_view}
 {benchmark}
 {chart}
 {drawdown}
@@ -324,7 +578,7 @@ def render_environment() -> str:
 <p>可为不同研究仓指定独立Python环境。设置QUANT_STUDIO_RUNTIMES指向本地运行环境配置；
 环境配置只影响新运行，已保存的命令和结果保留原样。</p>
 </section>"""
-    return _layout("环境", body, "data")
+    return _layout("环境", body, "environment")
 
 
 def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) -> Path:
@@ -382,8 +636,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path in {"/", "/strategy"}:
+            if path == "/":
+                self._send_html(render_overview(self.runs_root))
+            elif path == "/strategy":
                 self._send_html(render_home())
+            elif path == "/accounts":
+                self._send_html(render_accounts())
+            elif path.startswith("/accounts/"):
+                self._send_html(render_accounts(path.removeprefix("/accounts/")))
             elif path == "/data":
                 self._send_html(render_data())
             elif path == "/backtest":
@@ -407,7 +667,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif path.startswith("/runs/"):
                 run_id = path.removeprefix("/runs/")
                 run_dir = safe_run_file(self.runs_root, run_id)
-                self._send_html(render_run(run_dir))
+                self._send_html(render_run(run_dir, csrf_token=self.csrf_token))
             else:
                 self.send_error(404)
         except (QuantStudioError, FileNotFoundError, KeyError, json.JSONDecodeError):
@@ -449,19 +709,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_text(compiled_from_form(template_id, data))
                 return
             action = data.pop("action", ["preview"])[0]
+            if action not in {"preview", "check", "execute"}:
+                raise QuantStudioError("未知模板操作")
             factor_form = data.pop("factor_form", [None])[0]
             chosen = data.pop("factor", None)
             snapshot = data.pop("snapshot", [None])[0] or None
             factors = list(chosen) if factor_form else None
             knobs = _parse_form_knobs(template_id, data)
-            result = run(
-                template_id,
-                knobs,
-                factors=factors,
-                execute=action == "execute",
-                runs_root=self.runs_root,
-                snapshot=snapshot,
-            )
+            options = dict(factors=factors, runs_root=self.runs_root, snapshot=snapshot)
+            if action == "check":
+                result = preflight(template_id, knobs, **options)
+            else:
+                result = run(template_id, knobs, execute=action == "execute", **options)
             self.send_response(303)
             self.send_header("Location", f"/runs/{result.run_id}")
             self.end_headers()
@@ -618,6 +877,8 @@ _CHOICES = {
 }
 
 _STATUS = {
+    "checked": "预检通过",
+    "check_failed": "预检未通过",
     "previewed": "仅预览",
     "succeeded": "已完成",
     "failed": "失败",
@@ -740,10 +1001,16 @@ def _run_step(template: object) -> str:
     ready = template_readiness(template)
     disabled = "" if ready.runnable or ready.needs_input else " disabled"
     hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
+    check = (
+        '<button class="btn" name="action" value="check">数据预检</button>'
+        if template.metadata.get("preflight_argv")
+        else ""
+    )
     return (
         f"{hint}"
         '<div class="actions">'
         '<button class="btn" name="action" value="preview">仅预览</button>'
+        f"{check}"
         '<button class="btn primary" name="action" value="execute"'
         f"{disabled}>运行</button>"
         "</div>"
@@ -851,10 +1118,13 @@ def _choice_label(name: str, choice: object) -> str:
 def _layout(title: str, body: str, active: str = "strategy") -> str:
     links = []
     for key, label, href in (
+        ("overview", "总览", "/"),
+        ("environment", "环境", "/environment"),
         ("data", "数据", "/data"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),
         ("results", "结果", "/results"),
+        ("accounts", "账户", "/accounts"),
     ):
         mark = " on" if key == active else ""
         links.append(f'<a class="nav{mark}" href="{href}">{label}</a>')
@@ -865,7 +1135,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
 <style>{_CSS}</style></head>
 <body><div class="shell">
 <aside class="side">
-<a class="brand" href="/strategy"><b>Quant Studio</b><span>本地研究台</span></a>
+<a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
 <nav>{"".join(links)}</nav>
 <p class="side-note">不下真实订单。曲线只来自合成样例，或上游已经交出的净值。</p>
 </aside>
@@ -890,6 +1160,17 @@ body {
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 .shell { display: flex; min-height: 100vh; }
+.overview-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px;
+}
+.overview-card {
+  display: flex; flex-direction: column; padding: 20px;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: white; color: var(--ink); text-decoration: none;
+}
+.overview-card strong { font-size: 32px; margin: 12px 0; }
+.overview-card small { color: var(--muted); line-height: 1.6; }
+.onboarding li { margin: 12px 0; }
 .side {
   width: 232px;
   flex: none;
