@@ -1,10 +1,10 @@
 {
   "id": "timing-research",
   "title": "指数与风格择时研究",
-  "summary": "读取已有配置，预检后运行原生研究，分别查看全样本曲线、滚动测试折和仓位发布状态。",
+  "summary": "读取已有配置，预检后运行原生研究，查看曲线、测试折、逐项收益贡献和仓位发布状态。",
   "kind": "external",
   "workspace_repo": "quant-timing",
-  "upstream_ref": "4773d8f1ef3dac9cf86f155d9fe28f112fc9d649",
+  "upstream_ref": "0357f83d10be769cae289f0496f3827eb90796ec",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,

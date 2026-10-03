@@ -10,6 +10,7 @@ from quant_studio import QuantStudioError
 from quant_studio.desk import html_table
 from quant_studio.nav import parse_nav_csv
 from quant_studio.runner import safe_run_file
+from quant_studio.timing_attribution_panel import attribution_panel
 
 
 def load_timing_view(directory, result):
@@ -113,6 +114,7 @@ def timing_panel(directory, view):
         + table
         + f'<p><a href="/runs/{escape(directory.name)}/files/'
         'strategy-output/studio-view/folds.csv" download>下载完整滚动测试折CSV</a></p>'
+        + attribution_panel(directory.name, view)
         + '<details class="panel"><summary>本次实际研究配置</summary><pre>'
         + escape(json.dumps(view["effective_config"], ensure_ascii=False, indent=2))
         + "</pre></details>"
