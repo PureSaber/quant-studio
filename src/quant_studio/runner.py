@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -118,6 +119,7 @@ class RunResult:
     returncode: int | None = None
     message: str | None = None
     evidence_kind: str | None = None
+    research_view_sha256: str | None = None
 
     def as_json(self) -> dict[str, Any]:
         data = asdict(self)
@@ -282,7 +284,26 @@ def run(
     succeeded = returncode == 0
     message = None
     evidence_kind = None
+    research_view_sha256 = None
     report_name = loaded.report_name
+    if loaded.metadata.get("timing_view") and returncode in {0, 1, 2}:
+        manifest = safe_run_file(run_dir, "strategy-output/standard/run_manifest.json")
+        if manifest.is_file():
+            try:
+                _project_standard_output(loaded, run_dir, argv, cwd, timeout)
+                view_path = safe_run_file(
+                    run_dir, "strategy-output/studio-view/view.json"
+                )
+                view = json.loads(view_path.read_text(encoding="utf-8"))
+                if view["native_exit_code"] != returncode:
+                    raise QuantStudioError("原生退出状态与研究证据不一致")
+                evidence_kind = _evidence_kind(loaded, view)
+                research_view_sha256 = hashlib.sha256(
+                    view_path.read_bytes()
+                ).hexdigest()
+            except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
+                succeeded = False
+                message = f"无法核验本次择时研究: {exc}"
     if succeeded:
         try:
             if loaded.metadata.get("standard_view"):
@@ -326,6 +347,7 @@ def run(
         returncode,
         message,
         evidence_kind,
+        research_view_sha256,
     )
     _write_json(run_dir / "result.json", result.as_json())
     return result
@@ -443,7 +465,8 @@ def _validate_preflight(template: Template, evidence: object) -> None:
 
 
 def _project_standard_output(template, run_dir, argv, cwd, timeout):
-    declaration = template.metadata["standard_view"]
+    timing = bool(template.metadata.get("timing_view"))
+    declaration = template.metadata["timing_view" if timing else "standard_view"]
     native = safe_run_file(run_dir, "strategy-output/" + declaration["run"])
     if template.argv[:2] != ["python", "-m"]:
         raise QuantStudioError("标准账本模板必须通过明确Python模块入口运行")
@@ -458,7 +481,9 @@ def _project_standard_output(template, run_dir, argv, cwd, timeout):
     command = [
         python,
         "-I",
-        str(Path(__file__).with_name("standard_view.py")),
+        str(
+            Path(__file__).with_name("timing_view.py" if timing else "standard_view.py")
+        ),
         "--run",
         str(native),
         "--output",

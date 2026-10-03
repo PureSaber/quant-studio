@@ -23,6 +23,7 @@ from quant_studio.desk import (
 )
 from quant_studio.flow import compile_document, flow_steps
 from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
+from quant_studio.research_panel import load_timing_view, timing_panel
 from quant_studio.runner import preflight, run, safe_run_file, template_readiness
 from quant_studio.templates import load_template, template_ids
 
@@ -424,6 +425,11 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     template = load_template(request["template_id"])
+    timing_view = (
+        load_timing_view(directory, result)
+        if template.metadata.get("timing_view")
+        else None
+    )
     argv = " ".join(escape(str(item)) for item in result["argv"])
     report_html = ""
     if result.get("report"):
@@ -445,7 +451,9 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     chart = ""
     nav_path = directory / "nav.csv"
     series = None
-    if nav_path.is_file():
+    if nav_path.is_file() and not (
+        template.metadata.get("timing_view") and result["status"] != "succeeded"
+    ):
         opening_key = template.metadata.get("nav_initial_value_key")
         opening = template.metadata.get("nav_initial_value")
         if opening_key:
@@ -463,6 +471,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 series,
                 currency=template.metadata.get("nav_currency"),
                 return_decimals=template.metadata.get("return_decimals", 2),
+                title="策略净值 · 描述性全区间" if timing_view else "净值曲线",
             )
     notices = []
     if template.metadata.get("result_notice"):
@@ -507,6 +516,8 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         table_titles=template.metadata.get("result_table_titles"),
         column_labels=template.metadata.get("result_column_labels"),
     )
+    if template.metadata.get("timing_view") and result["status"] != "succeeded":
+        tables = ""
     benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
     drawdown = ""
     if series is not None:
@@ -525,6 +536,13 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 f"最大回撤{baseline.max_drawdown * 100:.2f}%。"
                 "完整比较见下方原始报告。</p>"
             )
+            if timing_view:
+                benchmark = (
+                    '<p class="note">基准与策略使用相同日期和期初净值1，'
+                    "不作为独立样本外结论。</p>"
+                    + chart_fragment(baseline, title="基准净值 · 描述性全区间")
+                )
+    curves = chart + benchmark if timing_view else benchmark + chart
     evidence_open = "" if result["status"] == "succeeded" else " open"
     preflight_view = ""
     if result["status"] == "checked":
@@ -599,8 +617,8 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
 </header>
 {"".join(notices)}
 {preflight_view}
-{benchmark}
-{chart}
+{timing_panel(directory, timing_view)}
+{curves}
 {drawdown}
 {tables}
 {report_html}
@@ -1376,7 +1394,7 @@ td, th {
   border-radius: 16px;
   background: white;
 }
-.stats { display: flex; gap: 12px; margin: 12px 0 4px; }
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0 4px; }
 .stat {
   min-width: 140px;
   padding: 12px 14px;
