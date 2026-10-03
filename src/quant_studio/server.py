@@ -510,11 +510,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         notices.append(
             '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
         )
+    table_labels = dict(template.metadata.get("result_column_labels") or {})
+    if timing_view and timing_view.get("return_attribution"):
+        table_labels.update(slippage="模型基础成本", market_impact="模型冲击成本")
     tables = _artifact_tables(
         directory,
         native=bool(template.metadata.get("standard_view")),
         table_titles=template.metadata.get("result_table_titles"),
-        column_labels=template.metadata.get("result_column_labels"),
+        column_labels=table_labels,
     )
     if template.metadata.get("timing_view") and result["status"] != "succeeded":
         tables = ""
@@ -679,6 +682,11 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
         raise QuantStudioError("仅允许读取上游结果包内的 JSON 证据")
     if not path.is_file():
         raise QuantStudioError(f"运行文件不存在: {relative_path}")
+    result_path = safe_run_file(run_dir, "result.json")
+    if result_path.is_file():
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if result.get("research_view_sha256"):
+            load_timing_view(run_dir, result)
     return path
 
 

@@ -45,6 +45,11 @@ def export_view(run: Path, output: Path, project: str) -> dict:
         run / "run_context.json",
         run / "decision.json",
     ]
+    declared_metrics = json.loads(
+        (standard / "metrics.json").read_text(encoding="utf-8")
+    )
+    if "return_attribution" in declared_metrics:
+        paths.append(run / "attribution/daily.csv")
     for path in paths:
         if not path.resolve().is_relative_to(run):
             raise ValueError("Timing evidence escaped the native run")
@@ -140,6 +145,7 @@ def export_view(run: Path, output: Path, project: str) -> dict:
         "effective_config_sha256": manifest.config_sha256,
         "verified_artifacts": len(manifest.artifacts),
         "source_files": identities,
+        "return_attribution": metrics.get("return_attribution"),
     }
     output.mkdir()
     (output / "folds.csv").write_bytes(
@@ -155,6 +161,10 @@ def export_view(run: Path, output: Path, project: str) -> dict:
         for name in ("positions", "orders", "costs"):
             (output / f"{name}.csv").write_bytes(
                 (standard / f"{name}.csv").read_bytes()
+            )
+        if evidence["return_attribution"] is not None:
+            (output / "attribution_daily.csv").write_bytes(
+                (run / "attribution/daily.csv").read_bytes()
             )
     evidence["view_files"] = {path.name: digest(path) for path in output.iterdir()}
     (output / "view.json").write_text(

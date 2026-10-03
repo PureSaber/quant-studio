@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-timing
-          ref: 4773d8f1ef3dac9cf86f155d9fe28f112fc9d649
+          ref: 0357f83d10be769cae289f0496f3827eb90796ec
           path: quant-timing
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97

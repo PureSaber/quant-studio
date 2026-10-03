@@ -15,7 +15,7 @@ from quant_studio import QuantStudioError
 from quant_studio.nav import parse_nav_csv
 from quant_studio.runner import preflight, run
 from quant_studio.runtime import configured_python
-from quant_studio.server import render_run
+from quant_studio.server import render_run, resolve_run_asset
 
 
 def fingerprints(root):
@@ -101,7 +101,25 @@ def test_timing_native_preflight_run_publication_and_tamper(
     if case == "blocked":
         assert "仓位发布被阻断" in page
         assert not (result.run_dir / "nav.csv").exists()
+        assert "本次研究未通过发布门禁，不展示收益归因" in page
+        assert not (output / "studio-view/attribution_daily.csv").exists()
     else:
+        assert "收益来源与成本分解" in page
+        assert "模型基础成本" in page and "模型冲击成本" in page
+        assert "每折归因期初为1" in page and "不是真实成交滑点" in page
+        attribution = view["return_attribution"]
+        assert attribution == metrics["return_attribution"]
+        assert len(attribution["periods"]) == view["fold_count"] + 1
+        for period in attribution["periods"]:
+            assert sum(
+                row["strategy"] for row in period["components"]
+            ) == pytest.approx(period["net_return"], abs=1e-10)
+        download = resolve_run_asset(
+            result.run_dir.parent,
+            result.run_dir.name,
+            "strategy-output/studio-view/attribution_daily.csv",
+        )
+        assert download.read_bytes() == (output / "attribution/daily.csv").read_bytes()
         assert page.index("策略净值 · 描述性全区间") < page.index(
             "基准净值 · 描述性全区间"
         )
@@ -136,6 +154,8 @@ def test_timing_native_preflight_run_publication_and_tamper(
             "strategy-output/validation/fold_metrics.csv",
             "strategy-output/studio-view/folds.csv",
             "strategy-output/studio-view/view.json",
+            "strategy-output/attribution/daily.csv",
+            "strategy-output/studio-view/attribution_daily.csv",
         ):
             target = result.run_dir / relative
             original = target.read_bytes()
@@ -146,6 +166,12 @@ def test_timing_native_preflight_run_publication_and_tamper(
             )
             with pytest.raises(QuantStudioError):
                 render_run(result.run_dir)
+            with pytest.raises(QuantStudioError):
+                resolve_run_asset(
+                    result.run_dir.parent,
+                    result.run_dir.name,
+                    "strategy-output/studio-view/attribution_daily.csv",
+                )
             target.write_bytes(original)
         missing = output / "validation/fold_metrics.csv"
         saved = missing.read_bytes()
