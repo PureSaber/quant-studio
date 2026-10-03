@@ -13,6 +13,8 @@ from quant_studio.runner import safe_run_file
 DATA_ROOTS = (
     ("A股", "a-share-multifactor", "data"),
     ("港股", "quant-hk-equity", "data"),
+    ("美股", "quant-us-equity", "data"),
+    ("基金", "quant-fund", "data"),
     ("共享行情", "quant-data-kit", "data"),
 )
 

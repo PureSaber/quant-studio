@@ -1,0 +1,31 @@
+{
+  "id": "us-equity-research",
+  "title": "美股与ETF研究",
+  "summary": "使用已有美元行情数据包，运行训练期选择与连续样本外账户，并与明确基准比较。",
+  "kind": "external",
+  "workspace_repo": "quant-us-equity",
+  "upstream_ref": "416c52fdfc6fa7278444dca3905b383f01301077",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {"label": "美股数据包目录", "environment": "QUANT_US_BUNDLE", "required_files": ["manifest.json"]},
+  "data_help": "选择已有bundle，并填写包内真实基准ID。历史股票池需要成员证据，质量模型需要SEC事实。当前固定队列不能冒充历史全市场。",
+  "knobs": [
+    {"name": "mode", "label": "研究模型", "type": "enum", "choices": ["etf", "equity", "quality", "quality_ttm"], "choice_labels": {"etf": "ETF趋势", "equity": "股票多因子", "quality": "年度盈利质量", "quality_ttm": "TTM盈利质量"}, "default": "etf", "path": "mode"},
+    {"name": "universe_mode", "label": "股票池口径", "type": "enum", "choices": ["fixed_cohort", "historical", "lifecycle"], "choice_labels": {"fixed_cohort": "用户指定固定队列", "historical": "有历史成员证据", "lifecycle": "有生命周期证据"}, "default": "fixed_cohort", "path": "universe_mode"},
+    {"name": "benchmark", "label": "包内基准证券ID", "type": "text", "max_length": 128, "pattern": "US:[A-Za-z0-9:._-]+", "default": "US:YAHOO:SPY", "path": "benchmark"},
+    {"name": "initial_cash", "label": "初始资金（美元）", "type": "number", "minimum": 1000, "maximum": 1000000000, "default": 100000, "path": "initial_cash"},
+    {"name": "train_sessions", "label": "训练交易日数", "type": "int", "minimum": 20, "maximum": 1260, "default": 126, "path": "train_sessions"},
+    {"name": "test_sessions", "label": "每折测试交易日数", "type": "int", "minimum": 1, "maximum": 252, "default": 63, "path": "test_sessions"},
+    {"name": "rebalance_sessions", "label": "调仓间隔（交易日）", "type": "int", "minimum": 1, "maximum": 252, "default": 21, "path": "rebalance_sessions"}
+  ],
+  "argv": ["python", "-m", "quant_us_equity.cli", "run", "--bundle", "{snapshot}", "--config", "{config}", "--output", "{output}"],
+  "preflight_argv": ["python", "-m", "quant_us_equity.cli", "preflight", "--bundle", "{snapshot}", "--config", "{config}"],
+  "preflight_summary": "只读校验bundle哈希、数据结构、基准、静态策略参数和研究窗口；不计算因子、不选参数、不执行账户回放。",
+  "output_dirs": ["{output}"],
+  "result_files": {"nav.csv": "nav.csv", "report.html": "report.html", "positions.csv": "positions.csv", "fills.csv": "fills.csv"},
+  "nav_initial_value_key": "initial_cash",
+  "result_evidence": {"file": "study.json", "field": "evidence_kind", "values": ["synthetic", "retrospective", "historical_pit"]},
+  "report_name": "report.html",
+  "disclaimer": "离线研究，不发送真实订单。固定队列、合成数据和历史PIT的边界在原始报告及结果页中保留。"
+}

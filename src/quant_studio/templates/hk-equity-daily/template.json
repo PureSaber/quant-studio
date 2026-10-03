@@ -15,6 +15,7 @@
   "preflight_argv": ["quant-hk", "preflight", "--config", "{config}", "--snapshot", "{snapshot}"],
   "output_dirs": ["{output}"],
   "requires_snapshot": true,
+  "input_source": {"label": "港股快照目录", "environment": "QUANT_HK_SNAPSHOT", "default": "data/hk-snapshot", "required_files": ["manifest.json"]},
   "nav_initial_value_key": "initial_cash",
   "result_files": {"nav.csv": "holdout/standard/returns.csv", "report.html": "report.html", "positions.csv": "holdout/standard/positions.csv", "orders.csv": "holdout/standard/orders.csv"},
   "presets": [

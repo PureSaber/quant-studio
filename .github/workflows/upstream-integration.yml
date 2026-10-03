@@ -19,6 +19,7 @@ jobs:
           - {repo: quant-hk-equity, ref: 37a9314e63038b8a89afcbbec2f5936953c0c62b, test: hk}
           - {repo: a-share-multifactor, ref: e54eb73bc4f8369759edf38a15a4b0dfa82f6895, test: ashare}
           - {repo: quant-pipeline, ref: b1fce90b85651248e9e60ae857b88fe4d170319e, test: account}
+          - {repo: quant-fund, ref: 16ab6bc0bec11feb1206615b3f53588360b12baa, test: fund}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -51,4 +52,4 @@ jobs:
       - name: Exercise actual upstream output and CLI contracts
         env:
           QUANT_UPSTREAM_REPO: ${{ github.workspace }}/${{ matrix.upstream.repo }}
-        run: python -m pytest quant-studio/integration/test_upstream.py -k ${{ matrix.upstream.test }} -q
+        run: python -m pytest quant-studio/integration -k ${{ matrix.upstream.test }} -q

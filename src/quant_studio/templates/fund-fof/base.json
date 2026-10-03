@@ -1,0 +1,12 @@
+{
+  "start": "2024-01-02",
+  "end": "2026-08-31",
+  "strategy": "equal",
+  "initial_cash": 1000000,
+  "frequency": "ME",
+  "lookback": 24,
+  "min_periods": 12,
+  "max_weight": 0.4,
+  "cash_buffer": 0.05,
+  "min_trade": 1000
+}

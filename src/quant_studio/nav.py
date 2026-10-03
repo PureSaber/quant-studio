@@ -10,7 +10,7 @@ from pathlib import Path
 
 from quant_studio import QuantStudioError
 
-DATE_COLUMNS = ("date", "trade_date", "datetime", "dt")
+DATE_COLUMNS = ("date", "trade_date", "datetime", "dt", "session")
 VALUE_COLUMNS = ("nav", "equity", "capital", "net_value", "value")
 TABLE_FILES = {
     "positions.csv",
