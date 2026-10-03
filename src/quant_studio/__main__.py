@@ -6,7 +6,7 @@ import sys
 from collections.abc import Sequence
 
 from quant_studio import QuantStudioError
-from quant_studio.runner import run
+from quant_studio.runner import preflight, run
 from quant_studio.server import serve
 from quant_studio.templates import load_template
 
@@ -16,9 +16,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "serve":
-            serve(args.host, args.port)
+            serve(args.host, args.port, runs_root=args.runs_root)
             return 0
         knobs = _parse_sets(args.template_id, args.settings)
+        if args.command == "check":
+            result = preflight(args.template_id, knobs, snapshot=args.snapshot)
+            print(json.dumps(result.as_json(), ensure_ascii=False, indent=2))
+            return 0 if result.status == "checked" else 2
         execute = args.command == "run" and args.execute
         result = run(args.template_id, knobs, execute=execute, snapshot=args.snapshot)
         print(json.dumps(result.as_json(), ensure_ascii=False, indent=2))
@@ -34,7 +38,8 @@ def _parser() -> argparse.ArgumentParser:
     serve_parser = commands.add_parser("serve", help="启动本机页面")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8770)
-    for name in ("preview", "run"):
+    serve_parser.add_argument("--runs-root", help="研究记录目录；可放在源码仓库外")
+    for name in ("preview", "check", "run"):
         command = commands.add_parser(name)
         command.add_argument("template_id")
         command.add_argument("--set", dest="settings", action="append", default=[])

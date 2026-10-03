@@ -1,10 +1,12 @@
 """Run against pinned real upstream packages; no broker or network market-data calls."""
 
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import threading
+from datetime import UTC
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -14,7 +16,7 @@ from urllib.request import urlopen
 import pytest
 
 from quant_studio.nav import collect_outputs, parse_nav_csv
-from quant_studio.runner import run
+from quant_studio.runner import preflight, run
 from quant_studio.server import _Handler, render_run
 from quant_studio.templates import Template, load_template
 
@@ -57,6 +59,29 @@ def test_hk_cli(tmp_path, monkeypatch, first_close_ratio):
     snapshot = fixture.snapshot(tmp_path, case)
     original = load_template("hk-equity-daily")
     template = Template(original.metadata, case[0], original.directory)
+    before = {
+        str(path): (
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            path.stat().st_mtime_ns,
+        )
+        for path in snapshot.rglob("*")
+        if path.is_file()
+    }
+    checked = preflight(template, snapshot=snapshot, runs_root=tmp_path / "checks")
+    assert checked.status == "checked", diagnostics(checked)
+    assert not (checked.run_dir / "strategy-output").exists()
+    assert (
+        json.loads((checked.run_dir / "preflight.json").read_text())["investable"]
+        is False
+    )
+    assert before == {
+        str(path): (
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            path.stat().st_mtime_ns,
+        )
+        for path in snapshot.rglob("*")
+        if path.is_file()
+    }
     result = run(
         template,
         execute=True,
@@ -147,3 +172,45 @@ def test_ashare_real_output_contract(tmp_path):
     assert parse_nav_csv(tmp_path / "nav.csv").label == "Q5"
     assert report == "strategy-output/latest/report.html"
     assert (tmp_path / report).is_file()
+
+
+def test_account_read_only_cli(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from quant_lab.trials import TrialRegistry
+    from quant_pipeline.research_paper import publish_account
+
+    from quant_studio.accounts import AccountSource, inspect_source
+
+    root = tmp_path / "frozen account"
+    now = datetime.now(UTC)
+    registry = TrialRegistry(root / "account.db")
+    registry.register(
+        "frozen",
+        {
+            "hypothesis": "synthetic integration only",
+            "parameters": [{"name": "base"}],
+            "code_identity": {"fixture": "frozen"},
+            "selection_rule": "fixed",
+            "holdout_start": (now.date() + timedelta(days=2)).isoformat(),
+            "holdout_end": (now.date() + timedelta(days=20)).isoformat(),
+            "source_scope": "synthetic-software-validation",
+        },
+        now=now,
+    )
+    publish_account(root, "frozen", registry.definition("frozen"))
+    monkeypatch.delenv("QUANT_STUDIO_RUNTIMES", raising=False)
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir()}
+    result = inspect_source(AccountSource("one", "已冻结账户", root))
+    assert result["state"] == "pending" and result["latest"] is None
+    assert result["read_only"] is True
+    assert before == {
+        p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir()
+    }
+    # Inspect never reconstructs an absent authoritative database.
+    (root / "account.db").unlink()
+    from quant_studio import QuantStudioError
+
+    with pytest.raises(QuantStudioError, match="核验失败"):
+        inspect_source(AccountSource("one", "已冻结账户", root))
+    assert not (root / "account.db").exists()

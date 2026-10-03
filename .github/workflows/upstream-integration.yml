@@ -18,6 +18,7 @@ jobs:
           - {repo: quant-paper-sim, ref: 1a022b50a3ff1eecae545c17d17a4a2fd47b63c9, test: paper}
           - {repo: quant-hk-equity, ref: 37a9314e63038b8a89afcbbec2f5936953c0c62b, test: hk}
           - {repo: a-share-multifactor, ref: 042e73704fc9702f8769c05a453e9149c448a1f0, test: ashare}
+          - {repo: quant-pipeline, ref: b1fce90b85651248e9e60ae857b88fe4d170319e, test: account}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
