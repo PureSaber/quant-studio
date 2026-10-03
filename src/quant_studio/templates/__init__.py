@@ -4,6 +4,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from importlib.resources import files
 from typing import Any
 
@@ -127,6 +128,20 @@ def _validate_knob(name: str, value: Any, knob: dict[str, Any]) -> None:
             and re.fullmatch(r"[0-9]+", value) is not None
             and knob["minimum_length"] <= len(value) <= knob["maximum_length"]
         )
+    elif kind == "text":
+        valid = (
+            isinstance(value, str)
+            and len(value) <= knob["max_length"]
+            and re.fullmatch(knob["pattern"], value) is not None
+        )
+    elif kind == "date":
+        try:
+            valid = (
+                isinstance(value, str)
+                and date.fromisoformat(value).isoformat() == value
+            )
+        except ValueError:
+            valid = False
     else:
         valid = False
     if not valid:

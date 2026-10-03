@@ -43,7 +43,10 @@ def _parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("template_id")
         command.add_argument("--set", dest="settings", action="append", default=[])
-        command.add_argument("--snapshot", help="已有港股快照目录")
+        command.add_argument(
+            "--snapshot",
+            help="模板所需的已有数据目录；港股快照、基金数据集或美股bundle",
+        )
         if name == "run":
             command.add_argument("--execute", action="store_true")
     return parser

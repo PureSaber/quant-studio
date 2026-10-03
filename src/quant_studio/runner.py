@@ -82,9 +82,16 @@ def template_readiness(
             )
     if template.metadata.get("requires_snapshot"):
         selected = _snapshot_path(template, snapshot)
-        if selected is None or not (selected / "manifest.json").is_file():
+        source = template.metadata["input_source"]
+        if selected is None or any(
+            not (selected / name).is_file() for name in source["required_files"]
+        ):
             return Readiness(
-                False, "请选择已有港股快照（需包含 manifest.json）", True, executable
+                False,
+                f"请选择已有{source['label']}"
+                f"（需包含{', '.join(source['required_files'])}）",
+                True,
+                executable,
             )
     return Readiness(True, "可运行", executable=executable)
 
@@ -98,6 +105,7 @@ class RunResult:
     report: str | None = None
     returncode: int | None = None
     message: str | None = None
+    evidence_kind: str | None = None
 
     def as_json(self) -> dict[str, Any]:
         data = asdict(self)
@@ -261,6 +269,7 @@ def run(
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     succeeded = returncode == 0
     message = None
+    evidence_kind = None
     report_name = loaded.report_name
     if succeeded:
         try:
@@ -272,10 +281,22 @@ def run(
                 result_files=loaded.metadata.get("result_files"),
                 nav_column=loaded.metadata.get("nav_column"),
                 nav_strategy=loaded.metadata.get("nav_strategy"),
-                initial_nav=rendered.config[opening_key] if opening_key else None,
+                initial_nav=(
+                    rendered.config[opening_key]
+                    if opening_key
+                    else loaded.metadata.get("nav_initial_value")
+                ),
             )
             report_name = collected_report or report_name
-        except (OSError, ValueError, QuantStudioError) as exc:
+            evidence = loaded.metadata.get("result_evidence")
+            if evidence:
+                path = safe_run_file(
+                    run_dir, "strategy-output/" + evidence["file"], {".json"}
+                )
+                evidence_kind = _evidence_kind(
+                    loaded, json.loads(path.read_text(encoding="utf-8"))
+                )
+        except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
             succeeded = False
             message = f"无法收集本次运行结果: {exc}"
     report = run_dir / report_name
@@ -290,6 +311,7 @@ def run(
         report_name if succeeded and report.is_file() else None,
         returncode,
         message,
+        evidence_kind,
     )
     _write_json(run_dir / "result.json", result.as_json())
     return result
@@ -359,6 +381,7 @@ def preflight(
             ):
                 raise QuantStudioError("上游未返回通过的数据预检证据")
             _write_json(prepared.run_dir / "preflight.json", evidence)
+            result.evidence_kind = _evidence_kind(loaded, evidence)
             result.status = "checked"
             result.message = (
                 "数据与配置预检通过；没有执行策略。投资适用性以原始证据为准。"
@@ -380,6 +403,18 @@ def preflight(
             result.message = f"数据预检未通过：{exc}"
     _write_json(prepared.run_dir / "result.json", result.as_json())
     return result
+
+
+def _evidence_kind(template: Template, record: dict) -> str | None:
+    declaration = template.metadata.get("result_evidence")
+    if not declaration:
+        return None
+    if not isinstance(record, dict):
+        raise QuantStudioError("上游结果的数据性质声明须为JSON对象")
+    value = record.get(declaration["field"])
+    if value not in declaration["values"]:
+        raise QuantStudioError("上游结果的数据性质声明无效")
+    return value
 
 
 def safe_run_file(
@@ -468,14 +503,15 @@ def _isolate_outputs(template: Template, config: dict[str, Any], run_dir: Path) 
 def _snapshot_path(template: Template, snapshot: str | Path | None) -> Path | None:
     if not template.metadata.get("requires_snapshot"):
         if snapshot:
-            raise QuantStudioError("该模板不使用港股快照")
+            raise QuantStudioError("该模板不接受外部数据目录")
         return None
-    chosen = snapshot or os.environ.get("QUANT_HK_SNAPSHOT")
+    source = template.metadata["input_source"]
+    chosen = snapshot or os.environ.get(source["environment"])
     if chosen:
         return Path(chosen).expanduser().resolve()
     root = os.environ.get("QUANT_WORKSPACE_ROOT")
-    if root:
-        return (Path(root) / template.workspace_repo / "data" / "hk-snapshot").resolve()
+    if root and source.get("default"):
+        return (Path(root) / template.workspace_repo / source["default"]).resolve()
     return None
 
 

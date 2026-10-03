@@ -1,0 +1,15 @@
+{
+  "mode": "etf",
+  "universe_mode": "fixed_cohort",
+  "initial_cash": 100000,
+  "benchmark": "US:YAHOO:SPY",
+  "train_sessions": 126,
+  "test_sessions": 63,
+  "rebalance_sessions": 21,
+  "top_n": 3,
+  "max_weight": 0.5,
+  "target_vol": 0.15,
+  "commission_bps": 1,
+  "slippage_bps": 2,
+  "candidates": [{"momentum_days": 20}, {"momentum_days": 60}]
+}

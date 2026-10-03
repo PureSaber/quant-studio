@@ -13,6 +13,8 @@ from quant_studio.runner import safe_run_file
 DATA_ROOTS = (
     ("A股", "a-share-multifactor", "data"),
     ("港股", "quant-hk-equity", "data"),
+    ("美股", "quant-us-equity", "data"),
+    ("基金", "quant-fund", "data"),
     ("共享行情", "quant-data-kit", "data"),
 )
 
@@ -146,5 +148,6 @@ def html_table(path: Path, title: str, limit: int = 12) -> str:
         body.append(f"<tr>{cells}</tr>")
     return (
         f'<section class="panel"><h2>{escape(title)}</h2>'
-        f"<table><tr>{head}</tr>{''.join(body)}</table></section>"
+        '<div class="table-scroll" tabindex="0">'
+        f"<table><tr>{head}</tr>{''.join(body)}</table></div></section>"
     )

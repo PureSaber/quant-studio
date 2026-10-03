@@ -1,0 +1,30 @@
+{
+  "id": "fund-fof",
+  "title": "基金与FOF研究",
+  "summary": "使用已有净值、条款和日历，检查输入后运行申赎账本与组合监控。",
+  "kind": "external",
+  "workspace_repo": "quant-fund",
+  "upstream_ref": "c7be45bdce66aee49762430ba93d2fc361e3c4b5",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {"label": "基金数据集目录", "environment": "QUANT_FUND_DATASET", "required_files": ["dataset.json", "funds.json", "nav.csv", "calendar.csv", "distributions.csv"]},
+  "data_help": "需要净值获知日期、基金条款和日历来源。真实业务数据另需分用途日历；不会用合成数据补齐缺失资料。",
+  "knobs": [
+    {"name": "strategy", "label": "配置方法", "type": "enum", "choices": ["equal", "balanced", "optimal_risk", "skfolio_risk", "hrp"], "choice_labels": {"equal": "等权基线", "balanced": "股债60/40基线", "optimal_risk": "风险预算", "skfolio_risk": "风险平价", "hrp": "层次风险平价"}, "default": "equal", "path": "strategy"},
+    {"name": "start", "label": "开始日期", "type": "date", "default": "2024-01-02", "path": "start"},
+    {"name": "end", "label": "结束日期", "type": "date", "default": "2026-08-31", "path": "end"},
+    {"name": "initial_cash", "label": "初始资金（人民币）", "type": "number", "minimum": 10000, "maximum": 1000000000, "default": 1000000, "path": "initial_cash"},
+    {"name": "max_weight", "label": "单基金权重上限", "type": "number", "minimum": 0.01, "maximum": 1, "default": 0.4, "path": "max_weight"},
+    {"name": "cash_buffer", "label": "现金缓冲比例", "type": "number", "minimum": 0, "maximum": 0.95, "default": 0.05, "path": "cash_buffer"}
+  ],
+  "argv": ["python", "-m", "quant_fund.cli", "run", "--dataset", "{snapshot}", "--config", "{config}", "--out", "{output}"],
+  "preflight_argv": ["python", "-m", "quant_fund.cli", "preflight", "--dataset", "{snapshot}", "--config", "{config}"],
+  "preflight_summary": "只读校验数据、条款、日历和静态账户前置条件；不配置权重、不回放申赎，不保证各日共同历史或优化可行性。",
+  "output_dirs": ["{output}"],
+  "result_files": {"nav.csv": "nav.csv", "report.html": "report.html", "orders.csv": "orders.csv", "trades.csv": "trades.csv", "holdings.csv": "holdings.csv"},
+  "nav_initial_value": 1,
+  "result_evidence": {"file": "manifest.json", "field": "classification", "values": ["synthetic", "public_source", "user_provided"]},
+  "report_name": "report.html",
+  "disclaimer": "离线研究；数据性质在结果页保留。合成输入只验证软件，真实基金业务仍需逐笔验收。"
+}

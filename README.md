@@ -1,6 +1,6 @@
 # quant-studio
 
-quant-studio 是只在本机回环地址运行的量化研究模板台。它让用户修改少量已声明参数，先检查生成的配置与参数列表，再选择是否运行上游工具。它不实现因子、撮合、账本或通用绘图，也不会安装三个外部研究仓库。
+quant-studio 是只在本机回环地址运行的量化研究模板台。它让用户修改少量已声明参数，先检查生成的配置与参数列表，再选择是否运行上游工具。它不实现因子、撮合、账本或通用绘图，也不会自动安装外部研究仓库。
 
 外部模板只会在设置 `QUANT_WORKSPACE_ROOT` 且对应上游仓库目录存在时执行。合成样例使用仓库内固定收益率，仅用于验证操作流程；合成样例不是市场收益。所有内容均为研究用途，不构成投资建议。
 
@@ -48,6 +48,35 @@ A股只读加载缓存、检查历史时点、因子可计算性及全收益基�
 ```powershell
 python -m quant_studio check hk-equity-daily --snapshot H:/Quant/hk-snapshot
 ```
+
+## 基金与美股模板
+
+现有六个模板包括合成演示、A股、港股、模拟盘、基金/FOF与美股/ETF。
+五个外部模板均调用上游原生只读预检，保持各自的数据与账户规则。
+
+|模板|已有输入|可修改参数|净值口径|
+|---|---|---|---|
+|`fund-fof`|基金数据集；网页路径或`QUANT_FUND_DATASET`|配置方法、起止日期、人民币资金、权重上限和现金缓冲|期初为1的单位净值|
+|`us-equity-research`|美股bundle；网页路径或`QUANT_US_BUNDLE`|模型、股票池口径、基准ID、美元资金、训练/测试和调仓日数|以初始美元资金为基准的账户金额|
+
+```powershell
+python -m quant_studio check fund-fof --snapshot H:/Quant/fund-dataset
+python -m quant_studio check us-equity-research --snapshot H:/Quant/us-bundle --set benchmark=US:YAHOO:SPY
+```
+
+基金需要`dataset.json`、`funds.json`、`nav.csv`、`calendar.csv`与`distributions.csv`；
+非合成业务还需要原生应用要求的分用途日历。美股需要带文件哈希的`manifest.json`及其声明文件，
+历史股票池、生命周期和质量模型分别需要对应证据。页面先检查必需文件存在，
+完整数据结构、参数和业务前置条件由各自预检负责；不会自动下载、猜路径或借用港股输入。
+
+基金预检不分配权重、不回放申赎，也不保证各决策日共同历史或优化可行。
+美股预检不计算因子、不选择候选或回放账户。预检通过后可保留相同参数显式运行，
+正式执行重新读取输入。基准ID必须属于美股bundle；合成`US:DEMO:SPY`需要明确填写。
+
+在`QUANT_STUDIO_RUNTIMES`中分别配置`quant-fund`和`quant-us-equity`的Python，
+可保留基金的Python3.12独立依赖。结果页根据原生产物显示合成、回顾性或历史PIT等数据性质；
+缺失或未知声明会使收集失败。合成输入只验证软件。日期、币种及期初净值分别处理，保留首日损益。
+美股策略与基准的观测日期必须完全一致，两者都以配置初始资金为分母；结果页显示同区间基准指标，完整比较保留在原始报告中。宽持仓和成交表在各自容器内横向滚动。
 
 ## 已有前向账户
 
@@ -100,7 +129,7 @@ python -m quant_studio run hk-equity-daily --snapshot F:/Quant/quant-hk-equity/d
 
 启动失败或超时会保留`result.json`和日志；“可运行”仅表示执行环境就绪，数据和业务前置条件仍由上游验证。模拟盘模板每次使用独立状态，不会续接共享账户。
 
-合成样例会在运行目录写出净值页。A 股、港股和模拟盘模板默认只生成配置与命令；执行成功后展示模板声明的净值和报告。上游命令失败或缺少本次结果时，保留日志并显示失败原因。Python 子进程统一使用 UTF-8 日志，避免 Windows 英文区域设置导致中文输出失败。
+合成样例会在运行目录写出净值页。外部模板默认只生成配置与命令；执行成功后展示模板声明的净值和报告。上游命令失败或缺少本次结果时，保留日志并显示失败原因。Python 子进程统一使用 UTF-8 日志，避免 Windows 英文区域设置导致中文输出失败。
 
 ## 开发检查
 
@@ -110,4 +139,4 @@ python -m quant_studio run hk-equity-daily --snapshot F:/Quant/quant-hk-equity/d
 .venv\Scripts\python -m pytest -q
 ```
 
-`Upstream integration` 工作流在 Windows/Linux 上使用固定提交的上游依赖，执行真实港股和模拟盘 CLI，并检验真实 A 股输出函数与 Studio 收集器的契约。测试行情为合成 fixture，不代表市场表现。
+`Upstream integration`工作流在Windows/Linux上使用固定提交的上游依赖，执行港股、模拟盘和基金原生CLI，并检验A股输出、预检及账户检查契约。美股应用为私有仓，其自身CI检出固定提交的公共Studio运行同一集成测试，不向公共工作流增加私有仓访问凭据。基金/美股集成检查输入内容及修改时间、相同配置、原生净值口径、报告和损坏输入拒绝；测试行情为合成fixture，不代表市场表现。

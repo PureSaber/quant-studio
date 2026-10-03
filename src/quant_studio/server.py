@@ -447,7 +447,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     series = None
     if nav_path.is_file():
         opening_key = template.metadata.get("nav_initial_value_key")
-        opening = None
+        opening = template.metadata.get("nav_initial_value")
         if opening_key:
             config = yaml.safe_load(
                 (directory / f"config.{template.config_format}").read_text(
@@ -463,6 +463,16 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     notices = []
     if template.kind == "synthetic":
         notices.append('<p class="banner">合成样例，不是市场收益</p>')
+    elif result.get("evidence_kind"):
+        kind = str(result["evidence_kind"])
+        label = {
+            "synthetic": "合成数据，仅验证软件，不是市场收益",
+            "retrospective": "回顾性历史数据，未获得历史PIT认证",
+            "historical_pit": "上游声明历史时点数据，策略有效性仍需独立验证",
+            "public_source": "公开来源数据，完整业务适用性尚未认证",
+            "user_provided": "用户提供数据，来源与业务规则仍须核验",
+        }.get(kind, kind)
+        notices.append(f'<p class="banner">数据性质：{escape(label)}</p>')
     if result.get("message"):
         notices.append(f'<p class="banner">{escape(str(result["message"]))}</p>')
     elif result["status"] == "failed":
@@ -481,6 +491,16 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         drawdown = drawdown_fragment(series)
         if _has_benchmark(nav_path):
             benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
+    benchmark_path = directory / "benchmark_nav.csv"
+    if series is not None and benchmark_path.is_file():
+        baseline = parse_nav_csv(benchmark_path)
+        if baseline is not None and baseline.period_return is not None:
+            benchmark = (
+                '<p class="note">同区间基准：区间涨跌'
+                f"{baseline.period_return * 100:+.2f}%，"
+                f"最大回撤{baseline.max_drawdown * 100:.2f}%。"
+                "完整比较见下方原始报告。</p>"
+            )
     evidence_open = "" if result["status"] == "succeeded" else " open"
     preflight_view = ""
     if result["status"] == "checked":
@@ -949,17 +969,29 @@ def _knob_fields(template: object, selected: dict[str, object]) -> list[str]:
         name = escape(knob["name"])
         current = selected.get(knob["name"], knob["default"])
         shown = escape(str(current))
-        label = escape(_LABELS.get(knob["name"], knob["name"]))
+        label = escape(knob.get("label", _LABELS.get(knob["name"], knob["name"])))
         if knob["type"] == "enum" or "choices" in knob:
+            labels = {
+                str(choice): knob.get("choice_labels", {}).get(
+                    str(choice), _choice_label(knob["name"], choice)
+                )
+                for choice in knob["choices"]
+            }
             options = "".join(
                 f'<option value="{escape(str(choice))}"'
                 + (" selected" if choice == current else "")
-                + f">{escape(_choice_label(knob['name'], choice))}</option>"
+                + f">{escape(labels[str(choice)])}</option>"
                 for choice in knob["choices"]
             )
             control = f'<select name="{name}">{options}</select>'
         else:
-            input_type = "text" if knob["type"] == "decimal-string" else "number"
+            input_type = (
+                "date"
+                if knob["type"] == "date"
+                else "text"
+                if knob["type"] in {"decimal-string", "text"}
+                else "number"
+            )
             step = ' step="any"' if knob["type"] == "number" else ""
             control = f'<input type="{input_type}" name="{name}" value="{shown}"{step}>'
         fields.append(
@@ -978,12 +1010,15 @@ def _data_step(template: object) -> str:
     )
     parts = [f"<p>{escape(template_readiness(template).message)}</p>"]
     if template.metadata.get("requires_snapshot"):
-        selected = escape(os.environ.get("QUANT_HK_SNAPSHOT", ""))
+        source = template.metadata["input_source"]
+        selected = escape(os.environ.get(source["environment"], ""))
         parts.append(
-            "<label><span>已有港股快照目录</span>"
+            f"<label><span>已有{escape(source['label'])}</span>"
             f'<input type="text" name="snapshot" value="{selected}"'
-            ' placeholder="留空使用默认快照"></label>'
+            ' placeholder="填写已有数据目录或使用已配置来源"></label>'
         )
+        if template.metadata.get("data_help"):
+            parts.append(f"<p>{escape(template.metadata['data_help'])}</p>")
     if dataset:
         parts.append(
             f"<p>{dataset.files}个数据文件，最近文件修改{escape(dataset.newest)}</p>"
@@ -1227,6 +1262,8 @@ ul.commands { padding-left: 18px; }
 .chip.on { border-color: var(--blue); background: #e8f1ff; color: #175cd3; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.table-scroll td, .table-scroll th { padding-right: 16px; white-space: nowrap; }
 .environment-table { table-layout: fixed; }
 .environment-table td, .environment-table th {
   overflow-wrap: anywhere; padding: 12px 16px 12px 0; vertical-align: top;
