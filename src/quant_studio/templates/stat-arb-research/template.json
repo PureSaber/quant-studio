@@ -1,0 +1,31 @@
+{
+  "id": "stat-arb-research",
+  "title": "统计套利研究",
+  "summary": "读取已有研究配置，检查价格与滚动窗口，再运行配对研究和成本计分。",
+  "kind": "external",
+  "workspace_repo": "quant-stat-arb",
+  "upstream_ref": "ae6c51447326f341fd7673f0497c5e2ca9379eb3",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {"kind": "file", "label": "统计套利研究配置文件", "environment": "QUANT_STAT_ARB_CONFIG"},
+  "data_help": "选择已有YAML研究配置。价格、全收益、行业和ADV路径相对于该配置解析；来源性质必须由source.evidence_kind声明，缺省显示未声明。默认两个系数为1，保留原研究参数。",
+  "knobs": [
+    {"name": "gross_budget_scale", "label": "原总敞口预算系数", "type": "number", "minimum": 0.01, "maximum": 1, "default": 1, "path": "gross_budget_scale"},
+    {"name": "cost_multiplier", "label": "原成本系数", "type": "number", "minimum": 0, "maximum": 10, "default": 1, "path": "cost_multiplier"}
+  ],
+  "argv": ["python", "-m", "quant_stat_arb", "run", "--config", "{snapshot}", "--overrides", "{config}", "--out", "{output}"],
+  "preflight_argv": ["python", "-m", "quant_stat_arb", "preflight", "--config", "{snapshot}", "--overrides", "{config}"],
+  "preflight_contract": {"schema_version": "quant-stat-arb.preflight/v1", "status_field": "software_preflight", "positive_counts": ["rows", "symbols", "folds"]},
+  "preflight_summary": "只读检查配置、输入对齐和滚动窗口；不筛选配对、不拟合模型、不运行泄漏审计或回测，也不认证借券、容量或成交。",
+  "output_dirs": ["{output}"],
+  "result_files": {"nav.csv": "standard/returns.csv", "positions.csv": "standard/positions.csv", "orders.csv": "standard/orders.csv", "costs.csv": "standard/costs.csv"},
+  "nav_initial_value": 1,
+  "nav_strategy": "stat_arb",
+  "result_evidence": {"file": "run_context.json", "field": "evidence_kind", "values": ["synthetic", "retrospective", "user_provided", "unspecified"]},
+  "result_notice": "净值从1开始，展示滚动测试计分路径并计入平仓成本。持仓和订单的quantity表示研究权重，market_value也为权重；target订单为研究目标。费用是收益比例，没有真实股数或货币本金。未提供独立市场基准；没有选出配对也是有效研究结果。",
+  "result_table_titles": {"positions.csv": "研究持仓权重", "orders.csv": "研究目标变动", "costs.csv": "研究费用（收益比例）"},
+  "result_column_labels": {"date": "日期", "timestamp": "日期", "strategy": "策略", "symbol": "标的", "quantity": "研究权重", "market_value": "研究权重", "weight": "权重", "target_weight": "目标权重", "side": "方向", "status": "状态", "order_type": "目标类型", "commission": "佣金比例", "slippage": "价差比例", "market_impact": "冲击比例", "borrow_cost": "借券费用比例", "total_cost": "费用合计比例"},
+  "report_name": "report.html",
+  "disclaimer": "研究用途，借券和成交仍依赖输入假设，不发送真实订单。"
+}

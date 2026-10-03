@@ -83,13 +83,25 @@ def template_readiness(
     if template.metadata.get("requires_snapshot"):
         selected = _snapshot_path(template, snapshot)
         source = template.metadata["input_source"]
-        if selected is None or any(
-            not (selected / name).is_file() for name in source["required_files"]
-        ):
+        kind = source.get("kind", "directory")
+        if kind == "file":
+            valid = selected is not None and selected.is_file()
+            requirement = "（需选择已有文件）"
+        elif kind == "directory":
+            valid = (
+                selected is not None
+                and selected.is_dir()
+                and all(
+                    (selected / name).is_file() for name in source["required_files"]
+                )
+            )
+            requirement = f"（需包含{', '.join(source['required_files'])}）"
+        else:
+            raise QuantStudioError(f"未知输入来源类型：{kind}")
+        if not valid:
             return Readiness(
                 False,
-                f"请选择已有{source['label']}"
-                f"（需包含{', '.join(source['required_files'])}）",
+                f"请选择已有{source['label']}{requirement}",
                 True,
                 executable,
             )
@@ -408,20 +420,26 @@ def _validate_preflight(template: Template, evidence: object) -> None:
     status_field = contract["status_field"] if contract else "software_preflight"
     if not isinstance(evidence, dict) or evidence.get(status_field) != "pass":
         raise QuantStudioError("上游未返回通过的数据预检证据")
-    if contract and (
+    if not contract:
+        return
+    if (
         evidence.get("schema_version") != contract["schema_version"]
         or evidence.get("read_only") is not True
         or evidence.get("investable") is not False
-        or evidence.get("evidence_kind") != "synthetic"
-        or not isinstance(evidence.get("instrument_ids"), list)
+    ):
+        raise QuantStudioError("上游预检契约不匹配")
+    _evidence_kind(template, evidence)
+    for field in contract["positive_counts"]:
+        if type(evidence.get(field)) is not int or evidence[field] <= 0:
+            raise QuantStudioError(f"上游预检契约不匹配：{field}须为正整数")
+    if contract.get("instrument_ids_required") and (
+        not isinstance(evidence.get("instrument_ids"), list)
         or not evidence["instrument_ids"]
         or not all(
             isinstance(item, str) and item for item in evidence["instrument_ids"]
         )
-        or type(evidence.get("event_count")) is not int
-        or evidence["event_count"] <= 0
     ):
-        raise QuantStudioError("上游离线样例预检契约不匹配")
+        raise QuantStudioError("上游预检契约不匹配：缺少标的身份")
 
 
 def _project_standard_output(template, run_dir, argv, cwd, timeout):

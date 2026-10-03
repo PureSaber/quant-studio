@@ -52,7 +52,7 @@ python -m quant_studio check hk-equity-daily --snapshot H:/Quant/hk-snapshot
 ## 基金与美股模板
 
 基金/FOF与美股/ETF模板均调用上游原生只读预检，保持各自的数据与账户规则。
-加上下面的期货与Crypto离线样例，当前共八个模板、七个业务预检入口。
+加上期货、Crypto离线样例和统计套利研究，当前共九个模板、八个业务预检入口。
 
 |模板|已有输入|可修改参数|净值口径|
 |---|---|---|---|
@@ -133,7 +133,7 @@ python -m quant_studio run hk-equity-daily --snapshot F:/Quant/quant-hk-equity/d
 
 ## 期货与Crypto离线样例
 
-新增`futures-spread-fixture`和`crypto-basis-fixture`，当前共八个模板、七个业务预检入口。
+`futures-spread-fixture`和`crypto-basis-fixture`提供两类离线样例。
 期货使用上游固定四段开平仓、换月及结算计划；Crypto可选择Binance/OKX离线来源、
 maker/taker、随机种子和USDT初始资金。两个模板都支持最多8位小数的本金，
 仅消费随上游交付的合成/脱敏fixture，不接受外部行情目录，也不访问交易所。
@@ -160,6 +160,30 @@ UTC事件时点和Crypto毫秒精度完整保留，横轴按事件等距展示�
 
 跨仓检查覆盖期货及Crypto四组来源/成交组合的实际CLI、相同参数预检与运行、
 精确本金和逐值账本投影、来源不变、重复只读投影及篡改拒绝。
+
+## 统计套利研究
+
+`stat-arb-research`选择已有YAML研究配置文件，可在网页填写路径或设置
+`QUANT_STAT_ARB_CONFIG`；`--snapshot`在这个模板中表示配置文件，不是数据目录。
+其价格、全收益、行业和ADV相对路径始终以原配置所在目录解析。
+
+```powershell
+python -m quant_studio check stat-arb-research --snapshot H:/Quant/research/study.yaml
+python -m quant_studio run stat-arb-research --snapshot H:/Quant/research/study.yaml --set gross_budget_scale=0.5 --set cost_multiplier=2 --execute
+```
+
+在运行环境配置中为`quant-stat-arb`指定已安装原生预检版本的Python。
+两个系数默认1，保持原参数；Studio只保存独立覆盖文件，不复制或修改研究配方。
+预检共用原生对齐和滚动窗口校验，不选对、不拟合、不模拟、不执行泄漏审计。
+通过后按相同参数运行，运行重新读取并校验输入。
+
+结果显示从1开始的单位净值、研究持仓权重、目标变动和收益比例费用。
+不把原生权重列当成股数或市值，不把零基准占位列当成市场基准。
+来源性质由原配置显式声明；缺省显示未声明，不猜测为真实或合成。
+没有选出配对可正常完成研究；原生`blocked`或损坏输入仍显示失败并保留日志。
+
+统计套利为私有上游，其CI检出固定公共Studio提交运行
+`integration/test_stat_arb_upstream.py`；公共CI不持有私有仓凭据。
 
 ## 开发检查
 
