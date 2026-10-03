@@ -32,6 +32,19 @@ def diagnostics(result):
 def test_paper_cli(tmp_path, monkeypatch):
     repo = Path(os.environ["QUANT_UPSTREAM_REPO"]).resolve()
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(repo.parent))
+    source_files = [
+        repo / "tests/fixtures/signals.yaml",
+        repo / "tests/fixtures/regime.json",
+    ]
+    before = {
+        str(path): (path.read_bytes(), path.stat().st_mtime_ns) for path in source_files
+    }
+    checked = preflight("paper-sim", runs_root=tmp_path / "checks")
+    assert checked.status == "checked", diagnostics(checked)
+    assert not (checked.run_dir / "strategy-output").exists()
+    assert before == {
+        str(path): (path.read_bytes(), path.stat().st_mtime_ns) for path in source_files
+    }
     result = run("paper-sim", execute=True, runs_root=tmp_path, timeout=90)
     assert result.status == "succeeded", diagnostics(result)
     assert result.returncode == 0
@@ -172,6 +185,38 @@ def test_ashare_real_output_contract(tmp_path):
     assert parse_nav_csv(tmp_path / "nav.csv").label == "Q5"
     assert report == "strategy-output/latest/report.html"
     assert (tmp_path / report).is_file()
+
+
+def test_ashare_native_preflight(tmp_path, monkeypatch):
+    repo = Path(os.environ["QUANT_UPSTREAM_REPO"]).resolve()
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(repo.parent))
+    spec = importlib.util.spec_from_file_location(
+        "ashare_fixture", repo / "tests/test_preflight.py"
+    )
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    _, config = fixture.cached_case(tmp_path)
+    from dataclasses import asdict
+
+    original = load_template("a-share-four-factor")
+    metadata = dict(original.metadata)
+    metadata["preflight_argv"] = [
+        *metadata["preflight_argv"],
+        "--data-dir",
+        str(tmp_path),
+    ]
+    template = Template(metadata, asdict(config), original.directory)
+    before = fixture.snapshot(tmp_path)
+    checked = preflight(template, runs_root=tmp_path / "checks")
+    assert checked.status == "checked", diagnostics(checked)
+    assert not (checked.run_dir / "strategy-output").exists()
+    after = fixture.snapshot(tmp_path)
+    assert all(after[path] == state for path, state in before.items())
+    assert not (tmp_path / "snapshots").exists()
+    (tmp_path / "prices.parquet").unlink()
+    rejected = preflight(template, runs_root=tmp_path / "checks")
+    assert rejected.status == "check_failed", diagnostics(rejected)
+    assert not (tmp_path / "prices.parquet").exists()
 
 
 def test_account_read_only_cli(tmp_path, monkeypatch):

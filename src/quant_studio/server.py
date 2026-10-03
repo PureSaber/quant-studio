@@ -498,17 +498,26 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
             for key, value in fields
         )
+        corporate_actions = ""
+        if "corporate_actions_complete" in checked:
+            corporate_actions = (
+                "公司行动证据："
+                + (
+                    "上游声明完整"
+                    if checked["corporate_actions_complete"] is True
+                    else "未确认完整"
+                )
+                + "；"
+            )
+        summary = template.metadata.get(
+            "preflight_summary", "校验所选配置与已有快照的完整性。"
+        )
         preflight_view = (
             '<section class="panel"><h2>数据预检证据</h2>'
+            f"<p>{escape(summary)}</p>"
             f"<p>标的数：{escape(str(checked.get('symbols', '未提供')))} · "
             f"数据行数：{escape(str(checked.get('rows', '未提供')))}</p>"
-            "<p>公司行动证据："
-            + (
-                "上游声明完整"
-                if checked.get("corporate_actions_complete") is True
-                else "未确认完整"
-            )
-            + "；投资适用性："
+            f"<p>{corporate_actions}投资适用性："
             + ("以上游证据为准" if checked.get("investable") is True else "尚未认证")
             + "</p><details><summary>上游原始证据</summary><pre>"
             + escape(json.dumps(checked, ensure_ascii=False, indent=2))
