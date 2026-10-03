@@ -4,7 +4,7 @@
   "summary": "读取已有研究配置，检查价格与滚动窗口，再运行配对研究和成本计分。",
   "kind": "external",
   "workspace_repo": "quant-stat-arb",
-  "upstream_ref": "af68f1d1c3435f9b978df0f5487a400ed2876636",
+  "upstream_ref": "ae6c51447326f341fd7673f0497c5e2ca9379eb3",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,
