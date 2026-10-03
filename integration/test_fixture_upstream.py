@@ -88,7 +88,10 @@ def test_native_fixture_cli(name, source, liquidity, tmp_path, monkeypatch):
     assert checked.evidence_kind == "synthetic"
     assert not (checked.run_dir / "strategy-output").exists()
     result = run(template, settings, execute=True, runs_root=tmp_path / "runs")
-    assert result.status == "succeeded", result.as_json()
+    assert result.status == "succeeded", (
+        result.message,
+        (result.run_dir / "stderr.txt").read_text(encoding="utf-8"),
+    )
     assert result.evidence_kind == "synthetic"
     config = "config." + template.config_format
     assert (checked.run_dir / config).read_bytes() == (
@@ -137,6 +140,8 @@ def test_native_fixture_cli(name, source, liquidity, tmp_path, monkeypatch):
     command = json.loads(
         (result.run_dir / "view-command.json").read_text(encoding="utf-8")
     )["argv"]
+    assert command[0] == result.argv[0] == checked.argv[0] == python
+    assert result.argv[1:2] == ["-m"]
 
     def project(native_path, output):
         args = command[:]

@@ -427,13 +427,14 @@ def _validate_preflight(template: Template, evidence: object) -> None:
 def _project_standard_output(template, run_dir, argv, cwd, timeout):
     declaration = template.metadata["standard_view"]
     native = safe_run_file(run_dir, "strategy-output/" + declaration["run"])
-    python = configured_python(template.workspace_repo)
-    if _executable(template.argv[0], python=python) != argv[0]:
+    if template.argv[:2] != ["python", "-m"]:
+        raise QuantStudioError("标准账本模板必须通过明确Python模块入口运行")
+    python = argv[0]
+    if (
+        _executable(template.argv[0], python=configured_python(template.workspace_repo))
+        != python
+    ):
         raise QuantStudioError("运行环境配置在执行期间改变，请重新运行")
-    if python is None:
-        python = str(
-            Path(argv[0]).parent / ("python.exe" if os.name == "nt" else "python")
-        )
     if not Path(python).is_file():
         raise QuantStudioError("无法定位原生核验环境的Python，请配置运行环境")
     command = [
