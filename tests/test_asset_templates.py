@@ -120,3 +120,25 @@ def test_missing_or_unknown_data_class_cannot_be_presented_as_success(name, fiel
     for record in ({}, {field: "certified-live"}, [], None):
         with pytest.raises(QuantStudioError, match="数据性质"):
             _evidence_kind(template, record)
+
+
+def test_benchmark_requires_identical_dates_and_same_opening_cash(tmp_path):
+    output = tmp_path / "strategy-output"
+    output.mkdir()
+    (output / "nav.csv").write_text(
+        "session,nav\n2026-01-02,98000\n2026-01-05,102000\n"
+    )
+    path = output / "benchmark_nav.csv"
+    path.write_text("session,nav\n2026-01-02,99000\n2026-01-05,104000\n")
+    mapping = {"nav.csv": "nav.csv", "benchmark_nav.csv": "benchmark_nav.csv"}
+    collect_outputs(
+        tmp_path, tmp_path, ["{output}"], result_files=mapping, initial_nav=100000
+    )
+    baseline = parse_nav_csv(tmp_path / "benchmark_nav.csv")
+    assert baseline.period_return == Decimal("0.04")
+    assert baseline.max_drawdown == Decimal("0.01")
+    path.write_text("session,nav\n2026-01-02,99000\n2026-01-06,104000\n")
+    with pytest.raises(QuantStudioError, match="观测日期"):
+        collect_outputs(
+            tmp_path, tmp_path, ["{output}"], result_files=mapping, initial_nav=100000
+        )

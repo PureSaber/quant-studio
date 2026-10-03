@@ -491,6 +491,16 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         drawdown = drawdown_fragment(series)
         if _has_benchmark(nav_path):
             benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
+    benchmark_path = directory / "benchmark_nav.csv"
+    if series is not None and benchmark_path.is_file():
+        baseline = parse_nav_csv(benchmark_path)
+        if baseline is not None and baseline.period_return is not None:
+            benchmark = (
+                '<p class="note">同区间基准：区间涨跌'
+                f"{baseline.period_return * 100:+.2f}%，"
+                f"最大回撤{baseline.max_drawdown * 100:.2f}%。"
+                "完整比较见下方原始报告。</p>"
+            )
     evidence_open = "" if result["status"] == "succeeded" else " open"
     preflight_view = ""
     if result["status"] == "checked":
@@ -1252,6 +1262,8 @@ ul.commands { padding-left: 18px; }
 .chip.on { border-color: var(--blue); background: #e8f1ff; color: #175cd3; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.table-scroll td, .table-scroll th { padding-right: 16px; white-space: nowrap; }
 .environment-table { table-layout: fixed; }
 .environment-table td, .environment-table th {
   overflow-wrap: anywhere; padding: 12px 16px 12px 0; vertical-align: top;

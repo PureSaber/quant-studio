@@ -148,5 +148,6 @@ def html_table(path: Path, title: str, limit: int = 12) -> str:
         body.append(f"<tr>{cells}</tr>")
     return (
         f'<section class="panel"><h2>{escape(title)}</h2>'
-        f"<table><tr>{head}</tr>{''.join(body)}</table></section>"
+        '<div class="table-scroll" tabindex="0">'
+        f"<table><tr>{head}</tr>{''.join(body)}</table></div></section>"
     )

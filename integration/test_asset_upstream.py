@@ -104,6 +104,13 @@ def test_native_asset_cli(name, tmp_path, monkeypatch):
     drawdown = metrics["full_period_max_drawdown" if fund else "max_drawdown"]
     assert float(nav.period_return) == pytest.approx(total, abs=1e-12)
     assert float(nav.max_drawdown) == pytest.approx(-drawdown, abs=1e-12)
+    if not fund:
+        baseline = parse_nav_csv(result.run_dir / "benchmark_nav.csv")
+        assert baseline.initial_nav == 250000
+        assert float(baseline.period_return) == pytest.approx(
+            native["benchmark_metrics"]["total_return"], abs=1e-12
+        )
+        assert "同区间基准：" in render_run(result.run_dir)
     assert "合成数据" in render_run(result.run_dir)
     assert "<iframe" in render_run(result.run_dir)
     assert result.report == "strategy-output/report.html"

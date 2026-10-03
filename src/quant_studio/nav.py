@@ -282,24 +282,32 @@ def _collect_declared(run_dir, result_files, nav_column, nav_strategy, initial_n
     sources = {}
     for target, relative in result_files.items():
         source = (root / relative).resolve()
-        if target not in {"nav.csv", "report.html", *TABLE_FILES}:
+        if target not in {"nav.csv", "benchmark_nav.csv", "report.html", *TABLE_FILES}:
             raise QuantStudioError(f"未知结果类型: {target}")
         if root not in source.parents or not source.is_file():
             raise QuantStudioError(f"本次运行结果缺失或路径非法: {relative}")
         sources[target] = source
-    series = None
-    if "nav.csv" in sources:
-        series = parse_nav_csv(
-            sources["nav.csv"],
+    curves = {}
+    for target in ("nav.csv", "benchmark_nav.csv"):
+        if target not in sources:
+            continue
+        curves[target] = parse_nav_csv(
+            sources[target],
             value_column=nav_column,
             strategy=nav_strategy,
             initial_nav=initial_nav,
         )
-        if series is None:
+        if curves[target] is None:
             raise QuantStudioError("本次运行没有可识别的净值")
+    if "benchmark_nav.csv" in curves and (
+        "nav.csv" not in curves
+        or [date for date, _ in curves["nav.csv"].rows]
+        != [date for date, _ in curves["benchmark_nav.csv"].rows]
+    ):
+        raise QuantStudioError("策略与基准的观测日期必须一致")
     for target, source in sources.items():
-        if target == "nav.csv":
-            write_nav_csv(run_dir / target, series)
+        if target in curves:
+            write_nav_csv(run_dir / target, curves[target])
         elif target != "report.html":
             (run_dir / target).write_bytes(source.read_bytes())
     report = sources.get("report.html")

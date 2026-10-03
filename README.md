@@ -76,6 +76,7 @@ python -m quant_studio check us-equity-research --snapshot H:/Quant/us-bundle --
 在`QUANT_STUDIO_RUNTIMES`中分别配置`quant-fund`和`quant-us-equity`的Python，
 可保留基金的Python3.12独立依赖。结果页根据原生产物显示合成、回顾性或历史PIT等数据性质；
 缺失或未知声明会使收集失败。合成输入只验证软件。日期、币种及期初净值分别处理，保留首日损益。
+美股策略与基准的观测日期必须完全一致，两者都以配置初始资金为分母；结果页显示同区间基准指标，完整比较保留在原始报告中。宽持仓和成交表在各自容器内横向滚动。
 
 ## 已有前向账户
 

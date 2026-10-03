@@ -23,7 +23,7 @@
   "preflight_argv": ["python", "-m", "quant_us_equity.cli", "preflight", "--bundle", "{snapshot}", "--config", "{config}"],
   "preflight_summary": "只读校验bundle哈希、数据结构、基准、静态策略参数和研究窗口；不计算因子、不选参数、不执行账户回放。",
   "output_dirs": ["{output}"],
-  "result_files": {"nav.csv": "nav.csv", "report.html": "report.html", "positions.csv": "positions.csv", "fills.csv": "fills.csv"},
+  "result_files": {"nav.csv": "nav.csv", "benchmark_nav.csv": "benchmark_nav.csv", "report.html": "report.html", "positions.csv": "positions.csv", "fills.csv": "fills.csv"},
   "nav_initial_value_key": "initial_cash",
   "result_evidence": {"file": "study.json", "field": "evidence_kind", "values": ["synthetic", "retrospective", "historical_pit"]},
   "report_name": "report.html",
