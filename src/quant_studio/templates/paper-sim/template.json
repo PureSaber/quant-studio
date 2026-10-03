@@ -11,6 +11,8 @@
     {"name": "initial_capital", "type": "number", "minimum": 10000, "maximum": 1000000000, "default": 100000, "path": "initial_capital"}
   ],
   "argv": ["quant-paper", "step", "--config", "{config}"],
+  "preflight_argv": ["quant-paper", "preflight", "--config", "{config}"],
+  "preflight_summary": "检查模拟信号、证券身份、费用及账户前置条件；不回放成交或改写账户。",
   "output_dirs": ["state"],
   "input_paths": ["signals.path", "regime.path"],
   "presets": [

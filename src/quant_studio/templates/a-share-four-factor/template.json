@@ -26,6 +26,8 @@
     {"name": "industry_rs_20d", "label": "行业相对强弱", "group": "宏观面", "direction": 1}
   ],
   "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
+  "preflight_argv": ["python", "-m", "a_share_multifactor.preflight", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
+  "preflight_summary": "检查已有行情、历史股票池、基本面可得时点、因子与全收益基准；不下载数据或执行回测。",
   "output_dirs": ["outputs/four_factors"],
   "result_files": {"nav.csv": "latest/cumulative_returns.csv", "report.html": "latest/report.html"},
   "nav_column": "Q5",

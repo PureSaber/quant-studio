@@ -68,5 +68,57 @@ def test_native_preflight_never_runs_strategy_and_keeps_failure_evidence(
 
 def test_unsupported_preflight_has_no_run_side_effects(tmp_path):
     with pytest.raises(QuantStudioError, match="尚未接入"):
-        preflight("a-share-four-factor", runs_root=tmp_path / "runs")
+        preflight("synthetic-demo", runs_root=tmp_path / "runs")
     assert not (tmp_path / "runs").exists()
+
+
+@pytest.mark.parametrize("name", ["a-share-four-factor", "paper-sim"])
+def test_native_preflight_keeps_runtime_parameters_and_factors(
+    tmp_path, monkeypatch, name
+):
+    monkeypatch.delenv("QUANT_STUDIO_RUNTIMES", raising=False)
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(tmp_path))
+    template = load_template(name)
+    (tmp_path / template.workspace_repo).mkdir()
+    monkeypatch.setattr(
+        "quant_studio.runner._executable", lambda *_a, **_k: sys.executable
+    )
+    monkeypatch.setattr(
+        "quant_studio.runner.template_readiness",
+        lambda *_a, **_k: Readiness(True, "ready", executable=sys.executable),
+    )
+    calls = []
+
+    def execute(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            json.dumps(
+                {
+                    "software_preflight": "pass",
+                    "read_only": True,
+                    "investable": False,
+                    "symbols": 2,
+                    "rows": 2,
+                }
+            ),
+            "",
+        )
+
+    monkeypatch.setattr("quant_studio.runner.subprocess.run", execute)
+    factors = ["momentum_20d"] if name == "a-share-four-factor" else None
+    checked = preflight(
+        template,
+        {"initial_capital": 200000},
+        factors=factors,
+        runs_root=tmp_path / "runs",
+    )
+    assert checked.status == "checked"
+    assert "step" not in calls[0] and "a_share_multifactor.backtest" not in calls[0]
+    assert any("preflight" in item for item in calls[0])
+    assert not (checked.run_dir / "strategy-output").exists()
+    page = render_run(checked.run_dir, csrf_token="same-session")
+    assert 'name="initial_capital" value="200000"' in page
+    if factors:
+        assert 'name="factor" value="momentum_20d"' in page
