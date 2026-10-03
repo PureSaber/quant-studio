@@ -368,7 +368,7 @@ def render_template_page(
     catalog = list(template.metadata.get("factor_catalog") or [])
     factors = [item["name"] for item in catalog] or None
     snapshot = (
-        os.environ.get("QUANT_HK_SNAPSHOT")
+        os.environ.get(template.metadata["input_source"]["environment"])
         if template.metadata.get("requires_snapshot")
         else None
     )
@@ -384,7 +384,7 @@ def render_template_page(
         "run": _run_step(template),
     }
     summaries = {
-        "data": "只读取工作区里已经存在的快照，不在这里下载。",
+        "data": "只读取已有输入，不在这里下载。",
         "factors": "股票池和因子实现都来自上游模板，页面不能新增因子。",
         "trade": "这些字段写入上游配置，或成为命令参数。",
         "run": "先生成配置和参数列表。确认后才执行。",
@@ -465,6 +465,10 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 return_decimals=template.metadata.get("return_decimals", 2),
             )
     notices = []
+    if template.metadata.get("result_notice"):
+        notices.append(
+            f'<p class="note">{escape(template.metadata["result_notice"])}</p>'
+        )
     if series is not None and template.metadata.get("standard_view"):
         notices.append(
             '<p class="note">事件级原生账本净值，时间为UTC；横轴按事件顺序等距排列。'
@@ -483,6 +487,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             "historical_pit": "上游声明历史时点数据，策略有效性仍需独立验证",
             "public_source": "公开来源数据，完整业务适用性尚未认证",
             "user_provided": "用户提供数据，来源与业务规则仍须核验",
+            "unspecified": "来源性质未声明，不能据此判断为真实或合成数据",
         }.get(kind, kind)
         notices.append(f'<p class="banner">数据性质：{escape(label)}</p>')
     if result.get("message"):
@@ -497,7 +502,10 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
         )
     tables = _artifact_tables(
-        directory, native=bool(template.metadata.get("standard_view"))
+        directory,
+        native=bool(template.metadata.get("standard_view")),
+        table_titles=template.metadata.get("result_table_titles"),
+        column_labels=template.metadata.get("result_column_labels"),
     )
     benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
     drawdown = ""
@@ -550,7 +558,9 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         )
         symbol_count = checked.get("symbols", "未提供")
         row_count = checked.get("rows", "未提供")
-        if template.metadata.get("preflight_contract"):
+        if template.metadata.get("preflight_contract", {}).get(
+            "instrument_ids_required"
+        ):
             symbol_count = len(checked["instrument_ids"])
             row_count = checked["event_count"]
         preflight_view = (
@@ -573,7 +583,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             "核对初始资金等参数与上游样例版本；修正后返回模板重新预检。"
             "完整错误保留在运行记录。"
             if template.metadata.get("standard_view")
-            else "核对快照目录、源文件及对应环境；保留失败记录，修正输入后重新检查。"
+            else "核对输入路径、源文件及对应环境；保留失败记录，修正输入后重新检查。"
         )
         preflight_view = (
             '<section class="panel"><h2>下一步</h2>'
@@ -1045,10 +1055,13 @@ def _data_step(template: object) -> str:
         parts.append(
             f"<label><span>已有{escape(source['label'])}</span>"
             f'<input type="text" name="snapshot" value="{selected}"'
-            ' placeholder="填写已有数据目录或使用已配置来源"></label>'
+            ' placeholder="填写已有输入路径或使用已配置来源"></label>'
         )
         if template.metadata.get("data_help"):
             parts.append(f"<p>{escape(template.metadata['data_help'])}</p>")
+        if source.get("kind") == "file":
+            parts.append("<p>原生预检会按所选配置检查其引用的输入文件。</p>")
+            return "".join(parts)
     if dataset:
         parts.append(
             f"<p>{dataset.files}个数据文件，最近文件修改{escape(dataset.newest)}</p>"
@@ -1143,7 +1156,13 @@ def _saved_config(directory: Path) -> str:
     return ""
 
 
-def _artifact_tables(directory: Path, *, native: bool = False) -> str:
+def _artifact_tables(
+    directory: Path,
+    *,
+    native: bool = False,
+    table_titles: dict | None = None,
+    column_labels: dict | None = None,
+) -> str:
     titles = {
         "account.csv": "账户快照",
         "positions.csv": "持仓",
@@ -1189,13 +1208,13 @@ def _artifact_tables(directory: Path, *, native: bool = False) -> str:
         "ledger_account": "账本科目",
         "quantity_delta": "数量变动",
     }
+    labels = (labels if native else {}) | (column_labels or {})
     parts = []
     for name, title in titles.items():
+        title = (table_titles or {}).get(name, title)
         path = directory / name
         if path.is_file():
-            parts.append(
-                html_table(path, title, column_labels=labels if native else None)
-            )
+            parts.append(html_table(path, title, column_labels=labels))
             parts.append(
                 f'<p><a href="/runs/{escape(directory.name)}/files/{name}" download>'
                 f"下载完整{escape(title)}CSV</a></p>"

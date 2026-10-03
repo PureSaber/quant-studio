@@ -16,7 +16,7 @@
   ],
   "argv": ["python", "-m", "quant_crypto_basis.cli", "--source", "{source}", "--seed", "{seed}", "--initial-cash", "{initial_cash}", "--liquidity", "{liquidity}", "--output", "{output}"],
   "preflight_argv": ["python", "-m", "quant_crypto_basis.cli", "--source", "{source}", "--seed", "{seed}", "--initial-cash", "{initial_cash}", "--liquidity", "{liquidity}", "--preflight"],
-  "preflight_contract": {"schema_version": "quant-crypto-basis.preflight/v1", "status_field": "status"},
+  "preflight_contract": {"schema_version": "quant-crypto-basis.preflight/v1", "status_field": "status", "positive_counts": ["event_count"], "instrument_ids_required": true},
   "preflight_summary": "只读检查双源离线事件、双腿身份、初始资金及静态策略配置；不计算策略信号、不撮合、不创建账本。",
   "standard_view": {"run": "."},
   "output_dirs": ["{output}"],

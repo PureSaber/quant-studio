@@ -45,7 +45,7 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--set", dest="settings", action="append", default=[])
         command.add_argument(
             "--snapshot",
-            help="模板所需的已有数据目录；港股快照、基金数据集或美股bundle",
+            help="模板所需的已有输入路径；数据目录或统计套利研究配置文件",
         )
         if name == "run":
             command.add_argument("--execute", action="store_true")

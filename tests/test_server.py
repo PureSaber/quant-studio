@@ -67,7 +67,7 @@ def _raw_request(server, method, path, *, headers, body=""):
 def test_home_has_seven_research_cards_and_one_synthetic_card():
     page = render_home()
 
-    assert page.count('class="template-card research"') == 7
+    assert page.count('class="template-card research"') == 8
     assert page.count('class="template-card synthetic"') == 1
     assert "A 股四类因子研究" in page
     assert "港股日频研究" in page
