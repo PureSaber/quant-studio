@@ -64,10 +64,11 @@ def _raw_request(server, method, path, *, headers, body=""):
     return response.status, dict(response.getheaders()), payload
 
 
-def test_home_has_seven_research_cards_and_one_synthetic_card():
+def test_home_has_nine_research_cards_and_one_synthetic_card():
     page = render_home()
 
-    assert page.count('class="template-card research"') == 8
+    assert page.count('class="template-card research"') == 9
+    assert "指数与风格择时研究" in page
     assert page.count('class="template-card synthetic"') == 1
     assert "A 股四类因子研究" in page
     assert "港股日频研究" in page

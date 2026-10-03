@@ -28,7 +28,7 @@ NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 _CHART_CSS = """
 .chart-card { color: #101828; font-family: "Segoe UI", "PingFang SC", sans-serif; }
 .chart-card h2 { margin: 8px 12px 0; font-size: 20px; }
-.stats { display: flex; gap: 12px; margin: 12px; }
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px; }
 .stat {
   min-width: 120px;
   padding: 12px 14px;
@@ -170,7 +170,11 @@ def write_nav_csv(path: Path, series: NavSeries) -> None:
 
 
 def chart_fragment(
-    series: NavSeries, *, currency: str | None = None, return_decimals: int = 2
+    series: NavSeries,
+    *,
+    currency: str | None = None,
+    return_decimals: int = 2,
+    title: str = "净值曲线",
 ) -> str:
     if len(series.plot_rows) == 1:
         date, value = series.rows[0]
@@ -214,14 +218,14 @@ def chart_fragment(
     change_text = _percentage(change, return_decimals, signed=True)
     drawdown_text = _percentage(drawdown, return_decimals)
     return f"""<section class="chart-card"><style>{_CHART_CSS}</style>
-<h2>净值曲线{f" · {escape(series.label)}" if series.label else ""}
+<h2>{escape(title)}{f" · {escape(series.label)}" if series.label else ""}
 {f" · {escape(currency)}账户金额" if currency else ""}</h2>
 <div class="stats">
 <div class="stat"><span>期末净值</span><b>{ending:.2f}</b></div>
 <div class="stat"><span>区间涨跌</span><b>{change_text}%</b></div>
 <div class="stat"><span>最大回撤</span><b>{drawdown_text}%</b></div>
 </div>
-<svg viewBox="0 0 940 360" role="img" aria-label="净值曲线">
+<svg viewBox="0 0 940 360" role="img" aria-label="{escape(title)}">
 <defs>
 <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0%" stop-color="#1677ff" stop-opacity="0.28"/>
