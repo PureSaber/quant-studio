@@ -18,6 +18,10 @@ TABLE_FILES = {
     "orders.csv",
     "fills.csv",
     "trades.csv",
+    "account.csv",
+    "margin.csv",
+    "costs.csv",
+    "cash_ledger.csv",
 }
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 
@@ -165,7 +169,9 @@ def write_nav_csv(path: Path, series: NavSeries) -> None:
             writer.writerow(row)
 
 
-def chart_fragment(series: NavSeries) -> str:
+def chart_fragment(
+    series: NavSeries, *, currency: str | None = None, return_decimals: int = 2
+) -> str:
     if len(series.plot_rows) == 1:
         date, value = series.rows[0]
         return (
@@ -205,12 +211,15 @@ def chart_fragment(series: NavSeries) -> str:
     ending = series.ending
     change = series.period_return * Decimal(100)
     drawdown = series.max_drawdown * Decimal(100)
+    change_text = _percentage(change, return_decimals, signed=True)
+    drawdown_text = _percentage(drawdown, return_decimals)
     return f"""<section class="chart-card"><style>{_CHART_CSS}</style>
-<h2>净值曲线{f" · {escape(series.label)}" if series.label else ""}</h2>
+<h2>净值曲线{f" · {escape(series.label)}" if series.label else ""}
+{f" · {escape(currency)}账户金额" if currency else ""}</h2>
 <div class="stats">
 <div class="stat"><span>期末净值</span><b>{ending:.2f}</b></div>
-<div class="stat"><span>区间涨跌</span><b>{change:+.2f}%</b></div>
-<div class="stat"><span>最大回撤</span><b>{drawdown:.2f}%</b></div>
+<div class="stat"><span>区间涨跌</span><b>{change_text}%</b></div>
+<div class="stat"><span>最大回撤</span><b>{drawdown_text}%</b></div>
 </div>
 <svg viewBox="0 0 940 360" role="img" aria-label="净值曲线">
 <defs>
@@ -440,7 +449,15 @@ def _date_axis(dates: list[str], left: int, right: int) -> str:
     return "".join(labels)
 
 
-def drawdown_fragment(series: NavSeries) -> str:
+def _percentage(value: Decimal, minimum: int = 2, *, signed: bool = False) -> str:
+    # Small event-level changes must remain visible instead of becoming -0.00%.
+    places = minimum
+    if value and value.copy_abs() < Decimal(1).scaleb(-minimum):
+        places = max(minimum, 1 - value.copy_abs().adjusted())
+    return format(value, f"{'+' if signed else ''}.{places}f")
+
+
+def drawdown_fragment(series: NavSeries, *, return_decimals: int = 2) -> str:
     if len(series.plot_rows) < 2:
         return ""
     peak = series.plot_rows[0][1]
@@ -464,10 +481,11 @@ def drawdown_fragment(series: NavSeries) -> str:
         coords.append((x, y))
     line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
     worst = min(value for _, value in points)
+    drawdown_text = _percentage(series.max_drawdown * Decimal(100), return_decimals)
     return f"""<section class="chart-card">
 <h2>回撤</h2>
-<p class="muted">最大回撤 {series.max_drawdown * Decimal(100):.2f}%，
-曲线最低 {worst:.2f}%</p>
+<p class="muted">最大回撤 {drawdown_text}%，
+曲线最低 {_percentage(worst, return_decimals)}%</p>
 <svg viewBox="0 0 940 180" role="img" aria-label="回撤曲线">
 <polyline points="{line}" fill="none" stroke="#d92d20" stroke-width="2.5"/>
 </svg>

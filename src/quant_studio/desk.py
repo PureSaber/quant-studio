@@ -129,7 +129,9 @@ def _format_time(stamp: float) -> str:
     return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
 
 
-def html_table(path: Path, title: str, limit: int = 12) -> str:
+def html_table(
+    path: Path, title: str, limit: int = 12, *, column_labels: dict | None = None
+) -> str:
     import csv
 
     with path.open(newline="", encoding="utf-8") as stream:
@@ -141,7 +143,11 @@ def html_table(path: Path, title: str, limit: int = 12) -> str:
             rows.append(row)
     if not rows:
         return ""
-    head = "".join(f"<th>{escape(cell)}</th>" for cell in rows[0])
+    labels = column_labels or {}
+    head = "".join(
+        f'<th title="{escape(cell)}">{escape(labels.get(cell, cell))}</th>'
+        for cell in rows[0]
+    )
     body = []
     for row in rows[1:]:
         cells = "".join(f"<td>{escape(cell)}</td>" for cell in row)

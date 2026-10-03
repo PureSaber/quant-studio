@@ -459,8 +459,20 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         # establishes the basis. Reading it never rewrites historical evidence.
         series = parse_nav_csv(nav_path, initial_nav=opening)
         if series is not None:
-            chart = chart_fragment(series)
+            chart = chart_fragment(
+                series,
+                currency=template.metadata.get("nav_currency"),
+                return_decimals=template.metadata.get("return_decimals", 2),
+            )
     notices = []
+    if series is not None and template.metadata.get("standard_view"):
+        notices.append(
+            '<p class="note">事件级原生账本净值，时间为UTC；横轴按事件顺序等距排列。'
+            f"共{len(series.rows)}次观测，期初资金{series.initial_nav}"
+            f"{escape(template.metadata['nav_currency'])}。没有按日重采样。"
+            "保证金、费用和成交均直接来自同一账本；以下表格预览前12行，"
+            "可下载完整CSV。</p>"
+        )
     if template.kind == "synthetic":
         notices.append('<p class="banner">合成样例，不是市场收益</p>')
     elif result.get("evidence_kind"):
@@ -484,11 +496,15 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         notices.append(
             '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
         )
-    tables = _artifact_tables(directory)
+    tables = _artifact_tables(
+        directory, native=bool(template.metadata.get("standard_view"))
+    )
     benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
     drawdown = ""
     if series is not None:
-        drawdown = drawdown_fragment(series)
+        drawdown = drawdown_fragment(
+            series, return_decimals=template.metadata.get("return_decimals", 2)
+        )
         if _has_benchmark(nav_path):
             benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
     benchmark_path = directory / "benchmark_nav.csv"
@@ -532,11 +548,16 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         summary = template.metadata.get(
             "preflight_summary", "校验所选配置与已有快照的完整性。"
         )
+        symbol_count = checked.get("symbols", "未提供")
+        row_count = checked.get("rows", "未提供")
+        if template.metadata.get("preflight_contract"):
+            symbol_count = len(checked["instrument_ids"])
+            row_count = checked["event_count"]
         preflight_view = (
             '<section class="panel"><h2>数据预检证据</h2>'
             f"<p>{escape(summary)}</p>"
-            f"<p>标的数：{escape(str(checked.get('symbols', '未提供')))} · "
-            f"数据行数：{escape(str(checked.get('rows', '未提供')))}</p>"
+            f"<p>标的数：{escape(str(symbol_count))} · "
+            f"数据行数：{escape(str(row_count))}</p>"
             f"<p>{corporate_actions}投资适用性："
             + ("以上游证据为准" if checked.get("investable") is True else "尚未认证")
             + "</p><details><summary>上游原始证据</summary><pre>"
@@ -548,9 +569,15 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             '<p class="note">运行时上游会重新校验数据；预检不锁定输入。</p></section>'
         )
     elif result["status"] in {"check_failed", "blocked"}:
+        next_step = (
+            "核对初始资金等参数与上游样例版本；修正后返回模板重新预检。"
+            "完整错误保留在运行记录。"
+            if template.metadata.get("standard_view")
+            else "核对快照目录、源文件及对应环境；保留失败记录，修正输入后重新检查。"
+        )
         preflight_view = (
             '<section class="panel"><h2>下一步</h2>'
-            "<p>核对快照目录、源文件及对应环境；保留失败记录，修正输入后重新检查。</p>"
+            f"<p>{next_step}</p>"
             f'<a href="/templates/{escape(template.id)}">返回模板</a></section>'
         )
     body = f"""<header class="page-head">
@@ -1009,6 +1036,9 @@ def _data_step(template: object) -> str:
         None,
     )
     parts = [f"<p>{escape(template_readiness(template).message)}</p>"]
+    if template.metadata.get("standard_view"):
+        parts.append(f"<p>{escape(template.metadata['data_help'])}</p>")
+        return "".join(parts)
     if template.metadata.get("requires_snapshot"):
         source = template.metadata["input_source"]
         selected = escape(os.environ.get(source["environment"], ""))
@@ -1113,19 +1143,63 @@ def _saved_config(directory: Path) -> str:
     return ""
 
 
-def _artifact_tables(directory: Path) -> str:
+def _artifact_tables(directory: Path, *, native: bool = False) -> str:
     titles = {
+        "account.csv": "账户快照",
         "positions.csv": "持仓",
         "holdings.csv": "持仓",
         "orders.csv": "委托",
         "fills.csv": "成交",
         "trades.csv": "成交",
+        "margin.csv": "保证金",
+        "costs.csv": "费用与资金费",
+        "cash_ledger.csv": "现金账本",
+    }
+    labels = {
+        "event_time": "事件时间（UTC）",
+        "account_id": "账户",
+        "base_currency": "基础币种",
+        "currency": "币种",
+        "nav": "账户净值",
+        "cash_value": "现金",
+        "market_value": "市值",
+        "unrealized_pnl": "未实现损益",
+        "realized_pnl": "已实现损益",
+        "margin_used": "已用保证金",
+        "instrument_id": "标的",
+        "strategy_id": "策略",
+        "quantity": "数量",
+        "mark_price": "估值价格",
+        "price": "成交价",
+        "initial_margin": "初始保证金",
+        "maintenance_margin": "维持保证金",
+        "order_id": "委托ID",
+        "fill_id": "成交ID",
+        "side": "方向",
+        "liquidity_role": "成交方式",
+        "amount": "金额",
+        "cost_type": "费用类型",
+        "order_type": "委托类型",
+        "limit_price": "限价",
+        "stop_price": "触发价",
+        "filled_quantity": "已成交数量",
+        "status": "状态",
+        "reduce_only": "仅减仓",
+        "event_type": "事件类型",
+        "ledger_account": "账本科目",
+        "quantity_delta": "数量变动",
     }
     parts = []
     for name, title in titles.items():
         path = directory / name
         if path.is_file():
-            parts.append(html_table(path, title))
+            parts.append(
+                html_table(path, title, column_labels=labels if native else None)
+            )
+            parts.append(
+                f'<p><a href="/runs/{escape(directory.name)}/files/{name}" download>'
+                f"下载完整{escape(title)}CSV</a></p>"
+            )
     return "".join(parts)
 
 

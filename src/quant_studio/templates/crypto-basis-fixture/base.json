@@ -1,0 +1,6 @@
+{
+  "source": "binance",
+  "seed": 7,
+  "initial_cash": "100000",
+  "liquidity": "maker"
+}
