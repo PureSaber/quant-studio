@@ -16,6 +16,7 @@ import yaml
 from quant_studio import QuantStudioError
 from quant_studio.flow import format_argv
 from quant_studio.nav import collect_outputs
+from quant_studio.runtime import configured_python
 from quant_studio.templates import (
     Template,
     apply_factor_selection,
@@ -29,6 +30,7 @@ class Readiness:
     runnable: bool
     message: str
     needs_input: bool = False
+    executable: str | None = None
 
 
 def template_readiness(
@@ -42,22 +44,49 @@ def template_readiness(
         return Readiness(False, f"未设置 QUANT_WORKSPACE_ROOT，{repo} 只能预览")
     if not (Path(root) / repo).is_dir():
         return Readiness(False, f"工作区里没有 {repo}，只能预览")
-    executable = _executable(template.argv[0])
+    try:
+        python = configured_python(template.workspace_repo)
+    except QuantStudioError as exc:
+        return Readiness(False, str(exc))
+    executable = _executable(template.argv[0], python=python)
     if executable is None:
         return Readiness(False, f"找不到命令 {template.argv[0]}，请安装对应环境后运行")
-    if executable == sys.executable and template.argv[1:2] == ["-m"]:
+    if template.argv[0] in {"python", "python3", sys.executable} and template.argv[
+        1:2
+    ] == ["-m"]:
         module = template.argv[2]
         try:
-            available = importlib.util.find_spec(module) is not None
-        except (ImportError, ValueError):
+            if python is None:
+                available = importlib.util.find_spec(module) is not None
+            else:
+                check = subprocess.run(
+                    [
+                        executable,
+                        "-c",
+                        "import importlib.util,sys; "
+                        "sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)",
+                        module,
+                    ],
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
+                available = check.returncode == 0
+        except (ImportError, ValueError, OSError, subprocess.SubprocessError):
             available = False
         if not available:
-            return Readiness(False, f"当前 Python 环境缺少模块 {module}")
+            return Readiness(
+                False,
+                f"所选Python无法加载模块{module}：{executable}",
+                executable=executable,
+            )
     if template.metadata.get("requires_snapshot"):
         selected = _snapshot_path(template, snapshot)
         if selected is None or not (selected / "manifest.json").is_file():
-            return Readiness(False, "请选择已有港股快照（需包含 manifest.json）", True)
-    return Readiness(True, "可运行")
+            return Readiness(
+                False, "请选择已有港股快照（需包含 manifest.json）", True, executable
+            )
+    return Readiness(True, "可运行", executable=executable)
 
 
 @dataclass
@@ -96,7 +125,12 @@ def preview(
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(
-        loaded.argv, rendered.values, run_dir, config_path, selected_snapshot
+        loaded.argv,
+        rendered.values,
+        run_dir,
+        config_path,
+        selected_snapshot,
+        python=configured_python(loaded.metadata.get("workspace_repo")),
     )
     _write_json(
         run_dir / "request.json",
@@ -145,7 +179,12 @@ def run(
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(
-        loaded.argv, rendered.values, run_dir, config_path, selected_snapshot
+        loaded.argv,
+        rendered.values,
+        run_dir,
+        config_path,
+        selected_snapshot,
+        python=configured_python(loaded.metadata.get("workspace_repo")),
     )
     _write_json(
         run_dir / "request.json",
@@ -189,6 +228,8 @@ def run(
         )
         _write_json(run_dir / "result.json", result.as_json())
         return result
+    if argv[0] != readiness.executable:
+        raise QuantStudioError("运行环境配置在预检期间改变，请重新预览")
     workspace_root = Path(os.environ["QUANT_WORKSPACE_ROOT"]).resolve()
     cwd = (workspace_root / loaded.workspace_repo).resolve()
 
@@ -300,6 +341,8 @@ def _render_argv(
     run_dir: Path,
     config_path: Path,
     snapshot: Path | None = None,
+    *,
+    python: str | None = None,
 ) -> list[str]:
     rendered = format_argv(
         argv,
@@ -309,13 +352,19 @@ def _render_argv(
         output=str(run_dir / "strategy-output"),
     )
     if rendered:
-        rendered[0] = _executable(rendered[0]) or rendered[0]
+        rendered[0] = _executable(rendered[0], python=python) or rendered[0]
     return rendered
 
 
-def _executable(command: str) -> str | None:
-    if command in {"python", "python3"}:
-        return sys.executable
+def _executable(command: str, *, python: str | None = None) -> str | None:
+    if command in {"python", "python3", sys.executable}:
+        return python or sys.executable
+    if python is not None:
+        # A selected environment is exclusive: never borrow another environment's CLI.
+        candidate = Path(python).parent / (
+            command + (".exe" if os.name == "nt" else "")
+        )
+        return str(candidate) if candidate.is_file() else None
     search_path = (
         str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
     )

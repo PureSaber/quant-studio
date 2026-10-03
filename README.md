@@ -58,7 +58,22 @@ python -m quant_studio run hk-equity-daily --snapshot F:/Quant/quant-hk-equity/d
 港股留出期以冻结配置的 `initial_cash` 为期初本金，首日盈亏和费用均进入收益、最大回撤。导出的 `nav.csv` 用 `initial_nav` 列保存该口径；曲线将本金标为“期初”，不编造交易日期。有明确本金的一次收盘观测可以计算首日收益；只有快照、没有本金时仍不计算区间表现。
 旧港股运行的结果页也会从已保存配置读取期初本金，并优先展示仍在原目录中的报告；读取不会改写旧净值或证据文件。
 
-运行前会检查仓库、可执行命令及 `python -m` 模块。Python 命令使用启动研究台的解释器；CLI 优先从该解释器所在目录查找。请在同一兼容环境安装需要运行的策略包。启动失败或超时会保留 `result.json` 和日志；“可运行”仅表示执行环境就绪，数据和业务前置条件仍由上游验证。模拟盘模板每次使用独立状态，不会续接共享账户。
+运行前会检查仓库、可执行命令及`python -m`模块。默认使用启动研究台的解释器，CLI优先从该解释器目录查找。不同应用已有独立环境时，将`QUANT_STUDIO_RUNTIMES`设置为本地JSON配置文件的绝对路径：
+
+```json
+{
+  "schema_version": "quant-studio.runtimes/v1",
+  "python_by_repo": {
+    "a-share-multifactor": "H:/Quant/research/.venv/Scripts/python.exe",
+    "quant-hk-equity": "H:/Quant/hk/.venv/Scripts/python.exe",
+    "quant-paper-sim": "H:/Quant/paper/.venv/Scripts/python.exe"
+  }
+}
+```
+
+路径应换成已安装并验证过的环境；配置中不需要的仓库可以省略。环境页展示实际命令路径，预览保存相同命令。已指定环境的CLI只能从该Python目录取得，缺失时明确阻止运行，不借用PATH上的其他版本。模块预检也在所选Python中执行。配置不可读、格式错误、路径非绝对或指定Python缺失时均明确提示；Studio不会自动安装依赖或更新冻结环境。
+
+启动失败或超时会保留`result.json`和日志；“可运行”仅表示执行环境就绪，数据和业务前置条件仍由上游验证。模拟盘模板每次使用独立状态，不会续接共享账户。
 
 合成样例会在运行目录写出净值页。A 股、港股和模拟盘模板默认只生成配置与命令；执行成功后展示模板声明的净值和报告。上游命令失败或缺少本次结果时，保留日志并显示失败原因。Python 子进程统一使用 UTF-8 日志，避免 Windows 英文区域设置导致中文输出失败。
 

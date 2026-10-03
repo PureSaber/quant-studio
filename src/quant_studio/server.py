@@ -69,7 +69,7 @@ def render_data() -> str:
             f"""<article class="template-card research">
 <span class="eyebrow">{escape(item.market)}</span>
 <h2>{item.files} 个数据文件</h2>
-<p>最近更新 {escape(item.newest)}</p>
+<p>最近文件修改 {escape(item.newest)}（不代表行情截止日）</p>
 <p>{escape(str(item.path))}</p>
 </article>"""
         )
@@ -156,7 +156,12 @@ def render_template_page(
     selected = _preset_values(template, preset_id)
     catalog = list(template.metadata.get("factor_catalog") or [])
     factors = [item["name"] for item in catalog] or None
-    document = compile_document(template, selected, factors)
+    snapshot = (
+        os.environ.get("QUANT_HK_SNAPSHOT")
+        if template.metadata.get("requires_snapshot")
+        else None
+    )
+    document = compile_document(template, selected, factors, snapshot=snapshot)
     steps = []
     index = 1
     bodies = {
@@ -264,7 +269,8 @@ def render_run(run_dir: str | Path) -> str:
     if series is not None:
         drawdown = drawdown_fragment(series)
         if _has_benchmark(nav_path):
-            benchmark = '<p class="note">净值文件包含基准列，已画在主图。</p>'
+            benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
+    evidence_open = "" if result["status"] == "succeeded" else " open"
     body = f"""<header class="page-head">
 <p class="kicker">结果</p>
 <h1>{escape(template.title)}</h1>
@@ -274,15 +280,18 @@ def render_run(run_dir: str | Path) -> str:
 </header>
 {"".join(notices)}
 {benchmark}
+{chart}
+{drawdown}
+{tables}
+{report_html}
+<details class="panel"{evidence_open}>
+<summary>配置与执行命令</summary>
 {_saved_config(directory)}
 <section class="panel command">
 <h2>参数列表</h2>
 <pre>{argv or "进程内合成样例，无外部命令"}</pre>
 </section>
-{chart}
-{drawdown}
-{tables}
-{report_html}"""
+</details>"""
     return _layout("运行结果", body, "results")
 
 
@@ -292,10 +301,12 @@ def render_environment() -> str:
     for template_id in template_ids():
         template = load_template(template_id)
         ready = template_readiness(template)
+        executable = ready.executable or ("内置样例" if ready.runnable else "未就绪")
         rows.append(
             "<tr>"
             f"<td>{escape(template.title)}</td>"
             f"<td>{escape(ready.message)}</td>"
+            f"<td>{escape(executable)}</td>"
             "</tr>"
         )
     body = f"""<header class="page-head">
@@ -304,10 +315,14 @@ def render_environment() -> str:
 <p class="lede">QUANT_WORKSPACE_ROOT：{escape(root)}</p>
 </header>
 <section class="panel">
-<table>
-<tr><th>模板</th><th>状态</th></tr>
+<table class="environment-table">
+<colgroup><col style="width:22%"><col style="width:28%">
+<col style="width:50%"></colgroup>
+<tr><th>模板</th><th>状态</th><th>执行环境</th></tr>
 {"".join(rows)}
 </table>
+<p>可为不同研究仓指定独立Python环境。设置QUANT_STUDIO_RUNTIMES指向本地运行环境配置；
+环境配置只影响新运行，已保存的命令和结果保留原样。</p>
 </section>"""
     return _layout("环境", body, "data")
 
@@ -693,17 +708,21 @@ def _data_step(template: object) -> str:
     )
     parts = [f"<p>{escape(template_readiness(template).message)}</p>"]
     if template.metadata.get("requires_snapshot"):
+        selected = escape(os.environ.get("QUANT_HK_SNAPSHOT", ""))
         parts.append(
             "<label><span>已有港股快照目录</span>"
-            '<input type="text" name="snapshot" placeholder="留空使用默认快照"></label>'
+            f'<input type="text" name="snapshot" value="{selected}"'
+            ' placeholder="留空使用默认快照"></label>'
         )
     if dataset:
         parts.append(
-            f"<p>{dataset.files} 个数据文件，最近更新 {escape(dataset.newest)}</p>"
+            f"<p>{dataset.files}个数据文件，最近文件修改{escape(dataset.newest)}</p>"
             f'<p class="path">{escape(str(dataset.path))}</p>'
         )
     else:
-        parts.append("<p>还没有读到这个仓库的数据目录。</p>")
+        parts.append(
+            "<p>默认数据目录未发现数据；已指定的外部快照由研究工具单独验证。</p>"
+        )
     command = FETCH_BY_REPO.get(repo)
     if command:
         parts.append(f"<pre>{escape(command)}</pre>")
@@ -918,6 +937,12 @@ ul.commands { padding-left: 18px; }
 .chip.on { border-color: var(--blue); background: #e8f1ff; color: #175cd3; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
+.environment-table { table-layout: fixed; }
+.environment-table td, .environment-table th {
+  overflow-wrap: anywhere; padding: 12px 16px 12px 0; vertical-align: top;
+}
+.environment-table td:last-child { font: 12px/1.7 ui-monospace, monospace; }
+summary { cursor: pointer; font-weight: 600; }
 td, th {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);

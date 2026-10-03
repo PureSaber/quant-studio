@@ -424,7 +424,8 @@ def test_data_page_sees_local_snapshot_and_fetch_command(monkeypatch, tmp_path):
     page = render_data()
 
     assert "1 个数据文件" in page
-    assert "最近更新" in page
+    assert "最近文件修改" in page
+    assert "不代表行情截止日" in page
     assert 'href="/environment"' in page
     assert "a_share_multifactor.fetch_data" in page
 
