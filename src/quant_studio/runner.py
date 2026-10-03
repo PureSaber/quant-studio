@@ -273,6 +273,8 @@ def run(
     report_name = loaded.report_name
     if succeeded:
         try:
+            if loaded.metadata.get("standard_view"):
+                _project_standard_output(loaded, run_dir, argv, cwd, timeout)
             opening_key = loaded.metadata.get("nav_initial_value_key")
             collected_report = collect_outputs(
                 cwd,
@@ -375,11 +377,7 @@ def preflight(
                 lines = completed.stderr.strip().splitlines()
                 raise QuantStudioError(lines[-1][-1600:] if lines else "上游预检失败")
             evidence = json.loads(completed.stdout)
-            if (
-                not isinstance(evidence, dict)
-                or evidence.get("software_preflight") != "pass"
-            ):
-                raise QuantStudioError("上游未返回通过的数据预检证据")
+            _validate_preflight(loaded, evidence)
             _write_json(prepared.run_dir / "preflight.json", evidence)
             result.evidence_kind = _evidence_kind(loaded, evidence)
             result.status = "checked"
@@ -403,6 +401,77 @@ def preflight(
             result.message = f"数据预检未通过：{exc}"
     _write_json(prepared.run_dir / "result.json", result.as_json())
     return result
+
+
+def _validate_preflight(template: Template, evidence: object) -> None:
+    contract = template.metadata.get("preflight_contract")
+    status_field = contract["status_field"] if contract else "software_preflight"
+    if not isinstance(evidence, dict) or evidence.get(status_field) != "pass":
+        raise QuantStudioError("上游未返回通过的数据预检证据")
+    if contract and (
+        evidence.get("schema_version") != contract["schema_version"]
+        or evidence.get("read_only") is not True
+        or evidence.get("investable") is not False
+        or evidence.get("evidence_kind") != "synthetic"
+        or not isinstance(evidence.get("instrument_ids"), list)
+        or not evidence["instrument_ids"]
+        or not all(
+            isinstance(item, str) and item for item in evidence["instrument_ids"]
+        )
+        or type(evidence.get("event_count")) is not int
+        or evidence["event_count"] <= 0
+    ):
+        raise QuantStudioError("上游离线样例预检契约不匹配")
+
+
+def _project_standard_output(template, run_dir, argv, cwd, timeout):
+    declaration = template.metadata["standard_view"]
+    native = safe_run_file(run_dir, "strategy-output/" + declaration["run"])
+    python = configured_python(template.workspace_repo)
+    if _executable(template.argv[0], python=python) != argv[0]:
+        raise QuantStudioError("运行环境配置在执行期间改变，请重新运行")
+    if python is None:
+        python = str(
+            Path(argv[0]).parent / ("python.exe" if os.name == "nt" else "python")
+        )
+    if not Path(python).is_file():
+        raise QuantStudioError("无法定位原生核验环境的Python，请配置运行环境")
+    command = [
+        python,
+        "-I",
+        str(Path(__file__).with_name("standard_view.py")),
+        "--run",
+        str(native),
+        "--output",
+        str(run_dir / "strategy-output" / "studio-view"),
+        "--project",
+        template.workspace_repo,
+    ]
+    _write_json(run_dir / "view-command.json", {"argv": command})
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        (run_dir / "view-stdout.txt").write_text(_text(exc.stdout), encoding="utf-8")
+        (run_dir / "view-stderr.txt").write_text(_text(exc.stderr), encoding="utf-8")
+        raise QuantStudioError("原生产物核验与展示转换超时") from exc
+    (run_dir / "view-stdout.txt").write_text(completed.stdout, encoding="utf-8")
+    (run_dir / "view-stderr.txt").write_text(completed.stderr, encoding="utf-8")
+    if completed.returncode:
+        detail = completed.stderr.strip().splitlines()
+        raise QuantStudioError(
+            "原生产物核验与展示转换失败："
+            + (detail[-1] if detail else "请查看转换日志")
+        )
 
 
 def _evidence_kind(template: Template, record: dict) -> str | None:

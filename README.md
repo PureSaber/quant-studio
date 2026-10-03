@@ -131,6 +131,36 @@ python -m quant_studio run hk-equity-daily --snapshot F:/Quant/quant-hk-equity/d
 
 合成样例会在运行目录写出净值页。外部模板默认只生成配置与命令；执行成功后展示模板声明的净值和报告。上游命令失败或缺少本次结果时，保留日志并显示失败原因。Python 子进程统一使用 UTF-8 日志，避免 Windows 英文区域设置导致中文输出失败。
 
+## 期货与Crypto离线样例
+
+新增`futures-spread-fixture`和`crypto-basis-fixture`，当前共八个模板、七个业务预检入口。
+期货使用上游固定四段开平仓、换月及结算计划；Crypto可选择Binance/OKX离线来源、
+maker/taker、随机种子和USDT初始资金。两个模板都支持最多8位小数的本金，
+仅消费随上游交付的合成/脱敏fixture，不接受外部行情目录，也不访问交易所。
+
+```powershell
+python -m quant_studio check crypto-basis-fixture --set source=okx --set liquidity=taker --set initial_cash=250000.12345678
+python -m quant_studio run futures-spread-fixture --set initial_cash=250000.12345678 --execute
+```
+
+在`QUANT_STUDIO_RUNTIMES`中配置两个仓各自的已安装Python。期货需要原生只读预检版本，
+Crypto还需要支持`--initial-cash`及`--liquidity`的版本；CI固定的上游提交见
+`.github/workflows/upstream-integration.yml`，模板也记录对应提交。不自动升级原生环境。
+
+正式运行成功后，Studio在同一上游Python中调用冻结QLab核验`standard/v2`，
+再把原生账户快照、持仓、委托、成交、保证金、费用及现金账本投影为展示CSV。
+Studio基础环境仍只依赖PyYAML。展示文件位于本次`strategy-output/studio-view`，
+与不可变标准产物分离；源文件内容、时间戳及清单在转换前后核对。
+
+净值直接使用账本的整数及精度，从已核验配置读取实际初始资金和币种，
+不累乘语义不同的收益列、不猜本金，也不建立第二套现金或保证金状态。
+UTC事件时点和Crypto毫秒精度完整保留，横轴按事件等距展示。
+结果页说明样例性质、观测次数和期初资金；表格预览前12行并提供完整CSV。
+非零微小收益按需增加显示精度，缺少基准时明确标示。该流程不提供真实市场或策略有效性认证。
+
+跨仓检查覆盖期货及Crypto四组来源/成交组合的实际CLI、相同参数预检与运行、
+精确本金和逐值账本投影、来源不变、重复只读投影及篡改拒绝。
+
 ## 开发检查
 
 ```powershell

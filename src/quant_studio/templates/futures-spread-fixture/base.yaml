@@ -1,0 +1,55 @@
+# M4 fixture-certified认证样例。只允许冻结QExec回测链；不是交易所历史或live配置。
+run_id: certified_local_sample_v1
+mode: backtest
+certified_profile: qexec-fixture-v1
+strategy_id: certified_spread_v1
+random_seed: 20200103
+created_at: '2020-01-03T08:00:00+00:00'
+
+account:
+  account_id: fixture-account-cny
+  base_currency: CNY
+  initial_cash: '200000'
+  money_scale: 8
+
+fixture:
+  certification: fixture-certified
+  source: qfs-local-sample-v1
+  as_of: '2020-01-02T12:00:00Z'
+  instrument_master: data/local_sample/certified_v1/instrument_master.json
+  market_events: data/local_sample/certified_v1/market_events.json
+
+execution:
+  authority: quant-execution-v0.5.1
+  engine: DeterministicRunEngine
+  risk_gate: RuleBookRiskGate
+  matching: BarMatchingModel
+  ledger: ExactAccountLedger
+  legacy_accounting: forbidden
+  sends_live_orders: false
+
+signals:
+  - signal_id: open-old-spread
+    trigger_event_id: signal-open-old
+    action: open_long
+    leg_a: A2003
+    leg_b: B2003
+    quantity: '1'
+  - signal_id: close-old-spread-before-roll
+    trigger_event_id: signal-close-old
+    action: close_long
+    leg_a: A2003
+    leg_b: B2003
+    quantity: '1'
+  - signal_id: open-successor-spread
+    trigger_event_id: signal-open-new
+    action: open_long
+    leg_a: A2005
+    leg_b: B2005
+    quantity: '1'
+  - signal_id: close-successor-spread
+    trigger_event_id: signal-close-new
+    action: close_long
+    leg_a: A2005
+    leg_b: B2005
+    quantity: '1'

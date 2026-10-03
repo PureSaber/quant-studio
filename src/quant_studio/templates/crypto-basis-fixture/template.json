@@ -1,0 +1,29 @@
+{
+  "id": "crypto-basis-fixture",
+  "title": "Crypto基差离线样例",
+  "summary": "回放现货与USDT线性永续双腿，查看毫秒事件净值、资金费、保证金与成交。",
+  "kind": "external",
+  "workspace_repo": "quant-crypto-basis",
+  "upstream_ref": "02acfeb6227d8f61243b908846592af4e5b70365",
+  "base_config": "base.json",
+  "config_format": "json",
+  "data_help": "使用上游随附的Binance/OKX脱敏离线样例，校验两个来源后回放所选来源。不连接交易所，不读取外部行情目录；L2范围仅为BTC现货样例。",
+  "knobs": [
+    {"name": "source", "label": "离线样例来源", "type": "enum", "choices": ["binance", "okx"], "choice_labels": {"binance": "Binance样例", "okx": "OKX样例"}, "default": "binance", "path": "source"},
+    {"name": "liquidity", "label": "模拟成交方式", "type": "enum", "choices": ["maker", "taker"], "choice_labels": {"maker": "限价挂单（maker）", "taker": "市价成交（taker）"}, "default": "maker", "path": "liquidity"},
+    {"name": "initial_cash", "label": "初始资金（USDT，最多8位小数）", "type": "text", "max_length": 18, "pattern": "[0-9]{1,9}(?:\\.[0-9]{1,8})?", "default": "100000", "path": "initial_cash"},
+    {"name": "seed", "label": "随机种子", "type": "int", "minimum": 0, "maximum": 2147483647, "default": 7, "path": "seed"}
+  ],
+  "argv": ["qcb-run-fixture", "--source", "{source}", "--seed", "{seed}", "--initial-cash", "{initial_cash}", "--liquidity", "{liquidity}", "--output", "{output}"],
+  "preflight_argv": ["qcb-run-fixture", "--source", "{source}", "--seed", "{seed}", "--initial-cash", "{initial_cash}", "--liquidity", "{liquidity}", "--preflight"],
+  "preflight_contract": {"schema_version": "quant-crypto-basis.preflight/v1", "status_field": "status"},
+  "preflight_summary": "只读检查双源离线事件、双腿身份、初始资金及静态策略配置；不计算策略信号、不撮合、不创建账本。",
+  "standard_view": {"run": "."},
+  "output_dirs": ["{output}"],
+  "result_files": {"nav.csv": "studio-view/nav.csv", "account.csv": "studio-view/account.csv", "positions.csv": "studio-view/positions.csv", "orders.csv": "studio-view/orders.csv", "fills.csv": "studio-view/fills.csv", "margin.csv": "studio-view/margin.csv", "costs.csv": "studio-view/costs.csv", "cash_ledger.csv": "studio-view/cash_ledger.csv"},
+  "result_evidence": {"file": "studio-view/view.json", "field": "evidence_kind", "values": ["synthetic"]},
+  "nav_currency": "USDT",
+  "return_decimals": 4,
+  "report_name": "report.html",
+  "disclaimer": "离线脱敏样例，仅验证软件，不能证明真实双腿可成交。保留毫秒UTC事件，不发送真实订单。"
+}
