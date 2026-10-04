@@ -17,7 +17,10 @@
   "requires_snapshot": true,
   "input_source": {"label": "港股快照目录", "environment": "QUANT_HK_SNAPSHOT", "default": "data/hk-snapshot", "required_files": ["manifest.json"]},
   "nav_initial_value_key": "initial_cash",
-  "result_files": {"nav.csv": "holdout/standard/returns.csv", "report.html": "report.html", "positions.csv": "holdout/standard/positions.csv", "orders.csv": "holdout/standard/orders.csv"},
+  "nav_currency": "HKD",
+  "benchmark_label": "同池等权基准",
+  "result_notice": "策略与同池等权基准均按原生规则模拟，含各自费用；同池指当前研究观察名单，不是历史全市场指数。具体收益口径、数据性质及限制见原始报告；探索性结果不代表可投资认证。",
+  "result_files": {"nav.csv": "holdout/standard/returns.csv", "benchmark_nav.csv": "benchmark/standard/returns.csv", "report.html": "report.html", "positions.csv": "holdout/standard/positions.csv", "orders.csv": "holdout/standard/orders.csv"},
   "presets": [
     {"id": "daily", "label": "日频", "values": {"rebalance_sessions": 1, "initial_cash": "1000000"}},
     {"id": "weekly-small", "label": "周频小资金", "values": {"rebalance_sessions": 5, "initial_cash": "100000"}}
