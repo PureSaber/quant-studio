@@ -218,7 +218,12 @@ def test_ashare_real_output_contract(tmp_path):
     assert (tmp_path / report).is_file()
 
 
-def test_ashare_native_preflight(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "bad_source", ["missing_prices", "other_benchmark", "unidentified_benchmark"]
+)
+def test_ashare_native_preflight(tmp_path, monkeypatch, bad_source):
+    import pandas as pd
+
     repo = Path(os.environ["QUANT_UPSTREAM_REPO"]).resolve()
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(repo.parent))
     spec = importlib.util.spec_from_file_location(
@@ -244,10 +249,33 @@ def test_ashare_native_preflight(tmp_path, monkeypatch):
     after = fixture.snapshot(tmp_path)
     assert all(after[path] == state for path, state in before.items())
     assert not (tmp_path / "snapshots").exists()
-    (tmp_path / "prices.parquet").unlink()
+    if bad_source == "missing_prices":
+        (tmp_path / "prices.parquet").unlink()
+    else:
+        benchmark_path = tmp_path / "benchmark.parquet"
+        benchmark = pd.read_parquet(benchmark_path)
+        if bad_source == "other_benchmark":
+            benchmark["benchmark_symbol"] = "OTHER_INDEX"
+        else:
+            benchmark = benchmark.drop(columns=["benchmark_symbol"])
+        benchmark.to_parquet(benchmark_path, index=False)
+    failed_source_before = {
+        name: state
+        for name, state in fixture.snapshot(tmp_path).items()
+        if name in before
+    }
     rejected = preflight(template, runs_root=tmp_path / "checks")
     assert rejected.status == "check_failed", diagnostics(rejected)
-    assert not (tmp_path / "prices.parquet").exists()
+    assert not (rejected.run_dir / "strategy-output").exists()
+    failed_source_after = fixture.snapshot(tmp_path)
+    assert all(
+        failed_source_after[name] == state
+        for name, state in failed_source_before.items()
+    )
+    if bad_source == "missing_prices":
+        assert not (tmp_path / "prices.parquet").exists()
+    else:
+        assert "H00300" in (rejected.run_dir / "stderr.txt").read_text(encoding="utf-8")
 
 
 def test_account_read_only_cli(tmp_path, monkeypatch):
