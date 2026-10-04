@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import secrets
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +28,9 @@ from quant_studio.flow import compile_document, flow_steps
 from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
 from quant_studio.research_panel import load_timing_view, timing_panel
 from quant_studio.runner import preflight, run, safe_run_file, template_readiness
+from quant_studio.settings import setting, use_settings
+from quant_studio.setup import SettingsStore, profile_from_form
+from quant_studio.setup_view import setup_body
 from quant_studio.templates import load_template, template_ids
 
 
@@ -129,6 +131,7 @@ def render_overview(runs_root: Path) -> str:
 <section class="overview-grid">{"".join(cards)}</section>
 {account_error}
 <section class="panel"><h2>开始一项研究</h2>
+<a class="chip on" href="/setup">首次配置工作区</a>
 <ol class="onboarding"><li><a href="/environment">检查运行环境</a>：
 确认每个应用使用的Python。</li>
 <li><a href="/data">查看本地数据</a>：核对输入来源，再进入模板。</li>
@@ -373,7 +376,7 @@ def render_template_page(
     catalog = list(template.metadata.get("factor_catalog") or [])
     factors = [item["name"] for item in catalog] or None
     snapshot = (
-        os.environ.get(template.metadata["input_source"]["environment"])
+        setting(template.metadata["input_source"]["environment"])
         if template.metadata.get("requires_snapshot")
         else None
     )
@@ -652,7 +655,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
 
 
 def render_environment() -> str:
-    root = os.environ.get("QUANT_WORKSPACE_ROOT") or "未设置"
+    root = setting("QUANT_WORKSPACE_ROOT") or "未设置"
     rows = []
     for template_id in template_ids():
         template = load_template(template_id)
@@ -668,6 +671,7 @@ def render_environment() -> str:
     body = f"""<header class="page-head">
 <p class="kicker">环境</p>
 <h1>工作区检查</h1>
+<a class="chip" href="/setup">填写或修改首次配置</a>
 <p class="lede">QUANT_WORKSPACE_ROOT：{escape(root)}</p>
 </header>
 <section class="panel">
@@ -726,6 +730,7 @@ def serve(
     port: int = 8770,
     *,
     runs_root: str | Path | None = None,
+    settings_path: str | Path | None = None,
 ) -> None:
     validate_host(host)
     root = (
@@ -739,6 +744,11 @@ def serve(
         pass
 
     Handler.runs_root = root
+    Handler.settings_store = SettingsStore(
+        Path(settings_path)
+        if settings_path is not None
+        else root / "studio-settings.json"
+    )
     Handler.csrf_token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((host, port), Handler)
     try:
@@ -752,8 +762,16 @@ def serve(
 class _Handler(BaseHTTPRequestHandler):
     runs_root = Path("runs")
     csrf_token = ""
+    settings_store = None
 
     def do_GET(self) -> None:
+        profile = (
+            self.settings_store.snapshot() if self.settings_store is not None else None
+        )
+        with use_settings(profile):
+            self._get()
+
+    def _get(self) -> None:
         self._frame_policy = "DENY"
         if not self._allow_request():
             return
@@ -775,6 +793,26 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_html(render_results(self.runs_root))
             elif path == "/environment":
                 self._send_html(render_environment())
+            elif path == "/setup" and self.settings_store is not None:
+                token = parse_qs(urlparse(self.path).query).get("review", [None])[0]
+                profile, error = None, ""
+                if token:
+                    try:
+                        profile = self.settings_store.reviewed(token)
+                    except QuantStudioError as exc:
+                        error = str(exc)
+                self._send_html(
+                    _layout(
+                        "首次配置",
+                        setup_body(
+                            self.settings_store,
+                            self.csrf_token,
+                            profile=profile,
+                            error=error,
+                        ),
+                        "setup",
+                    )
+                )
             elif path.startswith("/templates/"):
                 preset = parse_qs(urlparse(self.path).query).get("preset", [None])[0]
                 template_id = path.removeprefix("/templates/")
@@ -797,12 +835,19 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
+        profile = (
+            self.settings_store.snapshot() if self.settings_store is not None else None
+        )
+        with use_settings(profile):
+            self._post()
+
+    def _post(self) -> None:
         self._frame_policy = "DENY"
         if not self._allow_request(require_origin=True):
             return
         path = unquote(urlparse(self.path).path)
         code_view = False
-        if not path.startswith("/templates/"):
+        if not path.startswith("/templates/") and path != "/setup":
             self.send_error(404)
             return
         try:
@@ -824,6 +869,9 @@ class _Handler(BaseHTTPRequestHandler):
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path == "/setup":
+                self._setup_post(data)
                 return
             code_view = path.endswith("/code")
             template_id = path.removeprefix("/templates/")
@@ -852,6 +900,46 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_text(f"错误: {exc}", status=400)
                 return
             self.send_error(400, str(exc))
+
+    def _setup_post(self, data) -> None:
+        if self.settings_store is None:
+            self.send_error(404)
+            return
+        profile = None
+        try:
+            actions = data.pop("action", [])
+            if len(actions) != 1:
+                raise QuantStudioError("请选择唯一的配置操作")
+            if actions == ["review"]:
+                profile = profile_from_form(data)
+                token, checks = self.settings_store.review(profile)
+                body = setup_body(
+                    self.settings_store,
+                    self.csrf_token,
+                    profile=profile,
+                    reviewed=(token, checks),
+                )
+                self._send_html(_layout("配置预览", body, "setup"))
+            elif (
+                actions == ["save"]
+                and set(data) == {"review_token"}
+                and len(data["review_token"]) == 1
+            ):
+                self.settings_store.save(data["review_token"][0])
+                self.send_response(303)
+                self.send_header("Location", "/setup?saved=1")
+                self.end_headers()
+            else:
+                raise QuantStudioError("配置操作无效；请重新校验并预览")
+        except QuantStudioError as exc:
+            body = setup_body(
+                self.settings_store, self.csrf_token, profile=profile, error=str(exc)
+            )
+            self._send_text(
+                _layout("配置未保存", body, "setup"),
+                status=400,
+                content_type="text/html; charset=utf-8",
+            )
 
     def _allow_request(self, *, require_origin: bool = False) -> bool:
         try:
@@ -1108,7 +1196,7 @@ def _data_step(template: object) -> str:
         return "".join(parts)
     if template.metadata.get("requires_snapshot"):
         source = template.metadata["input_source"]
-        selected = escape(os.environ.get(source["environment"], ""))
+        selected = escape(setting(source["environment"]) or "")
         parts.append(
             f"<label><span>已有{escape(source['label'])}</span>"
             f'<input type="text" name="snapshot" value="{selected}"'
@@ -1313,6 +1401,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
     links = []
     for key, label, href in (
         ("overview", "总览", "/"),
+        ("setup", "首次配置", "/setup"),
         ("environment", "环境", "/environment"),
         ("data", "数据", "/data"),
         ("strategy", "策略", "/strategy"),
@@ -1365,6 +1454,9 @@ body {
 .overview-card strong { font-size: 32px; margin: 12px 0; }
 .overview-card small { color: var(--muted); line-height: 1.6; }
 .onboarding li { margin: 12px 0; }
+.setup-form, .setup-path { max-width: 1080px; }
+.setup-form label, .setup-state, .setup-path { overflow-wrap: anywhere; }
+.setup-form .actions { flex-wrap: wrap; }
 .side {
   width: 232px;
   flex: none;

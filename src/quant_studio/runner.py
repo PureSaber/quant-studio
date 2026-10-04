@@ -18,6 +18,7 @@ from quant_studio import QuantStudioError
 from quant_studio.flow import format_argv
 from quant_studio.nav import collect_outputs
 from quant_studio.runtime import configured_python
+from quant_studio.settings import current_settings, setting, subprocess_environment
 from quant_studio.templates import (
     Template,
     apply_factor_selection,
@@ -40,7 +41,7 @@ def template_readiness(
     if template.kind == "synthetic":
         return Readiness(True, "可运行")
     repo = str(template.workspace_repo)
-    root = os.environ.get("QUANT_WORKSPACE_ROOT")
+    root = setting("QUANT_WORKSPACE_ROOT")
     if not root:
         return Readiness(False, f"未设置 QUANT_WORKSPACE_ROOT，{repo} 只能预览")
     if not (Path(root) / repo).is_dir():
@@ -69,6 +70,7 @@ def template_readiness(
                         module,
                     ],
                     capture_output=True,
+                    env=subprocess_environment(),
                     timeout=10,
                     check=False,
                 )
@@ -231,7 +233,7 @@ def run(
         return result
 
     safe_run_file(run_dir, loaded.report_name, {".html"})
-    workspace_value = os.environ.get("QUANT_WORKSPACE_ROOT")
+    workspace_value = setting("QUANT_WORKSPACE_ROOT")
     if workspace_value:
         workspace_root = Path(workspace_value).resolve()
         cwd = (workspace_root / loaded.workspace_repo).resolve()
@@ -252,7 +254,7 @@ def run(
         return result
     if argv[0] != readiness.executable:
         raise QuantStudioError("运行环境配置在预检期间改变，请重新预览")
-    workspace_root = Path(os.environ["QUANT_WORKSPACE_ROOT"]).resolve()
+    workspace_root = Path(setting("QUANT_WORKSPACE_ROOT")).resolve()
     cwd = (workspace_root / loaded.workspace_repo).resolve()
 
     try:
@@ -264,7 +266,7 @@ def run(
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            env=subprocess_environment(),
             timeout=timeout,
             check=False,
         )
@@ -412,7 +414,7 @@ def preflight(
     if ready.runnable:
         if argv[0] != ready.executable:
             raise QuantStudioError("运行环境配置在预检期间改变，请重新预览")
-        cwd = Path(os.environ["QUANT_WORKSPACE_ROOT"]).resolve() / loaded.workspace_repo
+        cwd = Path(setting("QUANT_WORKSPACE_ROOT")).resolve() / loaded.workspace_repo
         try:
             completed = subprocess.run(
                 argv,
@@ -422,7 +424,7 @@ def preflight(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+                env=subprocess_environment(),
                 timeout=timeout,
                 check=False,
             )
@@ -528,7 +530,7 @@ def _project_standard_output(template, run_dir, argv, cwd, timeout):
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            env=subprocess_environment(),
             timeout=timeout,
             check=False,
         )
@@ -647,17 +649,20 @@ def _snapshot_path(template: Template, snapshot: str | Path | None) -> Path | No
             raise QuantStudioError("该模板不接受外部数据目录")
         return None
     source = template.metadata["input_source"]
-    chosen = snapshot or os.environ.get(source["environment"])
+    chosen = snapshot or setting(source["environment"])
     if chosen:
         return Path(chosen).expanduser().resolve()
-    root = os.environ.get("QUANT_WORKSPACE_ROOT")
+    profile = current_settings()
+    if profile is not None and profile["environment"].get("QUANT_WORKSPACE_ROOT"):
+        return None
+    root = setting("QUANT_WORKSPACE_ROOT")
     if root and source.get("default"):
         return (Path(root) / template.workspace_repo / source["default"]).resolve()
     return None
 
 
 def _resolve_input_paths(template: Template, config: dict[str, Any]) -> None:
-    workspace = os.environ.get("QUANT_WORKSPACE_ROOT")
+    workspace = setting("QUANT_WORKSPACE_ROOT")
     fields = template.metadata.get("input_paths", [])
     if not workspace or not fields:
         return

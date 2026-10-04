@@ -7,9 +7,16 @@ import os
 from pathlib import Path
 
 from quant_studio import QuantStudioError
+from quant_studio.settings import current_settings
 
 
 def configured_python(repository: str | None) -> str | None:
+    profile = current_settings()
+    if profile is not None and repository in profile["python_by_repo"]:
+        selected = profile["python_by_repo"][repository]
+        if not Path(selected).is_file():
+            raise QuantStudioError(f"{repository}配置的Python不存在：{selected}")
+        return selected
     path = os.environ.get("QUANT_STUDIO_RUNTIMES")
     if not path or repository is None:
         return None
