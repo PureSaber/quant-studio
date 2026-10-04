@@ -25,7 +25,13 @@ from quant_studio.desk import (
     workspace_root,
 )
 from quant_studio.flow import compile_document, flow_steps
-from quant_studio.nav import chart_fragment, drawdown_fragment, parse_nav_csv
+from quant_studio.nav import (
+    chart_fragment,
+    comparison_fragment,
+    drawdown_fragment,
+    parse_nav_csv,
+    validate_comparison,
+)
 from quant_studio.research_panel import load_timing_view, timing_panel
 from quant_studio.runner import preflight, run, safe_run_file, template_readiness
 from quant_studio.settings import setting, use_settings
@@ -548,8 +554,11 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
     benchmark_path = directory / "benchmark_nav.csv"
     if series is not None and benchmark_path.is_file():
-        baseline = parse_nav_csv(benchmark_path)
-        if baseline is not None and baseline.period_return is not None:
+        baseline = parse_nav_csv(benchmark_path, initial_nav=series.initial_nav)
+        if baseline is None:
+            raise QuantStudioError("基准文件没有可识别的净值")
+        validate_comparison(series, baseline)
+        if baseline.period_return is not None:
             benchmark = (
                 '<p class="note">同区间基准：区间涨跌'
                 f"{baseline.period_return * 100:+.2f}%，"
@@ -562,7 +571,24 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                     "不作为独立样本外结论。</p>"
                     + chart_fragment(baseline, title="基准净值 · 描述性全区间")
                 )
-    curves = chart + benchmark if timing_view else benchmark + chart
+            elif template.metadata.get("benchmark_label"):
+                benchmark = comparison_fragment(
+                    series,
+                    baseline,
+                    benchmark_label=template.metadata["benchmark_label"],
+                    currency=template.metadata["nav_currency"],
+                )
+                benchmark += (
+                    f'<p><a href="/runs/{escape(directory.name)}/files/nav.csv">'
+                    "下载策略净值CSV</a> · "
+                    f'<a href="/runs/{escape(directory.name)}/files/benchmark_nav.csv">'
+                    "下载基准净值CSV</a></p>"
+                )
+    curves = (
+        chart + benchmark
+        if timing_view or template.metadata.get("benchmark_label")
+        else benchmark + chart
+    )
     evidence_open = "" if result["status"] == "succeeded" else " open"
     preflight_view = ""
     if result["status"] == "checked":

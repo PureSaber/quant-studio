@@ -1,5 +1,6 @@
 """Run against pinned real upstream packages; no broker or network market-data calls."""
 
+import csv
 import hashlib
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import os
 import re
 import threading
 from datetime import UTC
+from decimal import Decimal
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -108,12 +110,41 @@ def test_hk_cli(tmp_path, monkeypatch, first_close_ratio):
     assert (result.run_dir / "positions.csv").is_file()
     assert "<iframe" in render_run(result.run_dir)
     nav = parse_nav_csv(result.run_dir / "nav.csv")
-    summary = json.loads(
+    native_summary = json.loads(
         (result.run_dir / "strategy-output/summary.json").read_text(encoding="utf-8")
-    )["holdout"]
+    )
+    summary = native_summary["holdout"]
     assert float(nav.initial_nav) == float(config["initial_cash"])
     assert float(nav.period_return) == pytest.approx(summary["total_return"], abs=1e-12)
     assert float(nav.max_drawdown) == pytest.approx(-summary["max_drawdown"], abs=1e-12)
+    baseline = parse_nav_csv(result.run_dir / "benchmark_nav.csv")
+    assert baseline.initial_nav == nav.initial_nav
+    assert [date for date, _ in baseline.rows] == [date for date, _ in nav.rows]
+    with (result.run_dir / "strategy-output/benchmark/standard/returns.csv").open(
+        encoding="utf-8", newline=""
+    ) as stream:
+        assert baseline.rows == [
+            (row["date"], Decimal(row["nav"])) for row in csv.DictReader(stream)
+        ]
+    for observed, key in (
+        (baseline.period_return, "total_return"),
+        (-baseline.max_drawdown, "max_drawdown"),
+        (baseline.ending, "ending_nav_hkd"),
+    ):
+        assert float(observed) == pytest.approx(
+            native_summary["benchmark"][key], abs=1e-12
+        )
+    page = render_run(result.run_dir)
+    assert "策略与基准累计收益" in page and "同池等权基准" in page
+    assert "未提供基准净值" not in page
+    assert before == {
+        str(path): (
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            path.stat().st_mtime_ns,
+        )
+        for path in snapshot.rglob("*")
+        if path.is_file()
+    }
     assert result.report == "strategy-output/report.html"
     _verify_report_http(result)
 

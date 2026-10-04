@@ -241,6 +241,82 @@ def chart_fragment(
 </section>"""
 
 
+def validate_comparison(strategy: NavSeries, benchmark: NavSeries) -> None:
+    if [date for date, _ in strategy.rows] != [date for date, _ in benchmark.rows]:
+        raise QuantStudioError("策略与基准的观测日期必须一致")
+    if strategy.initial_nav != benchmark.initial_nav:
+        raise QuantStudioError("策略与基准的期初净值必须一致")
+
+
+def comparison_fragment(
+    strategy: NavSeries,
+    benchmark: NavSeries,
+    *,
+    benchmark_label: str,
+    currency: str,
+) -> str:
+    validate_comparison(strategy, benchmark)
+    if strategy.initial_nav is None:
+        raise QuantStudioError("累计收益比较需要明确的期初本金")
+    opening = strategy.initial_nav
+    curves = [
+        [(value / opening - 1) * 100 for _, value in series.plot_rows]
+        for series in (strategy, benchmark)
+    ]
+    values = [value for curve in curves for value in curve]
+    low, high = min(values), max(values)
+    pad = (high - low) * Decimal("0.18") or Decimal(1)
+    low, high = low - pad, high + pad
+    span = high - low
+    left, top, right, bottom = 100, 24, 900, 300
+    grids = []
+    for mark in range(5):
+        ratio = Decimal(mark) / 4
+        y = top + (bottom - top) * ratio
+        level = high - span * ratio
+        grids.append(
+            f'<line x1="{left}" y1="{y:.1f}" x2="{right}" y2="{y:.1f}"/>'
+            f'<text x="92" y="{y + 4:.1f}" text-anchor="end">'
+            f"{_level(level, span)}%</text>"
+        )
+    lines = []
+    for curve, color, dash in zip(
+        curves, ("#1677ff", "#b45309"), ("", "8 5"), strict=True
+    ):
+        points = " ".join(
+            f"{left + Decimal(right - left) * i / (len(curve) - 1):.1f},"
+            f"{top + Decimal(bottom - top) * (high - value) / span:.1f}"
+            for i, value in enumerate(curve)
+        )
+        lines.append(
+            f'<polyline points="{points}" fill="none" stroke="{color}" '
+            f'stroke-width="3" stroke-dasharray="{dash}" '
+            'stroke-linejoin="round" stroke-linecap="round"/>'
+        )
+    axis = _date_axis([date for date, _ in strategy.plot_rows], left, right)
+    label = escape(benchmark_label)
+    difference = (strategy.period_return - benchmark.period_return) * 100
+    return f"""<section class="chart-card benchmark-comparison"><style>{_CHART_CSS}
+@media (max-width: 600px) {{ .benchmark-comparison svg text {{ font-size: 24px; }} }}
+</style>
+<h2>策略与基准累计收益</h2>
+<p>相同观测日期：{escape(strategy.rows[0][0])}至{escape(strategy.rows[-1][0])}；
+各自期初本金{opening:f}{escape(currency)}，首日损益计入。</p>
+<div class="stats">
+<div class="stat"><span>策略区间收益</span>
+<b>{strategy.period_return * 100:+.2f}%</b></div>
+<div class="stat"><span>{label}区间收益</span>
+<b>{benchmark.period_return * 100:+.2f}%</b></div>
+<div class="stat"><span>收益差（策略减基准）</span>
+<b>{difference:+.2f}个百分点</b></div>
+</div>
+<p>蓝色实线：策略；棕色虚线：{label}。收益差为区间收益相减，不是年化或风险调整后收益。</p>
+<svg viewBox="0 0 940 360" role="img" aria-label="策略与基准累计收益">
+{"".join(grids)}{"".join(lines)}{axis}
+</svg>
+</section>"""
+
+
 def collect_outputs(
     cwd: Path,
     run_dir: Path,
@@ -312,12 +388,10 @@ def _collect_declared(run_dir, result_files, nav_column, nav_strategy, initial_n
         )
         if curves[target] is None:
             raise QuantStudioError("本次运行没有可识别的净值")
-    if "benchmark_nav.csv" in curves and (
-        "nav.csv" not in curves
-        or [date for date, _ in curves["nav.csv"].rows]
-        != [date for date, _ in curves["benchmark_nav.csv"].rows]
-    ):
-        raise QuantStudioError("策略与基准的观测日期必须一致")
+    if "benchmark_nav.csv" in curves:
+        if "nav.csv" not in curves:
+            raise QuantStudioError("基准比较缺少策略净值")
+        validate_comparison(curves["nav.csv"], curves["benchmark_nav.csv"])
     for target, source in sources.items():
         if target in curves:
             write_nav_csv(run_dir / target, curves[target])
