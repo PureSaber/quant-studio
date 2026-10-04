@@ -5,7 +5,7 @@
   "kind": "external",
   "workspace_repo": "a-share-multifactor",
   "upstream_repo": "PureSaber/a-share-multifactor",
-  "upstream_ref": "e54eb73bc4f8369759edf38a15a4b0dfa82f6895",
+  "upstream_ref": "3c48cd28d056b6dad36fbc0041408c010912a20d",
   "base_config": "base.yaml",
   "config_format": "yaml",
   "knobs": [
