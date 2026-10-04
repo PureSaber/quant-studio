@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import venv
 from pathlib import Path
@@ -69,13 +70,57 @@ def test_module_probe_uses_selected_environment(tmp_path, monkeypatch):
 
 
 def test_selected_environment_never_borrows_cli_from_path(tmp_path, monkeypatch):
-    python = tmp_path / "python.exe"
-    python.touch()
+    environment = tmp_path / "selected"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     monkeypatch.setattr("shutil.which", lambda *a, **kw: "wrong-environment/quant-hk")
     assert _executable("quant-hk", python=str(python)) is None
-    cli = tmp_path / ("quant-hk.exe" if os.name == "nt" else "quant-hk")
+    cli = python.parent / ("quant-hk.exe" if os.name == "nt" else "quant-hk")
     cli.touch()
     assert _executable("quant-hk", python=str(python)) == str(cli)
+
+
+def test_selected_environment_uses_its_reported_scripts_directory(
+    tmp_path, monkeypatch
+):
+    python = tmp_path / "python.exe"
+    python.touch()
+    scripts = tmp_path / "console-scripts"
+    scripts.mkdir()
+    name = "quant-hk.exe" if os.name == "nt" else "quant-hk"
+    (python.parent / name).touch()
+
+    def probe(argv, **kwargs):
+        assert argv[0] == str(python) and "sysconfig" in argv[-1]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(str(scripts)), "")
+
+    monkeypatch.setattr("quant_studio.runner.subprocess.run", probe)
+    monkeypatch.setattr("shutil.which", lambda *a, **kw: "wrong-environment/quant-hk")
+    assert _executable("quant-hk", python=str(python)) is None
+    cli = scripts / name
+    cli.touch()
+    assert _executable("quant-hk", python=str(python)) == str(cli)
+
+
+@pytest.mark.parametrize(
+    "failure", ["exit-code", "invalid-json", "relative", "timeout"]
+)
+def test_failed_scripts_probe_cannot_borrow_a_global_cli(
+    tmp_path, monkeypatch, failure
+):
+    def probe(argv, **kwargs):
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 10)
+        return subprocess.CompletedProcess(
+            argv,
+            1 if failure == "exit-code" else 0,
+            "broken" if failure == "invalid-json" else json.dumps("relative/scripts"),
+            "",
+        )
+
+    monkeypatch.setattr("quant_studio.runner.subprocess.run", probe)
+    monkeypatch.setattr("shutil.which", lambda *a, **kw: "wrong-environment/quant-hk")
+    assert _executable("quant-hk", python=str(tmp_path / "python.exe")) is None
 
 
 @pytest.mark.parametrize(

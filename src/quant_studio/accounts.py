@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -12,6 +11,7 @@ from pathlib import Path
 
 from quant_studio import QuantStudioError
 from quant_studio.runtime import configured_python
+from quant_studio.settings import setting, subprocess_environment
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class AccountSource:
 
 
 def account_sources() -> list[AccountSource]:
-    value = os.environ.get("QUANT_STUDIO_ACCOUNTS")
+    value = setting("QUANT_STUDIO_ACCOUNTS")
     if not value:
         return []
     try:
@@ -81,7 +81,7 @@ def inspect_source(source: AccountSource, *, timeout: float = 30) -> dict:
             text=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+            env=subprocess_environment(),
             timeout=timeout,
             check=False,
         )

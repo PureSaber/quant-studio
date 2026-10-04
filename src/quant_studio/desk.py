@@ -9,6 +9,7 @@ from pathlib import Path
 
 from quant_studio import QuantStudioError
 from quant_studio.runner import safe_run_file
+from quant_studio.settings import setting
 
 DATA_ROOTS = (
     ("A股", "a-share-multifactor", "data"),
@@ -44,7 +45,7 @@ class Dataset:
 
 
 def workspace_root() -> Path | None:
-    raw = os.environ.get("QUANT_WORKSPACE_ROOT")
+    raw = setting("QUANT_WORKSPACE_ROOT")
     if not raw:
         return None
     path = Path(raw)

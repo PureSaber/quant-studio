@@ -16,7 +16,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "serve":
-            serve(args.host, args.port, runs_root=args.runs_root)
+            serve(
+                args.host,
+                args.port,
+                runs_root=args.runs_root,
+                settings_path=args.settings,
+            )
             return 0
         knobs = _parse_sets(args.template_id, args.settings)
         if args.command == "check":
@@ -39,6 +44,10 @@ def _parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8770)
     serve_parser.add_argument("--runs-root", help="研究记录目录；可放在源码仓库外")
+    serve_parser.add_argument(
+        "--settings",
+        help="本地配置保存文件；默认使用研究记录目录下的studio-settings.json",
+    )
     for name in ("preview", "check", "run"):
         command = commands.add_parser(name)
         command.add_argument("template_id")
