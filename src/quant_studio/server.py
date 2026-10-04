@@ -1424,8 +1424,7 @@ def _choice_label(name: str, choice: object) -> str:
 
 
 def _layout(title: str, body: str, active: str = "strategy") -> str:
-    links = []
-    for key, label, href in (
+    nav_items = (
         ("overview", "总览", "/"),
         ("setup", "首次配置", "/setup"),
         ("environment", "环境", "/environment"),
@@ -1434,9 +1433,16 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("backtest", "回测", "/backtest"),
         ("results", "结果", "/results"),
         ("accounts", "账户", "/accounts"),
-    ):
+    )
+    links = []
+    for key, label, href in nav_items:
         mark = " on" if key == active else ""
-        links.append(f'<a class="nav{mark}" href="{href}">{label}</a>')
+        current = ' aria-current="page"' if key == active else ""
+        links.append(f'<a class="nav{mark}" href="{href}"{current}>{label}</a>')
+    nav_html = "".join(links)
+    active_label = next(
+        (label for key, label, _ in nav_items if key == active), "当前页面"
+    )
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1445,7 +1451,11 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
 <body><div class="shell">
 <aside class="side">
 <a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
-<nav>{"".join(links)}</nav>
+<nav aria-label="主导航">{nav_html}</nav>
+<details class="mobile-nav">
+<summary>页面导航<span> · 当前：{escape(active_label)}</span></summary>
+<nav aria-label="页面导航">{nav_html}</nav>
+</details>
 <p class="side-note">不下真实订单。曲线只来自合成样例，或上游已经交出的净值。</p>
 </aside>
 <div class="stage">{body}</div>
@@ -1471,9 +1481,11 @@ body {
 .shell { display: flex; min-height: 100vh; }
 .overview-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px;
+  min-width: 0;
 }
 .overview-card {
   display: flex; flex-direction: column; padding: 20px;
+  min-width: 0;
   border: 1px solid var(--line); border-radius: 14px;
   background: white; color: var(--ink); text-decoration: none;
 }
@@ -1508,6 +1520,41 @@ nav a {
   text-decoration: none;
 }
 nav a.on { background: #24406e; }
+nav a:focus-visible, .mobile-nav summary:focus-visible {
+  outline: 3px solid #8bb8ff;
+  outline-offset: 2px;
+}
+.mobile-nav { display: none; }
+.mobile-nav summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #34445f;
+  border-radius: 8px;
+  color: white;
+  background: #172033;
+  cursor: pointer;
+  list-style: none;
+}
+.mobile-nav summary::-webkit-details-marker { display: none; }
+.mobile-nav summary::after { content: "＋"; color: #b7c8e2; }
+.mobile-nav[open] summary::after { content: "−"; }
+.mobile-nav summary span { color: #b7c8e2; font-size: 12px; }
+.mobile-nav nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.mobile-nav nav a {
+  margin-top: 0;
+  min-width: 0;
+  padding: 9px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 label.check { display: flex; align-items: center; gap: 8px; }
 label.check input { width: auto; margin: 0; }
 ul.commands { padding-left: 18px; }
@@ -1736,9 +1783,11 @@ iframe {
 @media (max-width: 1100px) {
   .shell { flex-direction: column; }
   .side { width: auto; padding: 16px 20px 8px; }
-  nav { margin-top: 12px; }
+  .side > nav { display: none; }
+  .mobile-nav { display: block; margin-top: 12px; }
   .side-note { display: none; }
   .stage { padding: 24px 20px 40px; }
+  .overview-grid { grid-template-columns: 1fr; }
   .studio-grid { grid-template-columns: 1fr; }
   .code-card { position: static; }
   .fields, .factor-grid { grid-template-columns: 1fr; }
