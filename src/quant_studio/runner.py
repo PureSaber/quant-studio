@@ -626,9 +626,35 @@ def _executable(command: str, *, python: str | None = None) -> str | None:
         return python or sys.executable
     if python is not None:
         # A selected environment is exclusive: never borrow another environment's CLI.
-        candidate = Path(python).parent / (
-            command + (".exe" if os.name == "nt" else "")
-        )
+        try:
+            probe = subprocess.run(
+                [
+                    python,
+                    "-I",
+                    "-B",
+                    "-X",
+                    "utf8",
+                    "-c",
+                    "import json,sysconfig; "
+                    "print(json.dumps(sysconfig.get_path('scripts')))",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=subprocess_environment(),
+                timeout=10,
+                check=False,
+            )
+            directory = json.loads(probe.stdout)
+            if (
+                probe.returncode
+                or not isinstance(directory, str)
+                or not Path(directory).is_absolute()
+            ):
+                return None
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        candidate = Path(directory) / (command + (".exe" if os.name == "nt" else ""))
         return str(candidate) if candidate.is_file() else None
     search_path = (
         str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
