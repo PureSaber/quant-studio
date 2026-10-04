@@ -21,7 +21,9 @@ def flow_steps(template: Template) -> list[tuple[str, str]]:
     steps = [("data", "数据")]
     if template.metadata.get("factor_catalog"):
         steps.append(("factors", "因子"))
-    steps.extend([("trade", "交易"), ("run", "回测"), ("code", "代码")])
+    if template.knobs:
+        steps.append(("trade", "交易"))
+    steps.extend([("run", "回测"), ("code", "代码")])
     return steps
 
 
