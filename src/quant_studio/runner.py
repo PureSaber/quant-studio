@@ -286,6 +286,30 @@ def run(
     evidence_kind = None
     research_view_sha256 = None
     report_name = loaded.report_name
+    family_report_verified = False
+    if loaded.metadata.get("counterfactual_view"):
+        try:
+            if returncode not in {0, 2}:
+                raise QuantStudioError("原生候选族未正常完成，请查看执行日志")
+            _project_standard_output(loaded, run_dir, argv, cwd, timeout)
+            view_path = safe_run_file(run_dir, "strategy-output/studio-view/view.json")
+            view = json.loads(view_path.read_text(encoding="utf-8"))
+            if view["native_exit_code"] != returncode:
+                raise QuantStudioError("原生退出状态与候选族证据不一致")
+            report_name = collect_outputs(
+                cwd,
+                run_dir,
+                _output_dirs(loaded, rendered.config),
+                result_files=loaded.metadata["result_files"],
+            )
+            evidence_kind = _evidence_kind(loaded, view)
+            research_view_sha256 = hashlib.sha256(view_path.read_bytes()).hexdigest()
+            family_report_verified = True
+            if returncode == 2:
+                message = "候选族未完成，保留失败证据；效应与联合交互结论不可用。"
+        except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
+            succeeded = False
+            message = f"无法核验本次择时反事实: {exc}"
     if loaded.metadata.get("timing_view") and returncode in {0, 1, 2}:
         manifest = safe_run_file(run_dir, "strategy-output/standard/run_manifest.json")
         if manifest.is_file():
@@ -304,7 +328,7 @@ def run(
             except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
                 succeeded = False
                 message = f"无法核验本次择时研究: {exc}"
-    if succeeded:
+    if succeeded and not family_report_verified:
         try:
             if loaded.metadata.get("standard_view"):
                 _project_standard_output(loaded, run_dir, argv, cwd, timeout)
@@ -343,7 +367,9 @@ def run(
         identifier,
         run_dir,
         argv,
-        report_name if succeeded and report.is_file() else None,
+        report_name
+        if (succeeded or family_report_verified) and report.is_file()
+        else None,
         returncode,
         message,
         evidence_kind,
@@ -465,8 +491,12 @@ def _validate_preflight(template: Template, evidence: object) -> None:
 
 
 def _project_standard_output(template, run_dir, argv, cwd, timeout):
-    timing = bool(template.metadata.get("timing_view"))
-    declaration = template.metadata["timing_view" if timing else "standard_view"]
+    view_kind = next(
+        key
+        for key in ("counterfactual_view", "timing_view", "standard_view")
+        if template.metadata.get(key)
+    )
+    declaration = template.metadata[view_kind]
     native = safe_run_file(run_dir, "strategy-output/" + declaration["run"])
     if template.argv[:2] != ["python", "-m"]:
         raise QuantStudioError("标准账本模板必须通过明确Python模块入口运行")
@@ -481,9 +511,7 @@ def _project_standard_output(template, run_dir, argv, cwd, timeout):
     command = [
         python,
         "-I",
-        str(
-            Path(__file__).with_name("timing_view.py" if timing else "standard_view.py")
-        ),
+        str(Path(__file__).with_name(f"{view_kind}.py")),
         "--run",
         str(native),
         "--output",

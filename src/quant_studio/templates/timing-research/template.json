@@ -4,7 +4,7 @@
   "summary": "读取已有配置，预检后运行原生研究，查看曲线、测试折、逐项收益贡献和仓位发布状态。",
   "kind": "external",
   "workspace_repo": "quant-timing",
-  "upstream_ref": "0357f83d10be769cae289f0496f3827eb90796ec",
+  "upstream_ref": "35058df73d079f951b5600154ee444ce66fe5fa6",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,

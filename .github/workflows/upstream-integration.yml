@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-timing
-          ref: 0357f83d10be769cae289f0496f3827eb90796ec
+          ref: 35058df73d079f951b5600154ee444ce66fe5fa6
           path: quant-timing
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -84,4 +84,4 @@ jobs:
       - name: Verify timing publication and evidence contracts
         env:
           QUANT_UPSTREAM_REPO: ${{ github.workspace }}/quant-timing
-        run: python -m pytest quant-studio/integration/test_timing_upstream.py -q
+        run: python -m pytest quant-studio/integration/test_timing_upstream.py quant-studio/integration/test_timing_counterfactual.py -q

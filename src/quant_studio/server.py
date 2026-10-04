@@ -13,6 +13,10 @@ import yaml
 
 from quant_studio import QuantStudioError
 from quant_studio.accounts import account_sources, inspect_source
+from quant_studio.counterfactual_panel import (
+    counterfactual_panel,
+    load_counterfactual_view,
+)
 from quant_studio.desk import (
     FETCH_BY_REPO,
     FETCH_COMMANDS,
@@ -425,6 +429,11 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     template = load_template(request["template_id"])
+    family_view = (
+        load_counterfactual_view(directory, result)
+        if template.metadata.get("counterfactual_view")
+        else None
+    )
     timing_view = (
         load_timing_view(directory, result)
         if template.metadata.get("timing_view")
@@ -432,7 +441,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     )
     argv = " ".join(escape(str(item)) for item in result["argv"])
     report_html = ""
-    if result.get("report"):
+    if result.get("report") and not family_view:
         report_name = result["report"]
         declared = (template.metadata.get("result_files") or {}).get("report.html")
         if report_name == "report.html" and declared:
@@ -506,7 +515,12 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if stderr_path.is_file():
             detail = stderr_path.read_text(encoding="utf-8")[-800:]
             notices.append(f"<pre>{escape(detail)}</pre>")
-    elif result["status"] == "succeeded" and not chart and not report_html:
+    elif (
+        result["status"] == "succeeded"
+        and not chart
+        and not report_html
+        and not family_view
+    ):
         notices.append(
             '<p class="banner">命令已结束，但没有找到净值序列或 report.html</p>'
         )
@@ -620,6 +634,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
 </header>
 {"".join(notices)}
 {preflight_view}
+{counterfactual_panel(directory, family_view)}
 {timing_panel(directory, timing_view)}
 {curves}
 {drawdown}
@@ -685,7 +700,23 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
     result_path = safe_run_file(run_dir, "result.json")
     if result_path.is_file():
         result = json.loads(result_path.read_text(encoding="utf-8"))
-        if result.get("research_view_sha256"):
+        request_path = safe_run_file(run_dir, "request.json")
+        family = False
+        if request_path.is_file():
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            family = load_template(request["template_id"]).metadata.get(
+                "counterfactual_view"
+            )
+        if family:
+            view = load_counterfactual_view(run_dir, result)
+            allowed = (
+                {"strategy-output/" + name for name in view["source_files"]}
+                if view
+                else set()
+            )
+            if path.relative_to(run_dir).as_posix() not in allowed:
+                raise QuantStudioError("反事实下载文件未通过候选族核验")
+        elif result.get("research_view_sha256"):
             load_timing_view(run_dir, result)
     return path
 
