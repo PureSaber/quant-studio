@@ -1437,7 +1437,8 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
     links = []
     for key, label, href in nav_items:
         mark = " on" if key == active else ""
-        links.append(f'<a class="nav{mark}" href="{href}">{label}</a>')
+        current = ' aria-current="page"' if key == active else ""
+        links.append(f'<a class="nav{mark}" href="{href}"{current}>{label}</a>')
     nav_html = "".join(links)
     active_label = next(
         (label for key, label, _ in nav_items if key == active), "当前页面"
@@ -1473,7 +1474,6 @@ _CSS = """
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  overflow-x: clip;
   color: var(--ink);
   background: var(--bg);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -1791,8 +1791,5 @@ iframe {
   .studio-grid { grid-template-columns: 1fr; }
   .code-card { position: static; }
   .fields, .factor-grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 600px) {
-  .overview-grid { grid-template-columns: 1fr; }
 }
 """
