@@ -19,7 +19,6 @@ from quant_studio.counterfactual_panel import (
 from quant_studio.desk import (
     FETCH_BY_REPO,
     FETCH_COMMANDS,
-    html_table,
     list_runs,
     scan_datasets,
     workspace_root,
@@ -37,6 +36,7 @@ from quant_studio.runner import preflight, run, safe_run_file, template_readines
 from quant_studio.settings import setting, use_settings
 from quant_studio.setup import SettingsStore, profile_from_form
 from quant_studio.setup_view import setup_body
+from quant_studio.table_view import html_table
 from quant_studio.templates import load_template, template_ids
 
 
@@ -148,9 +148,9 @@ def render_overview(runs_root: Path) -> str:
 <section class="panel"><h2>需要处理</h2>
 <ul>{blockers or "<li>环境检查通过；请继续核验数据和研究条件。</li>"}</ul></section>
 <section class="panel"><h2>最近研究</h2><table>
-<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
 {_run_rows(records[:6], "/runs/") or '<tr><td colspan="4">还没有研究记录</td></tr>'}
-</table></section>
+</table>{_FILE_TIME_NOTE}</section>
 <section class="panel"><h2>前向账户</h2>
 {account_links or '<p>尚未连接账户。<a href="/accounts">查看连接方法</a></p>'}
 <p class="note">这里只读取明确配置的账户，不登记、观察或封存账户。</p></section>"""
@@ -332,9 +332,9 @@ def render_backtest(runs_root: Path) -> str:
 <p class="lede">从策略页提交。打开一条记录可看命令；失败时能看到输出。</p>
 </header>
 <section class="panel"><table>
-<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
 {rows or "<tr><td colspan='4'>还没有运行</td></tr>"}
-</table></section>"""
+</table>{_FILE_TIME_NOTE}</section>"""
     return _layout("回测", body, "backtest")
 
 
@@ -352,9 +352,9 @@ def render_results(runs_root: Path) -> str:
 打开后可看曲线、回撤和持仓成交表。</p>
 </header>
 <section class="panel"><table>
-<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
 {rows or "<tr><td colspan='4'>还没有带净值或报告的结果</td></tr>"}
-</table></section>"""
+</table>{_FILE_TIME_NOTE}</section>"""
     return _layout("结果", body, "results")
 
 
@@ -1346,7 +1346,14 @@ def _artifact_tables(
         "cash_ledger.csv": "现金账本",
     }
     labels = {
-        "event_time": "事件时间（UTC）",
+        "event_time": "事件时间（UTC）" if native else "事件时间（原时区）",
+        "date": "日期",
+        "timestamp": "时间（原时区）",
+        "strategy": "策略",
+        "symbol": "标的",
+        "weight": "持仓权重（比例）",
+        "target_weight": "目标权重（比例）",
+        "requested_quantity": "申请数量",
         "account_id": "账户",
         "base_currency": "基础币种",
         "currency": "币种",
@@ -1379,13 +1386,47 @@ def _artifact_tables(
         "ledger_account": "账本科目",
         "quantity_delta": "数量变动",
     }
-    labels = (labels if native else {}) | (column_labels or {})
+    labels = labels | (column_labels or {})
+    numeric_columns = {
+        "nav",
+        "cash_value",
+        "market_value",
+        "unrealized_pnl",
+        "realized_pnl",
+        "margin_used",
+        "quantity",
+        "mark_price",
+        "price",
+        "initial_margin",
+        "maintenance_margin",
+        "amount",
+        "limit_price",
+        "stop_price",
+        "filled_quantity",
+        "requested_quantity",
+        "quantity_delta",
+        "weight",
+        "target_weight",
+        "commission",
+        "slippage",
+        "market_impact",
+        "cash",
+        "notional",
+    }
     parts = []
     for name, title in titles.items():
         title = (table_titles or {}).get(name, title)
         path = directory / name
         if path.is_file():
-            parts.append(html_table(path, title, column_labels=labels))
+            parts.append(
+                html_table(
+                    path,
+                    title,
+                    column_labels=labels,
+                    numeric_columns=numeric_columns,
+                    fraction_digits={"weight": 4, "target_weight": 4},
+                )
+            )
             parts.append(
                 f'<p><a href="/runs/{escape(directory.name)}/files/{name}" download>'
                 f"下载完整{escape(title)}CSV</a></p>"
@@ -1461,6 +1502,11 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
 <div class="stage">{body}</div>
 </div></body></html>"""
 
+
+_FILE_TIME_NOTE = (
+    '<p class="note">文件更新时间按服务所在机器的本地时区显示，包含UTC偏移；'
+    "不代表行情截止或策略成交时刻。</p>"
+)
 
 _CSS = """
 :root {
@@ -1579,6 +1625,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
 .table-scroll { max-width: 100%; overflow-x: auto; }
 .table-scroll td, .table-scroll th { padding-right: 16px; white-space: nowrap; }
+.table-scroll thead { background: #f8fafc; }
+.table-scroll tbody tr:nth-child(even) { background: #f8fafc; }
+.table-scroll tbody tr:hover { background: #edf4ff; }
+.table-scroll td, .table-scroll th { padding-left: 12px; }
+.table-scroll .numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.table-scroll:focus-visible { outline: 3px solid #8bb8ff; outline-offset: 2px; }
 .environment-table { table-layout: fixed; }
 .environment-table td, .environment-table th {
   overflow-wrap: anywhere; padding: 12px 16px 12px 0; vertical-align: top;

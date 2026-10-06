@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
-from html import escape
+from datetime import UTC, datetime
 from pathlib import Path
 
 from quant_studio import QuantStudioError
 from quant_studio.runner import safe_run_file
 from quant_studio.settings import setting
+from quant_studio.table_view import html_table as html_table
 
 DATA_ROOTS = (
     ("A股", "a-share-multifactor", "data"),
@@ -119,42 +119,16 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
                 "has_nav": "1" if (directory / "nav.csv").is_file() else "0",
                 "has_report": "1" if has_report else "0",
                 "when": _format_time(stamp),
-                "mtime": str(int(stamp)),
+                "mtime": str(stamp),
             }
         )
-    records.sort(key=lambda item: item["mtime"], reverse=True)
+    records.sort(key=lambda item: float(item["mtime"]), reverse=True)
     return records[:40]
 
 
 def _format_time(stamp: float) -> str:
-    return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
-
-
-def html_table(
-    path: Path, title: str, limit: int = 12, *, column_labels: dict | None = None
-) -> str:
-    import csv
-
-    with path.open(newline="", encoding="utf-8") as stream:
-        reader = csv.reader(stream)
-        rows = []
-        for index, row in enumerate(reader):
-            if index > limit:
-                break
-            rows.append(row)
-    if not rows:
-        return ""
-    labels = column_labels or {}
-    head = "".join(
-        f'<th title="{escape(cell)}">{escape(labels.get(cell, cell))}</th>'
-        for cell in rows[0]
-    )
-    body = []
-    for row in rows[1:]:
-        cells = "".join(f"<td>{escape(cell)}</td>" for cell in row)
-        body.append(f"<tr>{cells}</tr>")
     return (
-        f'<section class="panel"><h2>{escape(title)}</h2>'
-        '<div class="table-scroll" tabindex="0">'
-        f"<table><tr>{head}</tr>{''.join(body)}</table></div></section>"
+        datetime.fromtimestamp(stamp, UTC)
+        .astimezone()
+        .isoformat(sep=" ", timespec="seconds")
     )

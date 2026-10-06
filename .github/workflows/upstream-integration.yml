@@ -16,10 +16,10 @@ jobs:
         os: [ubuntu-24.04, windows-latest]
         upstream:
           - {repo: quant-paper-sim, ref: 0ff46a10f21c5df64a6cd77b7e941a506240dffe, test: paper}
-          - {repo: quant-hk-equity, ref: 37a9314e63038b8a89afcbbec2f5936953c0c62b, test: hk}
+          - {repo: quant-hk-equity, ref: 18cfe93a757e93e0c89875ceff9612350f989359, test: hk}
           - {repo: a-share-multifactor, ref: 3c48cd28d056b6dad36fbc0041408c010912a20d, test: ashare}
           - {repo: quant-pipeline, ref: b1fce90b85651248e9e60ae857b88fe4d170319e, test: account}
-          - {repo: quant-fund, ref: c7be45bdce66aee49762430ba93d2fc361e3c4b5, test: fund}
+          - {repo: quant-fund, ref: cbdfb5e353bf9ab372499d5ddca3e50bb03270d0, test: fund}
           - {repo: quant-futures-spread, ref: f01d6afd87ca0556d6e2f44e522cfecbf00cad56, test: futures}
           - {repo: quant-crypto-basis, ref: 02acfeb6227d8f61243b908846592af4e5b70365, test: crypto}
     steps:
