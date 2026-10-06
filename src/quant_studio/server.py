@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import secrets
@@ -32,6 +33,7 @@ from quant_studio.nav import (
     validate_comparison,
 )
 from quant_studio.research_panel import load_timing_view, timing_panel
+from quant_studio.run_record import load_run_result
 from quant_studio.runner import preflight, run, safe_run_file, template_readiness
 from quant_studio.settings import setting, use_settings
 from quant_studio.setup import SettingsStore, profile_from_form
@@ -435,9 +437,28 @@ def render_template_page(
 
 def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     directory = Path(run_dir)
-    result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
+    result = load_run_result(directory)
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     template = load_template(request["template_id"])
+    if result.get("verification_status") == "failed":
+        result = {**result, "status": "verification_failed"}
+    if result["status"] in {"running", "checking", "incomplete", "verification_failed"}:
+        return _render_unfinished_run(directory, request, result, template, csrf_token)
+    verified_evidence = None
+    if result.get("verification_status") == "pass":
+        try:
+            content = (directory / "verification.json").read_bytes()
+            if hashlib.sha256(content).hexdigest() != result.get("verification_sha256"):
+                raise QuantStudioError("账本核验记录已改变")
+            verified_evidence = json.loads(content)
+        except (OSError, ValueError, QuantStudioError) as exc:
+            return _render_unfinished_run(
+                directory,
+                request,
+                {**result, "status": "verification_failed", "message": str(exc)},
+                template,
+                csrf_token,
+            )
     family_view = (
         load_counterfactual_view(directory, result)
         if template.metadata.get("counterfactual_view")
@@ -448,7 +469,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if template.metadata.get("timing_view")
         else None
     )
-    argv = " ".join(escape(str(item)) for item in result["argv"])
+    argv = " ".join(escape(str(item)) for item in result.get("argv", []))
     report_html = ""
     if result.get("report") and not family_view:
         report_name = result["report"]
@@ -492,6 +513,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 title="策略净值 · 描述性全区间" if timing_view else "净值曲线",
             )
     notices = []
+    if verified_evidence is not None:
+        notices.append(
+            '<section class="panel"><h2>账本重放校验通过</h2>'
+            "<p>已从原始账本重新回放并核对保存结果。</p>"
+            "<details><summary>核验明细</summary><pre>"
+            + escape(json.dumps(verified_evidence, ensure_ascii=False, indent=2))
+            + "</pre></details></section>"
+        )
     if template.metadata.get("result_notice"):
         notices.append(
             f'<p class="note">{escape(template.metadata["result_notice"])}</p>'
@@ -678,6 +707,57 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
 </section>
 </details>"""
     return _layout("运行结果", body, "results")
+
+
+def _render_unfinished_run(directory, request, result, template, csrf_token):
+    has_preflight = bool(template.metadata.get("preflight_argv"))
+    retry_label = "按相同参数重新预检" if has_preflight else "按相同参数创建新记录"
+    fields = [
+        ("_csrf_token", csrf_token),
+        ("action", "check" if has_preflight else "execute"),
+    ]
+    fields.extend(
+        (str(key), str(value)) for key, value in request.get("knobs", {}).items()
+    )
+    if request.get("snapshot"):
+        fields.append(("snapshot", request["snapshot"]))
+    if request.get("factors") is not None:
+        fields.append(("factor_form", "1"))
+        fields.extend(("factor", factor) for factor in request["factors"])
+    inputs = "".join(
+        f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
+        for key, value in fields
+    )
+    logs = "".join(
+        f"<h3>{title}</h3><pre>{escape(path.read_text(encoding='utf-8')[-8000:])}</pre>"
+        for name, title in (
+            ("stdout.txt", "标准输出"),
+            ("stderr.txt", "错误输出"),
+            ("verification-stderr.txt", "账本核验错误"),
+        )
+        if (path := directory / name).is_file()
+    )
+    argv = " ".join(escape(str(item)) for item in result.get("argv", []))
+    message = escape(
+        result.get("message") or "进程可能仍在运行，也可能已中断；尚无完成证据。"
+    )
+    label = (
+        "账本核验未通过"
+        if result["status"] == "verification_failed"
+        else "记录尚未完成"
+    )
+    body = f"""<header class="page-head"><h1>{escape(template.title)}</h1>
+<p class="lede"><span class="status incomplete">{label}</span></p></header>
+<section class="panel"><h2>检查与恢复</h2>
+<p>{message}</p>
+<p>请先确认原进程已结束。保留当前记录与账本；已有账户先核验并恢复投影，
+不要用初始化覆盖账户。部分产物不能作为完整结果。</p>
+<form method="post" action="/templates/{escape(template.id)}">{inputs}
+<button class="btn primary">{retry_label}</button></form>
+<p class="note">新记录重新读取输入；本次配置、结果与账本继续保留。</p></section>
+<details class="panel" open><summary>配置与执行命令</summary>
+{_saved_config(directory)}<pre>{argv}</pre>{logs}</details>"""
+    return _layout("未完成运行", body, "results")
 
 
 def render_environment() -> str:
@@ -1114,6 +1194,9 @@ _CHOICES = {
 }
 
 _STATUS = {
+    "running": "运行尚未完成",
+    "checking": "预检尚未完成",
+    "incomplete": "记录未完成",
     "checked": "预检通过",
     "check_failed": "预检未通过",
     "previewed": "仅预览",
@@ -1814,6 +1897,9 @@ input, select {
   font-size: 13px;
 }
 .status.failed, .status.blocked { background: #fdecec; color: #b42318; }
+.status.incomplete, .status.running, .status.checking {
+  background: #fff2d5; color: #835300;
+}
 .command { margin-bottom: 16px; }
 .command h2 { margin: 0 0 10px; font-size: 16px; }
 pre {

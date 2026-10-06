@@ -39,6 +39,9 @@ def test_separate_environment_is_used_for_preview_and_actual_execution(
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     _configure(tmp_path, monkeypatch, python)
     template = load_template("paper-sim")
+    template.metadata.pop(
+        "verification_argv"
+    )  # The fixture only tests interpreter selection.
     template.metadata["argv"] = [
         "python",
         "-c",

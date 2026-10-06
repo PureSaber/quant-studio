@@ -86,6 +86,13 @@ def test_native_asset_cli(name, tmp_path, monkeypatch):
     )
     assert result.status == "succeeded", diagnostics(result)
     assert result.evidence_kind == "synthetic"
+    if fund:
+        assert result.verification_status == "pass"
+        evidence = json.loads(
+            (result.run_dir / "verification.json").read_text(encoding="utf-8")
+        )
+        assert evidence["verified_ledger_days"] > 60
+        assert "账本重放校验通过" in render_run(result.run_dir)
     assert fingerprint(source) == before
     assert (checked.run_dir / "config.json").read_bytes() == (
         result.run_dir / "config.json"

@@ -81,6 +81,9 @@ def test_external_success_only_records_report_from_run_directory(tmp_path, monke
     repo.mkdir(parents=True)
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
     template = load_template("paper-sim")
+    template.metadata.pop(
+        "verification_argv"
+    )  # This fixture only implements report collection.
     template.metadata["argv"] = [
         sys.executable,
         "-c",

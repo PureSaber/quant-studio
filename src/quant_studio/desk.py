@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from quant_studio import QuantStudioError
+from quant_studio.run_record import load_run_result
 from quant_studio.runner import safe_run_file
 from quant_studio.settings import setting
 from quant_studio.table_view import html_table as html_table
@@ -93,30 +94,38 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
     records = []
     for directory in runs_root.iterdir():
         result_path = directory / "result.json"
-        if not directory.is_dir() or not result_path.is_file():
+        request_path = directory / "request.json"
+        if not directory.is_dir() or not request_path.is_file():
             continue
         try:
-            result = json.loads(result_path.read_text(encoding="utf-8"))
-            request = json.loads(
-                (directory / "request.json").read_text(encoding="utf-8")
-            )
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            if not isinstance(request, dict):
+                continue
         except (OSError, json.JSONDecodeError):
             continue
+        result = load_run_result(directory)
+        unfinished = (
+            result["status"] in {"running", "checking", "incomplete"}
+            or result.get("verification_status") == "failed"
+        )
         report_name = str(result.get("report") or "")
         try:
             has_report = (
-                bool(report_name)
+                not unfinished
+                and bool(report_name)
                 and safe_run_file(directory, report_name, {".html"}).is_file()
             )
         except QuantStudioError:
             has_report = False
-        stamp = result_path.stat().st_mtime
+        stamp = (result_path if result_path.is_file() else request_path).stat().st_mtime
         records.append(
             {
                 "run_id": directory.name,
                 "template_id": str(request.get("template_id", "")),
                 "status": str(result.get("status", "")),
-                "has_nav": "1" if (directory / "nav.csv").is_file() else "0",
+                "has_nav": "1"
+                if not unfinished and (directory / "nav.csv").is_file()
+                else "0",
                 "has_report": "1" if has_report else "0",
                 "when": _format_time(stamp),
                 "mtime": str(stamp),
