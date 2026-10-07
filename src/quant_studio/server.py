@@ -1449,7 +1449,7 @@ def _artifact_tables(
         "instrument_id": "标的",
         "strategy_id": "策略",
         "quantity": "数量",
-        "shares": "持仓数量",
+        "shares": "数量",
         "mark_price": "估值价格",
         "price": "成交价",
         "initial_margin": "初始保证金",
@@ -1496,6 +1496,14 @@ def _artifact_tables(
         "market_impact",
         "cash",
         "notional",
+        "reserved_shares",
+        "mark",
+        "value",
+        "unit_nav",
+        "gross",
+        "fee",
+        "stale_days",
+        "lot_lock_days",
     }
     parts = []
     for name, title in titles.items():
@@ -1504,7 +1512,11 @@ def _artifact_tables(
         if path.is_file():
             table_labels = (
                 labels
-                | ({"price": "估值价格"} if name == "holdings.csv" else {})
+                | (
+                    {"price": "估值价格", "shares": "持仓数量"}
+                    if name == "holdings.csv"
+                    else {}
+                )
                 | (column_labels or {})
             )
             parts.append(

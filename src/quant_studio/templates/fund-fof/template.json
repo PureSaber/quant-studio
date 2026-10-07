@@ -25,6 +25,7 @@
   "preflight_summary": "只读校验数据、条款、日历和静态账户前置条件；不配置权重、不回放申赎，不保证各日共同历史或优化可行性。",
   "output_dirs": ["{output}"],
   "result_files": {"nav.csv": "nav.csv", "report.html": "report.html", "orders.csv": "orders.csv", "trades.csv": "trades.csv", "holdings.csv": "holdings.csv"},
+  "result_column_labels": {"fund_id": "基金代码", "name": "基金名称", "manager": "管理人", "strategy": "策略分类", "kind": "基金类型", "shares": "份额数量", "reserved_shares": "冻结份额", "mark": "估值单位净值", "value": "持仓估值", "nav_date": "净值日期", "stale_days": "估值滞后天数", "terms_id": "条款ID", "terms_version_id": "条款版本ID", "terms_known_at": "条款获知日期", "historical_terms_pit": "历史时点条款", "submitted": "申请日期", "deal_date": "交易日期", "confirm_date": "确认日期", "confirmed": "确认日期", "settle_date": "到账日期", "terms_effective_from": "条款生效日期", "terms_effective_to": "条款失效日期", "request_id": "申请ID", "unit_nav": "交易单位净值", "gross": "成交金额", "fee": "费用", "lot_lock_days": "批次锁定天数"},
   "nav_initial_value": 1,
   "result_evidence": {"file": "manifest.json", "field": "classification", "values": ["synthetic", "public_source", "user_provided"]},
   "report_name": "report.html",
