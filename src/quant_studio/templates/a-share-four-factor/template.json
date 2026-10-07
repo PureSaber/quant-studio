@@ -5,7 +5,7 @@
   "kind": "external",
   "workspace_repo": "a-share-multifactor",
   "upstream_repo": "PureSaber/a-share-multifactor",
-  "upstream_ref": "3c48cd28d056b6dad36fbc0041408c010912a20d",
+  "upstream_ref": "6b799c3e4c2871153e399a62ba0b5e1e6c68fc99",
   "base_config": "base.yaml",
   "config_format": "yaml",
   "knobs": [
@@ -25,8 +25,11 @@
     {"name": "northbound_chg_5d", "label": "北向变化", "group": "情绪面", "direction": 1},
     {"name": "industry_rs_20d", "label": "行业相对强弱", "group": "宏观面", "direction": 1}
   ],
-  "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
-  "preflight_argv": ["python", "-m", "a_share_multifactor.preflight", "--config", "{config}", "--symbols-limit", "{symbols_limit}"],
+  "requires_snapshot": true,
+  "input_source": {"label": "A股缓存根目录", "environment": "QUANT_ASHARE_DATA_ROOT", "default": "data", "required_files": []},
+  "data_help": "选择已有缓存根目录，配置中的data路径相对于该目录解析。预检逐项检查价格、历史成员、PIT基本面、所选因子和H00300全收益基准；目录存在不代表数据完整。缺失输入时请先准备数据，不执行回测。",
+  "argv": ["python", "-m", "a_share_multifactor.backtest", "--config", "{config}", "--symbols-limit", "{symbols_limit}", "--data-dir", "{snapshot}"],
+  "preflight_argv": ["python", "-m", "a_share_multifactor.preflight", "--config", "{config}", "--symbols-limit", "{symbols_limit}", "--data-dir", "{snapshot}"],
   "preflight_summary": "检查已有行情、历史股票池、基本面可得时点、因子与全收益基准；不下载数据或执行回测。",
   "output_dirs": ["outputs/four_factors"],
   "result_files": {"nav.csv": "latest/cumulative_returns.csv", "report.html": "latest/report.html"},

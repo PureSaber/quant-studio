@@ -99,7 +99,11 @@ def template_readiness(
                     (selected / name).is_file() for name in source["required_files"]
                 )
             )
-            requirement = f"（需包含{', '.join(source['required_files'])}）"
+            requirement = (
+                f"（需包含{', '.join(source['required_files'])}）"
+                if source["required_files"]
+                else "（需选择已有目录）"
+            )
         else:
             raise QuantStudioError(f"未知输入来源类型：{kind}")
         if not valid:

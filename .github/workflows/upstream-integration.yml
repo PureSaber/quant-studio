@@ -15,13 +15,13 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-latest]
         upstream:
-          - {repo: quant-paper-sim, ref: 55cfa0f8f12cc5419dfad664a644c5c29233ab23, test: paper}
+          - {repo: quant-paper-sim, ref: e414264a01f8c90f218e0c544d422e88db8051c6, test: paper}
           - {repo: quant-hk-equity, ref: 18cfe93a757e93e0c89875ceff9612350f989359, test: hk}
-          - {repo: a-share-multifactor, ref: 3c48cd28d056b6dad36fbc0041408c010912a20d, test: ashare}
+          - {repo: a-share-multifactor, ref: 6b799c3e4c2871153e399a62ba0b5e1e6c68fc99, test: ashare}
           - {repo: quant-pipeline, ref: b1fce90b85651248e9e60ae857b88fe4d170319e, test: account}
-          - {repo: quant-fund, ref: ad7cffe867ae319ab546acb06f0aa32ded9e6542, test: fund}
-          - {repo: quant-futures-spread, ref: f01d6afd87ca0556d6e2f44e522cfecbf00cad56, test: futures}
-          - {repo: quant-crypto-basis, ref: 02acfeb6227d8f61243b908846592af4e5b70365, test: crypto}
+          - {repo: quant-fund, ref: c0f2c5bc8d52313705a8c07f3081490800693933, test: fund}
+          - {repo: quant-futures-spread, ref: 314b889455166c39611285ddd72aa73ee451ec34, test: futures}
+          - {repo: quant-crypto-basis, ref: 3b0e68aefe2a013b9c8f8e15b47078cf19c55b54, test: crypto}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

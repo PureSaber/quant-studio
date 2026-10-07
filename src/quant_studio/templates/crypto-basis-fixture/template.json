@@ -4,7 +4,7 @@
   "summary": "回放现货与USDT线性永续双腿，查看毫秒事件净值、资金费、保证金与成交。",
   "kind": "external",
   "workspace_repo": "quant-crypto-basis",
-  "upstream_ref": "02acfeb6227d8f61243b908846592af4e5b70365",
+  "upstream_ref": "3b0e68aefe2a013b9c8f8e15b47078cf19c55b54",
   "base_config": "base.json",
   "config_format": "json",
   "data_help": "使用上游随附的Binance/OKX脱敏离线样例，校验两个来源后回放所选来源。不连接交易所，不读取外部行情目录；L2范围仅为BTC现货样例。",
