@@ -309,6 +309,10 @@ def test_synthetic_result_embeds_report_and_shows_disclaimer(tmp_path):
 
     assert "合成样例，不是市场收益" in page
     assert f"/runs/{result.run_id}/files/report.html" in page
+    assert (
+        f'<a href="/runs/{result.run_id}/files/report.html" '
+        'target="_blank" rel="noopener">独立打开完整报告</a>'
+    ) in page
 
 
 def test_legacy_hk_results_use_frozen_opening_and_original_report_without_rewriting(
@@ -330,6 +334,10 @@ def test_legacy_hk_results_use_frozen_opening_and_original_report_without_rewrit
     page = render_run(directory)
     assert "+1.00%" in page and "50.00%" in page
     assert f"/runs/{result.run_id}/files/strategy-output/report.html" in page
+    assert (
+        f'<a href="/runs/{result.run_id}/files/strategy-output/report.html" '
+        'target="_blank" rel="noopener">独立打开完整报告</a>'
+    ) in page
     assert before == {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
 
 

@@ -1,99 +1,56 @@
-# Spec: quant-studio
+# quant-studio功能与验收契约
 
-## Objective
+更新日期：2026-10-07。当前实现是只在本机回环地址运行的研究模板台，供用户查看输入、修改已声明参数、预检、确认执行和核对结果。本仓库不实现因子、撮合或账本，不自动下载市场数据或安装上游仓库；也不属于M8的14仓不可变发布清单。
 
-本地模板回测台。代码不熟的人打开本机页面，选择已经存在的研究模板。模板在页面上排成数据、因子（若模板声明了因子）、交易和回测几块积木，只改允许的参数。代码区展示将要写给上游仓的配置和命令，不执行手写代码。确认后才执行。成功的上游运行嵌入该仓自己的报告；失败不画净值。另有一个明确标注的合成样例，不依赖其余量化仓库，用来走通「改参数 → 运行 → 净值页」。
+## 安装与环境
 
-本仓库是应用层，不属于 M8 的 14 仓不可变清单。不实现因子、撮合、账本或通用绘图库。
+支持Python3.12，运行依赖为PyYAML，服务使用标准库`http.server`。依赖按`requirements.lock`安装，随后无依赖、无构建隔离地安装本仓库，再执行`pip check`。完整命令见[README](README.md)。
 
-## Assumptions
+网页设置支持保存工作区、各仓Python与输入路径。保存前检查路径和依赖闭包；重启后读取同一配置。上游使用独立进程和指定Python，不继承PYTHONPATH。运行目录与仓库路径必须处于允许范围，进程参数使用列表，禁止`shell=True`。
 
-1. 仓库公开在 `https://github.com/PureSaber/quant-studio`，开发走功能分支和 PR。
-2. 只监听 `127.0.0.1`。
-3. A 股、港股、模拟盘模板只覆盖上游已经读取的字段，并在模板里记录上游 tag 或版本作为说明，不在本仓库安装那些包。
-4. 合成样例的曲线来自仓库内固定收益率序列，页面标明「合成样例，不是市场收益」。
-5. 执行外部模板时使用参数列表调用进程，工作目录必须落在 `QUANT_WORKSPACE_ROOT` 下的指定仓库内。
+## 当前模板
 
-## Tech Stack
+共11个模板，10个外部模板声明原生预检。具体参数、输入文件、输出映射与不可变上游引用以`src/quant_studio/templates/*/template.json`为准；CI引用以`.github/workflows/upstream-integration.yml`为准。
 
-- Python 3.12
-- PyYAML
-- pytest、ruff
-- 标准库 `http.server` 提供页面，无前端框架
+|模板|输入和用途|结果边界|
+|---|---|---|
+|`a-share-four-factor`|A股价格、历史成员、PIT基本面、因子和H00300全收益基准缓存|读取本次`latest`集合，明确展示Q5组合；小标的数量不免除完整输入检查|
+|`hk-equity-daily`|已有港股快照，配置与参数预检|留出期账户净值、同区间基准、持仓和委托；研究池性质按原生产物展示|
+|`paper-sim`|已有信号和状态配置，本次独立状态目录|原生只读账本重放核验；只有一个观测时不虚构区间收益|
+|`fund-fof`|净值获知日期、产品条款、分红和用途日历|原生申赎账本重放核验；真实数据和业务适用性需要另外验收|
+|`us-equity-research`|带哈希的美股bundle与明确基准ID|同日期账户与基准；生命周期和股票池能力取决于输入证据|
+|`timing-research`|已有择时YAML配置|发布前置条件、描述性全区间与各测试折结果分别展示|
+|`timing-counterfactual`|同一择时配置和固定干预族|冻结成本和协议，展示配对效应；所有候选禁止发布仓位|
+|`stat-arb-research`|已有统计套利配置|探索性研究；成本、借券和可投资性按上游声明处理|
+|`futures-spread-fixture`|仓内离线期货fixture|QExec原生事件级账本；fixture-certified、backtest-only|
+|`crypto-basis-fixture`|仓内离线Crypto fixture|QExec原生事件级账本；fixture不能冒充真实市场认证|
+|`synthetic-demo`|本仓库固定收益序列|明确标注“合成样例，不是市场收益”|
 
-## Commands
+页面按数据、因子（若模板声明）、交易和运行组织参数，同时展示将生成的配置与命令。只能修改声明字段，拒绝未知参数、越界数值和不支持的枚举。预览只生成运行记录、配置和命令；显式执行才运行上游进程。
 
-```powershell
-python -m venv .venv
-.venv\Scripts\python -m pip install --no-deps -r requirements.lock
-.venv\Scripts\python -m pip install --no-deps --no-build-isolation -e .
-.venv\Scripts\python -m pip check
-.venv\Scripts\python -m ruff check src tests
-.venv\Scripts\python -m ruff format --check src tests
-.venv\Scripts\python -m pytest -q
-.venv\Scripts\python -m quant_studio serve --host 127.0.0.1 --port 8770
-```
+## 生命周期与账本证据
 
-## Project Structure
+- 预检只读输入，不下载、不计算策略、不重写已有账户；正式执行重新读取和校验相同参数。
+- 新运行先原子记录未完成状态，结果JSON采用同目录临时文件、fsync与原子替换。
+- 缺输入或环境时显示阻断原因。非零退出或结果收集失败时保留日志与原产物，不展示普通成功曲线、持仓表或报告iframe。
+- 缺失/损坏结果和中断状态仍可在列表、详情页查看。确认原进程结束后，可按保存参数创建新记录重新预检，不续写旧运行。
+- 基金与模拟盘成功后调用原生只读核验，绑定`verification.json`的SHA-256。失败或明细改变时转为诊断页，不能显示核验通过。
+- 合法的择时干预失败家族可展示其失败证据，但不能生成家族效应。旧运行不追认为本次核验通过。
+- 外部报告保留原目录与相对链接，提供“独立打开完整报告”入口和同源iframe。该入口改善查看方式，不代表宿主浏览器注入问题已经修复。
 
-```text
-SPEC.md
-src/quant_studio/            目录、渲染、执行、页面、合成样例
-src/quant_studio/templates/  模板说明与上游配置基线
-tests/                       pytest
-.github/workflows/tests.yml  Ubuntu 与 Windows，Python 3.12
-```
+## 展示与只读账户
 
-## Code Style
+金额、份额和净值保持Decimal原值；收益指标只在展示时舍入。数量和金额表格显示精确值，权重如缩写须保留完整原值。宽表可用键盘横向滚动。事件级净值不偷偷改为日频，时间口径和币种由模板声明；文件排序保留亚秒精度，页面显示本地时间与UTC偏移。日频场景没有纳秒精度要求。
 
-标识符使用英文。页面文案使用中文。配置深合并只允许模板声明的路径。进程参数是列表，禁止 `shell=True`。
+净值拒绝重复日期、无效数值和非正期初金额。已知期初资金时首个观测的损益进入收益和回撤；没有期初资金的单次快照不计算区间表现。策略和基准使用相同日期与期初口径。
 
-```python
-def overlay_config(base: dict, knobs: dict, fields: list[Knob]) -> dict:
-    result = copy.deepcopy(base)
-    for field in fields:
-        if field.target != "config":
-            continue
-        _assign_path(result, field.path, knobs[field.name])
-    return result
-```
+账户页只列明确配置的账户，调用`quant_pipeline.research_paper inspect`核验证据。无观测时绩效不可用，读取失败保留原因；不登记、追加、封存或改写冻结账户。恢复操作使用模拟盘原生`verify/status/backup/restore`。
 
-## Templates
+## 验收与安全边界
 
-| id | 上游 | 允许旋钮 | 命令 |
-|---|---|---|---|
-| `a-share-four-factor` | `a-share-multifactor` tag `v0.4.2` | `rebalance_freq`=`daily\|weekly\|monthly`；`costs.initial_capital`；`costs.commission`；`costs.slippage`；CLI `--symbols-limit` 1–300；已声明因子可勾选 | `python -m a_share_multifactor.backtest --config {config} --symbols-limit {symbols_limit}` |
-| `hk-equity-daily` | `quant-hk-equity` `0.1.0`（尚无 tag），配置形态 `quant-hk-study/v1` | `initial_cash` 十进制字符串；`rebalance_sessions` 只允许 1 或 5 | `quant-hk run --config {config} --snapshot {snapshot} --output {output}` |
-| `paper-sim` | `quant-paper-sim` tag `v0.2.2` | `initial_capital` | `quant-paper step --config {config}` |
-| `synthetic-demo` | 本仓库固定日收益 | `initial_capital` | 进程内生成 `nav.csv` 与 `report.html` |
+提交前运行Ruff检查、格式检查与完整pytest。行为变更先增加失败回归测试。现有测试覆盖参数拒绝、设置保存与重启、缺输入阻断、成功与失败隔离、账本核验、证据篡改、中断诊断、精度和日期口径、桌面与宽表展示契约。
 
-基线配置随模板存放。渲染结果写入 `runs/<run_id>/`，不修改模板文件，不修改上游仓库。
+CI在Ubuntu和Windows的Python3.12执行本仓检查；另在两种系统按不可变引用安装7个上游，执行真实CLI和产物契约，并验证择时两条路径。该矩阵是已声明的软件兼容范围，不是23仓重新发行或市场数据GA。具体本机验收次数和缺口写入Notes，不将软件测试成功等同于新的视觉截图或真实金融业务验收。
 
-港股模板的 `snapshot` 与 `output` 使用本次运行目录下的新子目录。上游要求这两个目录事先不存在。
+只监听`127.0.0.1/localhost`；校验Host、Origin和CSRF。报告仅服务运行目录内允许的HTML、CSV及上游JSON证据，不提供任意本地文件下载。主页面拒绝被嵌入，报告资产只允许同源嵌入。不得提交密钥、真实运行数据或虚拟环境，不覆盖历史运行，不用装饰性曲线替代策略产物。新增运行依赖或改变监听范围需先讨论；上游修改遵循相应仓库的授权范围和治理门禁。
 
-## Runner
-
-- `preview` 只写配置、请求记录和将要执行的参数列表。
-- `execute` 默认关闭。外部模板在仓库目录不存在时状态为 `blocked`，不启动子进程。
-- 子进程非零退出时状态为 `failed`，不标记报告可嵌入。
-- 子进程退出码为 0 且模板声明的 `report.html` 出现在本次运行目录内时，页面才嵌入该文件。
-- 合成样例成功时嵌入本仓库生成的报告，标题包含「合成样例，不是市场收益」。
-- 拒绝模板未声明的参数名、越界数值、非回环地址，以及逃出运行目录的路径。
-
-## Testing Strategy
-
-pytest 放在 `tests/`。覆盖参数拒绝、配置深合并、预览不启动子进程、缺仓库时 blocked、失败退出码不嵌入报告、合成样例净值可复现、页面含三张研究卡片和一张合成卡片、非回环 host 被拒绝。外部命令用测试里的假可执行文件或 `subprocess` 替身，不调用真实策略仓。
-
-## Boundaries
-
-- Always: 测试通过后再提交；参数列表调用；只监听回环地址；合成结果与上游研究文案分开。
-- Ask first: 增加 PyPI 依赖、改动 14 个已认证仓库、把服务绑定到非回环地址。
-- Never: 提交密钥或运行产物；用装饰性硬编码曲线冒充回测；`shell=True`；覆盖已有运行目录。
-
-## Success Criteria
-
-1. `pytest -q`、`ruff check`、`ruff format --check` 通过。
-2. 预览 A 股模板时，配置里的调仓频率和 `costs.initial_capital` 等于请求值，因子列表仍来自基线。
-3. 未知参数、港股 `rebalance_sessions=3`、`--host 0.0.0.0` 均失败。
-4. 合成样例在无其他量化仓库时生成净值页，且页面含合成声明。
-5. CI 在 Ubuntu 与 Windows 的 Python 3.12 上执行与本机相同的安装和测试命令。
