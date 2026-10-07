@@ -4,7 +4,7 @@
   "summary": "使用固定信号驱动上游模拟盘单步运行。",
   "kind": "external",
   "workspace_repo": "quant-paper-sim",
-  "upstream_ref": "45d350a74fdd36d64addd8506cf120516bfbe261",
+  "upstream_ref": "55cfa0f8f12cc5419dfad664a644c5c29233ab23",
   "base_config": "base.yaml",
   "config_format": "yaml",
   "knobs": [
