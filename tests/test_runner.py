@@ -23,7 +23,7 @@ def test_preview_writes_artifacts_without_starting_process(tmp_path, monkeypatch
     assert (result.run_dir / "request.json").is_file()
     assert (result.run_dir / "config.yaml").is_file()
     command = json.loads((result.run_dir / "command.json").read_text("utf-8"))
-    assert command["argv"][-2:] == ["--symbols-limit", "12"]
+    assert command["argv"][command["argv"].index("--symbols-limit") + 1] == "12"
 
 
 def test_external_run_is_blocked_without_workspace(tmp_path, monkeypatch):
@@ -185,6 +185,9 @@ def test_old_workspace_outputs_are_never_used(tmp_path, monkeypatch):
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
     template = load_template("a-share-four-factor")
     template.metadata["argv"] = [sys.executable, "-c", "raise SystemExit(0)"]
+    template.metadata["requires_snapshot"] = (
+        False  # Only output isolation is exercised.
+    )
 
     result = run(template, {}, execute=True, runs_root=tmp_path / "runs")
 
@@ -200,6 +203,7 @@ def test_current_run_outputs_are_isolated_and_collected(tmp_path, monkeypatch):
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
     template = load_template("a-share-four-factor")
     # Generic external-output discovery; the real A-share contract is tested separately.
+    template.metadata["requires_snapshot"] = False
     template.metadata.pop("result_files")
     template.metadata.pop("nav_column")
     template.metadata["argv"] = [

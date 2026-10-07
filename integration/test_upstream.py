@@ -237,15 +237,9 @@ def test_ashare_native_preflight(tmp_path, monkeypatch, bad_source):
     from dataclasses import asdict
 
     original = load_template("a-share-four-factor")
-    metadata = dict(original.metadata)
-    metadata["preflight_argv"] = [
-        *metadata["preflight_argv"],
-        "--data-dir",
-        str(tmp_path),
-    ]
-    template = Template(metadata, asdict(config), original.directory)
+    template = Template(original.metadata, asdict(config), original.directory)
     before = fixture.snapshot(tmp_path)
-    checked = preflight(template, runs_root=tmp_path / "checks")
+    checked = preflight(template, snapshot=tmp_path, runs_root=tmp_path / "checks")
     assert checked.status == "checked", diagnostics(checked)
     assert not (checked.run_dir / "strategy-output").exists()
     after = fixture.snapshot(tmp_path)
@@ -266,7 +260,7 @@ def test_ashare_native_preflight(tmp_path, monkeypatch, bad_source):
         for name, state in fixture.snapshot(tmp_path).items()
         if name in before
     }
-    rejected = preflight(template, runs_root=tmp_path / "checks")
+    rejected = preflight(template, snapshot=tmp_path, runs_root=tmp_path / "checks")
     assert rejected.status == "check_failed", diagnostics(rejected)
     assert not (rejected.run_dir / "strategy-output").exists()
     failed_source_after = fixture.snapshot(tmp_path)

@@ -62,6 +62,15 @@ A股、港股和模拟盘模板均提供独立“数据预检”，分别调用�
 
 A股只读加载缓存、检查历史时点、因子可计算性及全收益基准，不下载缺失数据或创建快照。模拟盘检查信号、证券身份、费用及保存状态前置条件，不回放成交或改写账户；Studio仍为每次运行使用独立状态。所选上游环境需要支持对应预检命令，旧版本不支持时保留失败日志，不回退到完整回测或可写的status命令。
 
+A股页面和首次配置支持选择已有缓存根目录，也可设置`QUANT_ASHARE_DATA_ROOT`或使用
+`--snapshot`。预检与正式回测均将该目录传给原生`--data-dir`，配置中的`data`路径仍相对于
+缓存根目录解析。命令行未显式选择时继续使用上游仓库的`data`目录；网页显式保存工作区后
+要求选择已有输入。目录存在只代表路径已连接，文件完整性、所选因子和历史PIT仍由原生预检判断。
+
+```powershell
+python -m quant_studio check a-share-four-factor --snapshot H:/Quant/ashare-cache
+```
+
 ```powershell
 python -m quant_studio check hk-equity-daily --snapshot H:/Quant/hk-snapshot
 ```

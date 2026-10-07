@@ -789,6 +789,8 @@ def render_environment() -> str:
 </table>
 <p>可为不同研究仓指定独立Python环境。设置QUANT_STUDIO_RUNTIMES指向本地运行环境配置；
 环境配置只影响新运行，已保存的命令和结果保留原样。</p>
+<p>“可运行”表示工具与已声明的输入路径就绪。请先执行模板的数据预检，
+确认文件内容、日期和业务条件；它不代表真实数据或投资适用性已验收。</p>
 </section>"""
     return _layout("环境", body, "environment")
 

@@ -4,7 +4,7 @@
   "summary": "使用已有美元行情数据包，运行训练期选择与连续样本外账户，并与明确基准比较。",
   "kind": "external",
   "workspace_repo": "quant-us-equity",
-  "upstream_ref": "416c52fdfc6fa7278444dca3905b383f01301077",
+  "upstream_ref": "49cb750b01ca26b9995a22e2ecb82329f84a7a48",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,

@@ -4,7 +4,7 @@
   "summary": "回放固定双腿、换月和结算事件，查看原生净值、保证金、费用及成交。",
   "kind": "external",
   "workspace_repo": "quant-futures-spread",
-  "upstream_ref": "f01d6afd87ca0556d6e2f44e522cfecbf00cad56",
+  "upstream_ref": "314b889455166c39611285ddd72aa73ee451ec34",
   "base_config": "base.yaml",
   "config_format": "yaml",
   "data_help": "使用上游仓库随附的固定合成事件与四段开平仓计划。仅验证双腿、换月及账本软件，不读取外部行情目录，不代表真实市场策略。",
