@@ -27,6 +27,7 @@ def test_child_logs_use_utf8_even_with_ascii_parent_environment(tmp_path, monkey
     monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
     monkeypatch.setenv("PYTHONIOENCODING", "ascii")
     template = load_template("paper-sim")
+    template.metadata.pop("verification_argv")  # The child only tests log encoding.
     template.metadata["argv"] = [
         sys.executable,
         "-c",

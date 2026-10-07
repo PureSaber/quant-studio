@@ -4,7 +4,7 @@
   "summary": "使用固定信号驱动上游模拟盘单步运行。",
   "kind": "external",
   "workspace_repo": "quant-paper-sim",
-  "upstream_ref": "0ff46a10f21c5df64a6cd77b7e941a506240dffe",
+  "upstream_ref": "55cfa0f8f12cc5419dfad664a644c5c29233ab23",
   "base_config": "base.yaml",
   "config_format": "yaml",
   "knobs": [
@@ -12,6 +12,8 @@
   ],
   "argv": ["quant-paper", "step", "--config", "{config}"],
   "preflight_argv": ["quant-paper", "preflight", "--config", "{config}"],
+  "verification_argv": ["quant-paper", "verify", "--config", "{config}"],
+  "verification_contract": {"replay_verified": true, "projection_status": "complete"},
   "preflight_summary": "检查模拟信号、证券身份、费用及账户前置条件；不回放成交或改写账户。",
   "output_dirs": ["state"],
   "input_paths": ["signals.path", "regime.path"],

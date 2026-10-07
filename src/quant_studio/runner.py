@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -122,6 +123,8 @@ class RunResult:
     message: str | None = None
     evidence_kind: str | None = None
     research_view_sha256: str | None = None
+    verification_status: str = "not_requested"
+    verification_sha256: str | None = None
 
     def as_json(self) -> dict[str, Any]:
         data = asdict(self)
@@ -222,6 +225,10 @@ def run(
     )
     _write_json(run_dir / "command.json", {"argv": argv})
 
+    _write_json(
+        run_dir / "result.json",
+        RunResult("running", identifier, run_dir, argv).as_json(),
+    )
     if loaded.kind == "synthetic":
         from quant_studio.synthetic import execute_synthetic
 
@@ -289,6 +296,30 @@ def run(
     research_view_sha256 = None
     report_name = loaded.report_name
     family_report_verified = False
+    verification_status = "not_requested"
+    verification_sha256 = None
+    if succeeded and loaded.metadata.get("verification_argv"):
+        try:
+            verification_sha256 = _verify_account_output(
+                loaded,
+                rendered.values,
+                run_dir,
+                config_path,
+                selected_snapshot,
+                cwd,
+                timeout,
+            )
+            verification_status = "pass"
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            QuantStudioError,
+            subprocess.SubprocessError,
+        ) as exc:
+            succeeded = False
+            verification_status = "failed"
+            message = f"账本核验未通过：{exc}"
     if loaded.metadata.get("counterfactual_view"):
         try:
             if returncode not in {0, 2}:
@@ -376,9 +407,51 @@ def run(
         message,
         evidence_kind,
         research_view_sha256,
+        verification_status,
+        verification_sha256,
     )
     _write_json(run_dir / "result.json", result.as_json())
     return result
+
+
+def _verify_account_output(
+    template, values, run_dir, config_path, snapshot, cwd, timeout
+):
+    argv = _render_argv(
+        template.metadata["verification_argv"],
+        values,
+        run_dir,
+        config_path,
+        snapshot,
+        python=configured_python(template.workspace_repo),
+    )
+    _write_json(run_dir / "verification-command.json", {"argv": argv})
+    completed = subprocess.run(
+        argv,
+        cwd=cwd,
+        shell=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=subprocess_environment(),
+        timeout=timeout,
+        check=False,
+    )
+    (run_dir / "verification-stdout.txt").write_text(completed.stdout, encoding="utf-8")
+    (run_dir / "verification-stderr.txt").write_text(completed.stderr, encoding="utf-8")
+    if completed.returncode:
+        raise QuantStudioError(completed.stderr.strip()[-1600:] or "上游账本核验失败")
+    evidence = json.loads(completed.stdout)
+    contract = template.metadata["verification_contract"]
+    if not isinstance(evidence, dict) or any(
+        type(evidence.get(key)) is not type(expected) or evidence.get(key) != expected
+        for key, expected in contract.items()
+    ):
+        raise QuantStudioError("上游未返回完整的账本重放通过证据")
+    path = run_dir / "verification.json"
+    _write_json(path, evidence)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def preflight(
@@ -415,6 +488,8 @@ def preflight(
         if argv[0] != ready.executable:
             raise QuantStudioError("运行环境配置在预检期间改变，请重新预览")
         cwd = Path(setting("QUANT_WORKSPACE_ROOT")).resolve() / loaded.workspace_repo
+        result.status = "checking"
+        _write_json(prepared.run_dir / "result.json", result.as_json())
         try:
             completed = subprocess.run(
                 argv,
@@ -725,10 +800,16 @@ def _write_config(path: Path, config_format: str, config: dict[str, Any]) -> Non
 
 
 def _write_json(path: Path, value: Any) -> None:
-    path.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    data = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _text(value: str | bytes | None) -> str:

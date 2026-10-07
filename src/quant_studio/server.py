@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import secrets
@@ -19,7 +20,6 @@ from quant_studio.counterfactual_panel import (
 from quant_studio.desk import (
     FETCH_BY_REPO,
     FETCH_COMMANDS,
-    html_table,
     list_runs,
     scan_datasets,
     workspace_root,
@@ -33,10 +33,12 @@ from quant_studio.nav import (
     validate_comparison,
 )
 from quant_studio.research_panel import load_timing_view, timing_panel
+from quant_studio.run_record import load_run_result
 from quant_studio.runner import preflight, run, safe_run_file, template_readiness
 from quant_studio.settings import setting, use_settings
 from quant_studio.setup import SettingsStore, profile_from_form
 from quant_studio.setup_view import setup_body
+from quant_studio.table_view import html_table
 from quant_studio.templates import load_template, template_ids
 
 
@@ -148,9 +150,9 @@ def render_overview(runs_root: Path) -> str:
 <section class="panel"><h2>需要处理</h2>
 <ul>{blockers or "<li>环境检查通过；请继续核验数据和研究条件。</li>"}</ul></section>
 <section class="panel"><h2>最近研究</h2><table>
-<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
 {_run_rows(records[:6], "/runs/") or '<tr><td colspan="4">还没有研究记录</td></tr>'}
-</table></section>
+</table>{_FILE_TIME_NOTE}</section>
 <section class="panel"><h2>前向账户</h2>
 {account_links or '<p>尚未连接账户。<a href="/accounts">查看连接方法</a></p>'}
 <p class="note">这里只读取明确配置的账户，不登记、观察或封存账户。</p></section>"""
@@ -332,9 +334,9 @@ def render_backtest(runs_root: Path) -> str:
 <p class="lede">从策略页提交。打开一条记录可看命令；失败时能看到输出。</p>
 </header>
 <section class="panel"><table>
-<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
 {rows or "<tr><td colspan='4'>还没有运行</td></tr>"}
-</table></section>"""
+</table>{_FILE_TIME_NOTE}</section>"""
     return _layout("回测", body, "backtest")
 
 
@@ -352,9 +354,9 @@ def render_results(runs_root: Path) -> str:
 打开后可看曲线、回撤和持仓成交表。</p>
 </header>
 <section class="panel"><table>
-<tr><th>模板</th><th>状态</th><th>时间</th><th>净值</th></tr>
+<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
 {rows or "<tr><td colspan='4'>还没有带净值或报告的结果</td></tr>"}
-</table></section>"""
+</table>{_FILE_TIME_NOTE}</section>"""
     return _layout("结果", body, "results")
 
 
@@ -435,9 +437,28 @@ def render_template_page(
 
 def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     directory = Path(run_dir)
-    result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
+    result = load_run_result(directory)
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     template = load_template(request["template_id"])
+    if result.get("verification_status") == "failed":
+        result = {**result, "status": "verification_failed"}
+    if result["status"] in {"running", "checking", "incomplete", "verification_failed"}:
+        return _render_unfinished_run(directory, request, result, template, csrf_token)
+    verified_evidence = None
+    if result.get("verification_status") == "pass":
+        try:
+            content = (directory / "verification.json").read_bytes()
+            if hashlib.sha256(content).hexdigest() != result.get("verification_sha256"):
+                raise QuantStudioError("账本核验记录已改变")
+            verified_evidence = json.loads(content)
+        except (OSError, ValueError, QuantStudioError) as exc:
+            return _render_unfinished_run(
+                directory,
+                request,
+                {**result, "status": "verification_failed", "message": str(exc)},
+                template,
+                csrf_token,
+            )
     family_view = (
         load_counterfactual_view(directory, result)
         if template.metadata.get("counterfactual_view")
@@ -448,9 +469,9 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if template.metadata.get("timing_view")
         else None
     )
-    argv = " ".join(escape(str(item)) for item in result["argv"])
+    argv = " ".join(escape(str(item)) for item in result.get("argv", []))
     report_html = ""
-    if result.get("report") and not family_view:
+    if result["status"] == "succeeded" and result.get("report") and not family_view:
         report_name = result["report"]
         declared = (template.metadata.get("result_files") or {}).get("report.html")
         if report_name == "report.html" and declared:
@@ -469,9 +490,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     chart = ""
     nav_path = directory / "nav.csv"
     series = None
-    if nav_path.is_file() and not (
-        template.metadata.get("timing_view") and result["status"] != "succeeded"
-    ):
+    if result["status"] == "succeeded" and nav_path.is_file():
         opening_key = template.metadata.get("nav_initial_value_key")
         opening = template.metadata.get("nav_initial_value")
         if opening_key:
@@ -492,6 +511,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 title="策略净值 · 描述性全区间" if timing_view else "净值曲线",
             )
     notices = []
+    if verified_evidence is not None:
+        notices.append(
+            '<section class="panel"><h2>账本重放校验通过</h2>'
+            "<p>已从原始账本重新回放并核对保存结果。</p>"
+            "<details><summary>核验明细</summary><pre>"
+            + escape(json.dumps(verified_evidence, ensure_ascii=False, indent=2))
+            + "</pre></details></section>"
+        )
     if template.metadata.get("result_notice"):
         notices.append(
             f'<p class="note">{escape(template.metadata["result_notice"])}</p>'
@@ -536,14 +563,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     table_labels = dict(template.metadata.get("result_column_labels") or {})
     if timing_view and timing_view.get("return_attribution"):
         table_labels.update(slippage="模型基础成本", market_impact="模型冲击成本")
-    tables = _artifact_tables(
-        directory,
-        native=bool(template.metadata.get("standard_view")),
-        table_titles=template.metadata.get("result_table_titles"),
-        column_labels=table_labels,
-    )
-    if template.metadata.get("timing_view") and result["status"] != "succeeded":
-        tables = ""
+    tables = ""
+    if result["status"] == "succeeded":
+        tables = _artifact_tables(
+            directory,
+            native=bool(template.metadata.get("standard_view")),
+            table_titles=template.metadata.get("result_table_titles"),
+            column_labels=table_labels,
+        )
     benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
     drawdown = ""
     if series is not None:
@@ -678,6 +705,57 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
 </section>
 </details>"""
     return _layout("运行结果", body, "results")
+
+
+def _render_unfinished_run(directory, request, result, template, csrf_token):
+    has_preflight = bool(template.metadata.get("preflight_argv"))
+    retry_label = "按相同参数重新预检" if has_preflight else "按相同参数创建新记录"
+    fields = [
+        ("_csrf_token", csrf_token),
+        ("action", "check" if has_preflight else "execute"),
+    ]
+    fields.extend(
+        (str(key), str(value)) for key, value in request.get("knobs", {}).items()
+    )
+    if request.get("snapshot"):
+        fields.append(("snapshot", request["snapshot"]))
+    if request.get("factors") is not None:
+        fields.append(("factor_form", "1"))
+        fields.extend(("factor", factor) for factor in request["factors"])
+    inputs = "".join(
+        f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
+        for key, value in fields
+    )
+    logs = "".join(
+        f"<h3>{title}</h3><pre>{escape(path.read_text(encoding='utf-8')[-8000:])}</pre>"
+        for name, title in (
+            ("stdout.txt", "标准输出"),
+            ("stderr.txt", "错误输出"),
+            ("verification-stderr.txt", "账本核验错误"),
+        )
+        if (path := directory / name).is_file()
+    )
+    argv = " ".join(escape(str(item)) for item in result.get("argv", []))
+    message = escape(
+        result.get("message") or "进程可能仍在运行，也可能已中断；尚无完成证据。"
+    )
+    label = (
+        "账本核验未通过"
+        if result["status"] == "verification_failed"
+        else "记录尚未完成"
+    )
+    body = f"""<header class="page-head"><h1>{escape(template.title)}</h1>
+<p class="lede"><span class="status incomplete">{label}</span></p></header>
+<section class="panel"><h2>检查与恢复</h2>
+<p>{message}</p>
+<p>请先确认原进程已结束。保留当前记录与账本；已有账户先核验并恢复投影，
+不要用初始化覆盖账户。部分产物不能作为完整结果。</p>
+<form method="post" action="/templates/{escape(template.id)}">{inputs}
+<button class="btn primary">{retry_label}</button></form>
+<p class="note">新记录重新读取输入；本次配置、结果与账本继续保留。</p></section>
+<details class="panel" open><summary>配置与执行命令</summary>
+{_saved_config(directory)}<pre>{argv}</pre>{logs}</details>"""
+    return _layout("未完成运行", body, "results")
 
 
 def render_environment() -> str:
@@ -1114,6 +1192,9 @@ _CHOICES = {
 }
 
 _STATUS = {
+    "running": "运行尚未完成",
+    "checking": "预检尚未完成",
+    "incomplete": "记录未完成",
     "checked": "预检通过",
     "check_failed": "预检未通过",
     "previewed": "仅预览",
@@ -1346,7 +1427,14 @@ def _artifact_tables(
         "cash_ledger.csv": "现金账本",
     }
     labels = {
-        "event_time": "事件时间（UTC）",
+        "event_time": "事件时间（UTC）" if native else "事件时间（原时区）",
+        "date": "日期",
+        "timestamp": "时间（原时区）",
+        "strategy": "策略",
+        "symbol": "标的",
+        "weight": "持仓权重（比例）",
+        "target_weight": "目标权重（比例）",
+        "requested_quantity": "申请数量",
         "account_id": "账户",
         "base_currency": "基础币种",
         "currency": "币种",
@@ -1379,13 +1467,47 @@ def _artifact_tables(
         "ledger_account": "账本科目",
         "quantity_delta": "数量变动",
     }
-    labels = (labels if native else {}) | (column_labels or {})
+    labels = labels | (column_labels or {})
+    numeric_columns = {
+        "nav",
+        "cash_value",
+        "market_value",
+        "unrealized_pnl",
+        "realized_pnl",
+        "margin_used",
+        "quantity",
+        "mark_price",
+        "price",
+        "initial_margin",
+        "maintenance_margin",
+        "amount",
+        "limit_price",
+        "stop_price",
+        "filled_quantity",
+        "requested_quantity",
+        "quantity_delta",
+        "weight",
+        "target_weight",
+        "commission",
+        "slippage",
+        "market_impact",
+        "cash",
+        "notional",
+    }
     parts = []
     for name, title in titles.items():
         title = (table_titles or {}).get(name, title)
         path = directory / name
         if path.is_file():
-            parts.append(html_table(path, title, column_labels=labels))
+            parts.append(
+                html_table(
+                    path,
+                    title,
+                    column_labels=labels,
+                    numeric_columns=numeric_columns,
+                    fraction_digits={"weight": 4, "target_weight": 4},
+                )
+            )
             parts.append(
                 f'<p><a href="/runs/{escape(directory.name)}/files/{name}" download>'
                 f"下载完整{escape(title)}CSV</a></p>"
@@ -1461,6 +1583,11 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
 <div class="stage">{body}</div>
 </div></body></html>"""
 
+
+_FILE_TIME_NOTE = (
+    '<p class="note">文件更新时间按服务所在机器的本地时区显示，包含UTC偏移；'
+    "不代表行情截止或策略成交时刻。</p>"
+)
 
 _CSS = """
 :root {
@@ -1579,6 +1706,12 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
 .table-scroll { max-width: 100%; overflow-x: auto; }
 .table-scroll td, .table-scroll th { padding-right: 16px; white-space: nowrap; }
+.table-scroll thead { background: #f8fafc; }
+.table-scroll tbody tr:nth-child(even) { background: #f8fafc; }
+.table-scroll tbody tr:hover { background: #edf4ff; }
+.table-scroll td, .table-scroll th { padding-left: 12px; }
+.table-scroll .numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.table-scroll:focus-visible { outline: 3px solid #8bb8ff; outline-offset: 2px; }
 .environment-table { table-layout: fixed; }
 .environment-table td, .environment-table th {
   overflow-wrap: anywhere; padding: 12px 16px 12px 0; vertical-align: top;
@@ -1762,6 +1895,9 @@ input, select {
   font-size: 13px;
 }
 .status.failed, .status.blocked { background: #fdecec; color: #b42318; }
+.status.incomplete, .status.running, .status.checking {
+  background: #fff2d5; color: #835300;
+}
 .command { margin-bottom: 16px; }
 .command h2 { margin: 0 0 10px; font-size: 16px; }
 pre {

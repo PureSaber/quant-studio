@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 
 import pytest
@@ -42,6 +43,8 @@ def _collected(tmp_path):
         initial_nav="100000",
     )
     assert before == {p: p.read_bytes() for p in output.rglob("*") if p.is_file()}
+    result.status = "succeeded"
+    (result.run_dir / "result.json").write_text(json.dumps(result.as_json()))
     return result.run_dir
 
 

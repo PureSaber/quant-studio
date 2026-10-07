@@ -50,6 +50,8 @@ def test_paper_cli(tmp_path, monkeypatch):
     result = run("paper-sim", execute=True, runs_root=tmp_path, timeout=90)
     assert result.status == "succeeded", diagnostics(result)
     assert result.returncode == 0
+    assert result.verification_status == "pass"
+    assert "账本重放校验通过" in render_run(result.run_dir)
     nav = parse_nav_csv(result.run_dir / "nav.csv")
     assert len(nav.rows) == 1 and nav.period_return is None
     assert (result.run_dir / "strategy-output" / "execution_log.json").is_file()
