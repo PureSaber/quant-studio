@@ -104,14 +104,14 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
         except (OSError, json.JSONDecodeError):
             continue
         result = load_run_result(directory)
-        unfinished = (
-            result["status"] in {"running", "checking", "incomplete"}
-            or result.get("verification_status") == "failed"
+        results_available = (
+            result["status"] == "succeeded"
+            and result.get("verification_status") != "failed"
         )
         report_name = str(result.get("report") or "")
         try:
             has_report = (
-                not unfinished
+                results_available
                 and bool(report_name)
                 and safe_run_file(directory, report_name, {".html"}).is_file()
             )
@@ -124,7 +124,7 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
                 "template_id": str(request.get("template_id", "")),
                 "status": str(result.get("status", "")),
                 "has_nav": "1"
-                if not unfinished and (directory / "nav.csv").is_file()
+                if results_available and (directory / "nav.csv").is_file()
                 else "0",
                 "has_report": "1" if has_report else "0",
                 "when": _format_time(stamp),

@@ -471,7 +471,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     )
     argv = " ".join(escape(str(item)) for item in result.get("argv", []))
     report_html = ""
-    if result.get("report") and not family_view:
+    if result["status"] == "succeeded" and result.get("report") and not family_view:
         report_name = result["report"]
         declared = (template.metadata.get("result_files") or {}).get("report.html")
         if report_name == "report.html" and declared:
@@ -490,9 +490,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     chart = ""
     nav_path = directory / "nav.csv"
     series = None
-    if nav_path.is_file() and not (
-        template.metadata.get("timing_view") and result["status"] != "succeeded"
-    ):
+    if result["status"] == "succeeded" and nav_path.is_file():
         opening_key = template.metadata.get("nav_initial_value_key")
         opening = template.metadata.get("nav_initial_value")
         if opening_key:
@@ -565,14 +563,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     table_labels = dict(template.metadata.get("result_column_labels") or {})
     if timing_view and timing_view.get("return_attribution"):
         table_labels.update(slippage="模型基础成本", market_impact="模型冲击成本")
-    tables = _artifact_tables(
-        directory,
-        native=bool(template.metadata.get("standard_view")),
-        table_titles=template.metadata.get("result_table_titles"),
-        column_labels=table_labels,
-    )
-    if template.metadata.get("timing_view") and result["status"] != "succeeded":
-        tables = ""
+    tables = ""
+    if result["status"] == "succeeded":
+        tables = _artifact_tables(
+            directory,
+            native=bool(template.metadata.get("standard_view")),
+            table_titles=template.metadata.get("result_table_titles"),
+            column_labels=table_labels,
+        )
     benchmark = '<p class="note">未提供基准净值。</p>' if chart else ""
     drawdown = ""
     if series is not None:
