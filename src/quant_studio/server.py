@@ -1449,6 +1449,7 @@ def _artifact_tables(
         "instrument_id": "标的",
         "strategy_id": "策略",
         "quantity": "数量",
+        "shares": "数量",
         "mark_price": "估值价格",
         "price": "成交价",
         "initial_margin": "初始保证金",
@@ -1469,7 +1470,6 @@ def _artifact_tables(
         "ledger_account": "账本科目",
         "quantity_delta": "数量变动",
     }
-    labels = labels | (column_labels or {})
     numeric_columns = {
         "nav",
         "cash_value",
@@ -1478,6 +1478,7 @@ def _artifact_tables(
         "realized_pnl",
         "margin_used",
         "quantity",
+        "shares",
         "mark_price",
         "price",
         "initial_margin",
@@ -1495,17 +1496,34 @@ def _artifact_tables(
         "market_impact",
         "cash",
         "notional",
+        "reserved_shares",
+        "mark",
+        "value",
+        "unit_nav",
+        "gross",
+        "fee",
+        "stale_days",
+        "lot_lock_days",
     }
     parts = []
     for name, title in titles.items():
         title = (table_titles or {}).get(name, title)
         path = directory / name
         if path.is_file():
+            table_labels = (
+                labels
+                | (
+                    {"price": "估值价格", "shares": "持仓数量"}
+                    if name == "holdings.csv"
+                    else {}
+                )
+                | (column_labels or {})
+            )
             parts.append(
                 html_table(
                     path,
                     title,
-                    column_labels=labels,
+                    column_labels=table_labels,
                     numeric_columns=numeric_columns,
                     fraction_digits={"weight": 4, "target_weight": 4},
                 )
