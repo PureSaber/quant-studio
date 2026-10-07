@@ -482,9 +482,11 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 report_name = f"strategy-output/{declared}"
         report = safe_run_file(directory, report_name, {".html"})
         if report.is_file():
+            report_url = f"/runs/{escape(directory.name)}/files/{escape(report_name)}"
             report_html = (
-                f'<iframe title="运行报告" src="/runs/{escape(directory.name)}'
-                f'/files/{escape(report_name)}"></iframe>'
+                f'<p><a href="{report_url}" target="_blank" rel="noopener">'
+                "独立打开完整报告</a></p>"
+                f'<iframe title="运行报告" src="{report_url}"></iframe>'
             )
     status = escape(str(result["status"]))
     chart = ""
