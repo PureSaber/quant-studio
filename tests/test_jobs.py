@@ -136,6 +136,49 @@ def test_second_manager_cannot_audit_or_take_over_live_runs_root(tmp_path):
         manager.close()
 
 
+def test_list_waits_for_atomic_record_update_instead_of_skipping_job(
+    tmp_path, monkeypatch
+):
+    manager = JobManager(tmp_path, start_worker=False)
+    job = manager.submit("execute", "synthetic-demo", {}, profile=None)
+    entered = threading.Event()
+    release = threading.Event()
+    listed = threading.Event()
+    result = []
+    original = manager._write
+
+    def slow_write(record):
+        entered.set()
+        assert release.wait(5)
+        original(record)
+
+    monkeypatch.setattr(manager, "_write", slow_write)
+    updater = threading.Thread(
+        target=manager._update, args=(job["job_id"],), kwargs={"message": "updated"}
+    )
+
+    def read_list():
+        result.extend(manager.list())
+        listed.set()
+
+    reader = threading.Thread(target=read_list)
+    try:
+        updater.start()
+        assert entered.wait(5)
+        reader.start()
+        assert not listed.wait(0.1)
+        release.set()
+        updater.join(timeout=5)
+        reader.join(timeout=5)
+        assert [item["job_id"] for item in result] == [job["job_id"]]
+        assert result[0]["message"] == "updated"
+    finally:
+        release.set()
+        updater.join(timeout=5)
+        reader.join(timeout=5)
+        manager.close()
+
+
 def test_close_interrupts_queued_jobs_without_starting_them(tmp_path):
     entered = []
     first_started = threading.Event()

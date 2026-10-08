@@ -153,13 +153,14 @@ class JobManager:
 
     def list(self) -> list[dict]:
         records = []
-        for path in self.root.glob("*.json"):
-            try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(value, dict) and value.get("job_id") == path.stem:
-                    records.append(value)
-            except (OSError, ValueError):
-                continue
+        with self._lock:
+            for path in self.root.glob("*.json"):
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(value, dict) and value.get("job_id") == path.stem:
+                        records.append(value)
+                except (OSError, ValueError):
+                    continue
         return sorted(
             records, key=lambda item: str(item.get("created_at", "")), reverse=True
         )
