@@ -5,10 +5,13 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,138 @@ from quant_studio.templates import (
     load_template,
     render_template,
 )
+
+
+class ExecutionCancelled(Exception):
+    """A child process owned by the current HTTP job was explicitly cancelled."""
+
+    def __init__(self, stdout: str = "", stderr: str = ""):
+        super().__init__("本任务的原生进程已取消")
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+_PROCESS_DRAIN_TIMEOUT = 5.0
+
+
+def _terminate_process_scope(process: subprocess.Popen, *, force: bool) -> bool:
+    """Stop only the process group created for this live Popen handle."""
+    if process.poll() is not None:
+        return False
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            if completed.returncode and process.poll() is None:
+                process.kill() if force else process.terminate()
+        else:
+            os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        try:
+            process.kill() if force else process.terminate()
+            return True
+        except OSError:
+            return False
+
+
+def _bounded_process_drain(process: subprocess.Popen) -> tuple[str, str]:
+    """Collect pipes after scope termination without waiting on escaped descendants."""
+    try:
+        return process.communicate(timeout=_PROCESS_DRAIN_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                with suppress(OSError):
+                    stream.close()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(timeout=1)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return _timeout_text(exc.output), _timeout_text(exc.stderr)
+
+
+def _timeout_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _execute_subprocess(
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None,
+    timeout: float,
+    control=None,
+) -> subprocess.CompletedProcess:
+    """Keep synchronous CLI semantics, with a live handle for queued HTTP jobs."""
+    if control is None:
+        return subprocess.run(
+            argv,
+            cwd=cwd,
+            shell=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=timeout,
+            check=False,
+        )
+    popen_options = {
+        "cwd": cwd,
+        "shell": False,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": env,
+    }
+    if os.name == "nt":
+        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_options["start_new_session"] = True
+    process = subprocess.Popen(argv, **popen_options)
+    control.bind_process(process)
+    started = time.monotonic()
+    try:
+        if control.cancel_requested:
+            control.request_cancel()
+        while True:
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                _terminate_process_scope(process, force=True)
+                stdout, stderr = _bounded_process_drain(process)
+                control.log("stdout", stdout)
+                control.log("stderr", stderr)
+                raise subprocess.TimeoutExpired(
+                    argv, timeout, output=stdout, stderr=stderr
+                )
+            try:
+                stdout, stderr = process.communicate(timeout=min(0.2, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                if control.cancel_requested and process.poll() is None:
+                    control.request_cancel()
+        control.log("stdout", stdout)
+        control.log("stderr", stderr)
+        if control.cancel_requested:
+            raise ExecutionCancelled(stdout, stderr)
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    finally:
+        control.release_process(process)
 
 
 @dataclass(frozen=True)
@@ -188,6 +323,7 @@ def run(
     run_id: str | None = None,
     timeout: float = 300,
     snapshot: str | Path | None = None,
+    control=None,
 ) -> RunResult:
     loaded = load_template(template) if isinstance(template, str) else template
     if not execute:
@@ -199,6 +335,9 @@ def run(
             run_id=run_id,
             snapshot=snapshot,
         )
+
+    if control is not None:
+        control.stage("preparing", "正在生成隔离配置与运行记录")
 
     rendered = render_template(loaded, knobs)
     if factors is not None:
@@ -234,6 +373,16 @@ def run(
         RunResult("running", identifier, run_dir, argv).as_json(),
     )
     if loaded.kind == "synthetic":
+        if control is not None and control.cancel_requested:
+            result = RunResult(
+                "cancelled",
+                identifier,
+                run_dir,
+                argv,
+                message="任务在合成样例执行前已取消。",
+            )
+            _write_json(run_dir / "result.json", result.as_json())
+            return result
         from quant_studio.synthetic import execute_synthetic
 
         execute_synthetic(loaded, rendered, run_dir)
@@ -268,22 +417,21 @@ def run(
     workspace_root = Path(setting("QUANT_WORKSPACE_ROOT")).resolve()
     cwd = (workspace_root / loaded.workspace_repo).resolve()
 
+    if control is not None:
+        control.stage("native", "正在执行原生 runner")
     try:
-        completed = subprocess.run(
+        completed = _execute_subprocess(
             argv,
             cwd=cwd,
-            shell=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             env=subprocess_environment(),
             timeout=timeout,
-            check=False,
+            control=control,
         )
         returncode = completed.returncode
         stdout = completed.stdout
         stderr = completed.stderr
+    except ExecutionCancelled as exc:
+        return _cancelled_result(identifier, run_dir, argv, exc.stdout, exc.stderr)
     except subprocess.TimeoutExpired as exc:
         returncode = None
         stdout = _text(exc.stdout)
@@ -303,6 +451,8 @@ def run(
     verification_status = "not_requested"
     verification_sha256 = None
     if succeeded and loaded.metadata.get("verification_argv"):
+        if control is not None:
+            control.stage("verifying", "正在进行原生账本只读核验")
         try:
             verification_sha256 = _verify_account_output(
                 loaded,
@@ -312,8 +462,11 @@ def run(
                 selected_snapshot,
                 cwd,
                 timeout,
+                control,
             )
             verification_status = "pass"
+        except ExecutionCancelled as exc:
+            return _cancelled_result(identifier, run_dir, argv, exc.stdout, exc.stderr)
         except (
             OSError,
             ValueError,
@@ -325,10 +478,14 @@ def run(
             verification_status = "failed"
             message = f"账本核验未通过：{exc}"
     if loaded.metadata.get("counterfactual_view"):
+        if control is not None:
+            control.stage("collecting", "正在核验并投影候选族证据")
         try:
             if returncode not in {0, 2}:
                 raise QuantStudioError("原生候选族未正常完成，请查看执行日志")
-            _project_standard_output(loaded, run_dir, argv, cwd, timeout)
+            _project_standard_output(
+                loaded, run_dir, argv, cwd, timeout, control=control
+            )
             view_path = safe_run_file(run_dir, "strategy-output/studio-view/view.json")
             view = json.loads(view_path.read_text(encoding="utf-8"))
             if view["native_exit_code"] != returncode:
@@ -344,6 +501,8 @@ def run(
             family_report_verified = True
             if returncode == 2:
                 message = "候选族未完成，保留失败证据；效应与联合交互结论不可用。"
+        except ExecutionCancelled as exc:
+            return _cancelled_result(identifier, run_dir, argv, exc.stdout, exc.stderr)
         except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
             succeeded = False
             message = f"无法核验本次择时反事实: {exc}"
@@ -351,7 +510,11 @@ def run(
         manifest = safe_run_file(run_dir, "strategy-output/standard/run_manifest.json")
         if manifest.is_file():
             try:
-                _project_standard_output(loaded, run_dir, argv, cwd, timeout)
+                if control is not None:
+                    control.stage("collecting", "正在核验并投影择时研究证据")
+                _project_standard_output(
+                    loaded, run_dir, argv, cwd, timeout, control=control
+                )
                 view_path = safe_run_file(
                     run_dir, "strategy-output/studio-view/view.json"
                 )
@@ -362,13 +525,21 @@ def run(
                 research_view_sha256 = hashlib.sha256(
                     view_path.read_bytes()
                 ).hexdigest()
+            except ExecutionCancelled as exc:
+                return _cancelled_result(
+                    identifier, run_dir, argv, exc.stdout, exc.stderr
+                )
             except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
                 succeeded = False
                 message = f"无法核验本次择时研究: {exc}"
     if succeeded and not family_report_verified:
+        if control is not None:
+            control.stage("collecting", "正在核验并收集本次运行产物")
         try:
             if loaded.metadata.get("standard_view"):
-                _project_standard_output(loaded, run_dir, argv, cwd, timeout)
+                _project_standard_output(
+                    loaded, run_dir, argv, cwd, timeout, control=control
+                )
             opening_key = loaded.metadata.get("nav_initial_value_key")
             collected_report = collect_outputs(
                 cwd,
@@ -392,6 +563,8 @@ def run(
                 evidence_kind = _evidence_kind(
                     loaded, json.loads(path.read_text(encoding="utf-8"))
                 )
+        except ExecutionCancelled as exc:
+            return _cancelled_result(identifier, run_dir, argv, exc.stdout, exc.stderr)
         except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
             succeeded = False
             message = f"无法收集本次运行结果: {exc}"
@@ -419,7 +592,7 @@ def run(
 
 
 def _verify_account_output(
-    template, values, run_dir, config_path, snapshot, cwd, timeout
+    template, values, run_dir, config_path, snapshot, cwd, timeout, control=None
 ):
     argv = _render_argv(
         template.metadata["verification_argv"],
@@ -430,18 +603,18 @@ def _verify_account_output(
         python=configured_python(template.workspace_repo),
     )
     _write_json(run_dir / "verification-command.json", {"argv": argv})
-    completed = subprocess.run(
-        argv,
-        cwd=cwd,
-        shell=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=subprocess_environment(),
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        completed = _execute_subprocess(
+            argv,
+            cwd=cwd,
+            env=subprocess_environment(),
+            timeout=timeout,
+            control=control,
+        )
+    except ExecutionCancelled as exc:
+        (run_dir / "verification-stdout.txt").write_text(exc.stdout, encoding="utf-8")
+        (run_dir / "verification-stderr.txt").write_text(exc.stderr, encoding="utf-8")
+        raise
     (run_dir / "verification-stdout.txt").write_text(completed.stdout, encoding="utf-8")
     (run_dir / "verification-stderr.txt").write_text(completed.stderr, encoding="utf-8")
     if completed.returncode:
@@ -466,12 +639,15 @@ def preflight(
     snapshot: str | Path | None = None,
     runs_root: str | Path | None = None,
     timeout: float = 60,
+    control=None,
 ) -> RunResult:
     """Run an explicitly declared upstream data check; never substitute a backtest."""
     loaded = load_template(template) if isinstance(template, str) else template
     declared = loaded.metadata.get("preflight_argv")
     if not declared:
         raise QuantStudioError("该模板尚未接入独立的数据预检，请查看模板的数据要求。")
+    if control is not None:
+        control.stage("preparing", "正在生成只读预检配置")
     prepared = preview(
         loaded, knobs, factors=factors, snapshot=snapshot, runs_root=runs_root
     )
@@ -494,18 +670,15 @@ def preflight(
         cwd = Path(setting("QUANT_WORKSPACE_ROOT")).resolve() / loaded.workspace_repo
         result.status = "checking"
         _write_json(prepared.run_dir / "result.json", result.as_json())
+        if control is not None:
+            control.stage("native", "正在执行原生只读预检")
         try:
-            completed = subprocess.run(
+            completed = _execute_subprocess(
                 argv,
                 cwd=cwd,
-                shell=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 env=subprocess_environment(),
                 timeout=timeout,
-                check=False,
+                control=control,
             )
             (prepared.run_dir / "stdout.txt").write_text(
                 completed.stdout, encoding="utf-8"
@@ -524,6 +697,14 @@ def preflight(
             result.status = "checked"
             result.message = (
                 "数据与配置预检通过；没有执行策略。投资适用性以原始证据为准。"
+            )
+        except ExecutionCancelled as exc:
+            return _cancelled_result(
+                prepared.run_id,
+                prepared.run_dir,
+                argv,
+                exc.stdout,
+                exc.stderr,
             )
         except (
             OSError,
@@ -571,7 +752,7 @@ def _validate_preflight(template: Template, evidence: object) -> None:
         raise QuantStudioError("上游预检契约不匹配：缺少标的身份")
 
 
-def _project_standard_output(template, run_dir, argv, cwd, timeout):
+def _project_standard_output(template, run_dir, argv, cwd, timeout, *, control=None):
     view_kind = next(
         key
         for key in ("counterfactual_view", "timing_view", "standard_view")
@@ -602,17 +783,17 @@ def _project_standard_output(template, run_dir, argv, cwd, timeout):
     ]
     _write_json(run_dir / "view-command.json", {"argv": command})
     try:
-        completed = subprocess.run(
+        completed = _execute_subprocess(
             command,
             cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             env=subprocess_environment(),
             timeout=timeout,
-            check=False,
+            control=control,
         )
+    except ExecutionCancelled as exc:
+        (run_dir / "view-stdout.txt").write_text(exc.stdout, encoding="utf-8")
+        (run_dir / "view-stderr.txt").write_text(exc.stderr, encoding="utf-8")
+        raise
     except subprocess.TimeoutExpired as exc:
         (run_dir / "view-stdout.txt").write_text(_text(exc.stdout), encoding="utf-8")
         (run_dir / "view-stderr.txt").write_text(_text(exc.stderr), encoding="utf-8")
@@ -814,6 +995,26 @@ def _write_json(path: Path, value: Any) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def _cancelled_result(
+    run_id: str, run_dir: Path, argv: list[str], stdout: str, stderr: str
+) -> RunResult:
+    stdout_path = run_dir / "stdout.txt"
+    stderr_path = run_dir / "stderr.txt"
+    if not stdout_path.is_file():
+        stdout_path.write_text(stdout, encoding="utf-8")
+    if not stderr_path.is_file():
+        stderr_path.write_text(stderr, encoding="utf-8")
+    result = RunResult(
+        "cancelled",
+        run_id,
+        run_dir,
+        argv,
+        message="本任务持有的原生进程已取消；保留日志与不完整诊断。",
+    )
+    _write_json(run_dir / "result.json", result.as_json())
+    return result
 
 
 def _text(value: str | bytes | None) -> str:

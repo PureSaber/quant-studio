@@ -4,7 +4,7 @@
   "summary": "使用已有净值、条款和日历，检查输入后运行申赎账本与组合监控。",
   "kind": "external",
   "workspace_repo": "quant-fund",
-  "upstream_ref": "c0f2c5bc8d52313705a8c07f3081490800693933",
+  "upstream_ref": "52042caff6fc60aa6a4b5273946ab2093ba1de5d",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,

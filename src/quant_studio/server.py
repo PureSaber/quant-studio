@@ -17,6 +17,7 @@ from quant_studio.counterfactual_panel import (
     counterfactual_panel,
     load_counterfactual_view,
 )
+from quant_studio.data_evidence import latest_availability
 from quant_studio.desk import (
     FETCH_BY_REPO,
     FETCH_COMMANDS,
@@ -25,6 +26,14 @@ from quant_studio.desk import (
     workspace_root,
 )
 from quant_studio.flow import compile_document, flow_steps
+from quant_studio.fund_reconciliation import (
+    BATCH_CONFIRMATION_COLUMNS,
+    BATCH_RECEIPT_COLUMNS,
+    CONFIRMATION_COLUMNS,
+    RECEIPT_COLUMNS,
+    FundReconciliationStore,
+)
+from quant_studio.jobs import JobManager
 from quant_studio.nav import (
     chart_fragment,
     comparison_fragment,
@@ -272,7 +281,7 @@ def _account_view(label: str, result: dict) -> str:
 一致性核验不替代真实数据、观察完整性或投资有效性评价。</p>"""
 
 
-def render_data() -> str:
+def render_data(runs_root: str | Path = "runs") -> str:
     root = workspace_root()
     datasets = scan_datasets(root)
     cards = []
@@ -310,12 +319,39 @@ def render_data() -> str:
         if load_template(key).kind != "synthetic"
     )
     root_text = str(root) if root else "未设置"
+    evidence_rows = []
+    for item in latest_availability(runs_root):
+        missing = "、".join(item.missing) or "无已声明缺失项"
+        blockers = "；".join(item.blockers) or "无已声明阻断"
+        source = escape(item.source)
+        link = (
+            f'<a href="/runs/{escape(item.run_id)}">原生证据</a>'
+            if item.run_id
+            else "尚无原生证据"
+        )
+        evidence_rows.append(
+            "<tr>"
+            f"<td>{escape(item.title)}</td><td>{source}</td>"
+            f"<td>{escape(item.observed_through)}</td>"
+            f"<td>{escape(item.available_at)}</td>"
+            f"<td>{escape(missing)}</td><td>{escape(blockers)}</td>"
+            f"<td>{link}</td></tr>"
+        )
     body = f"""<header class="page-head">
 <p class="kicker">数据</p>
-<h1>本机行情</h1>
+<h1>数据证据与可用性</h1>
 <p class="lede">工作区：{escape(root_text)}</p>
 </header>
+<section class="panel"><h2>原生预检证据</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="数据预检证据表">
+<table><tr><th>模板</th><th>来源</th><th>数据观测截止</th><th>可用时点</th>
+<th>缺失</th><th>阻断原因</th><th>证据</th></tr>{"".join(evidence_rows)}</table>
+</div>
+<p class="note">unknown表示原生预检没有声明该字段。这里不使用文件修改时间冒充行情截止，
+也不推测发布时间、来源真实性或自动下载状态。</p></section>
+<section class="panel"><h2>本机文件目录</h2>
 <main class="card-grid">{"".join(cards)}</main>
+</section>
 <section class="panel"><h2>数据与配置预检</h2><ul>{checks}</ul>
 <p class="note">进入模板设置参数后预检。
 文件存在、环境就绪与业务数据通过分别展示。</p></section>
@@ -338,6 +374,161 @@ def render_backtest(runs_root: Path) -> str:
 {rows or "<tr><td colspan='4'>还没有运行</td></tr>"}
 </table>{_FILE_TIME_NOTE}</section>"""
     return _layout("回测", body, "backtest")
+
+
+def render_jobs(manager: JobManager) -> str:
+    rows = []
+    for job in manager.list():
+        status = _STATUS.get(str(job.get("status")), str(job.get("status")))
+        rows.append(
+            "<tr>"
+            f'<td><a href="/jobs/{escape(job["job_id"])}">'
+            f"{escape(str(job.get('template_id', '')))}</a></td>"
+            f"<td>{escape(str(job.get('action', '')))}</td>"
+            f"<td>{escape(status)}</td>"
+            f"<td>{escape(str(job.get('stage', '')))}</td>"
+            f"<td>{escape(str(job.get('updated_at', '')))}</td></tr>"
+        )
+    body = f"""<header class="page-head"><p class="kicker">任务</p>
+<h1>任务中心</h1><p class="lede">显式排队执行；
+每条任务保留阶段、日志和真实取消结果。</p>
+</header><section class="panel">
+<div class="table-scroll" tabindex="0" role="region" aria-label="任务列表">
+<table>
+<tr><th>模板</th><th>动作</th><th>状态</th><th>阶段</th><th>更新时间</th></tr>
+{"".join(rows) or '<tr><td colspan="5">还没有排队任务</td></tr>'}
+</table></div><p class="note">服务重启后，旧的排队或运行任务会标记为中断，
+不会自动重放。</p>
+</section>"""
+    return _layout("任务中心", body, "jobs")
+
+
+def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str:
+    job = manager.get(job_id)
+    active = job["status"] in {"queued", "running", "cancelling"}
+    refresh = '<meta http-equiv="refresh" content="2">' if active else ""
+    cancel = ""
+    if job["status"] in {"queued", "running"}:
+        cancel = f"""<form method="post" action="/jobs/{escape(job_id)}/cancel">
+<input type="hidden" name="_csrf_token" value="{escape(csrf_token)}">
+<button class="btn">取消本任务</button></form>"""
+    run_link = (
+        f'<p><a class="chip on" href="/runs/{escape(str(job["run_id"]))}">'
+        "打开运行记录</a></p>"
+        if job.get("run_id")
+        else ""
+    )
+    log = manager.read_log(job_id)
+    body = f"""{refresh}<header class="page-head"><p class="kicker">任务</p>
+<h1>{escape(str(job.get("template_id", "")))}</h1>
+<p class="lede">{escape(_STATUS.get(job["status"], job["status"]))}</p></header>
+<section class="panel"><h2>阶段</h2><p>{escape(str(job.get("stage", "")))}</p>
+<p>{escape(str(job.get("message") or ""))}</p>{run_link}{cancel}</section>
+<section class="panel"><h2>任务日志</h2><pre>{escape(log) if log else "尚无日志"}</pre>
+<p class="note">取消只作用于当前服务实例持有的本任务进程句柄；
+取消失败不会显示为成功。</p>
+</section>"""
+    return _layout("任务详情", body, "jobs")
+
+
+def render_fund_reconcile(
+    runs_root: str | Path, *, csrf_token: str = "", run_id: str | None = None
+) -> str:
+    options = []
+    for record in list_runs(Path(runs_root)):
+        if record["template_id"] == "fund-fof" and record["status"] == "succeeded":
+            selected = " selected" if record["run_id"] == run_id else ""
+            options.append(
+                f'<option value="{escape(record["run_id"])}"{selected}>'
+                f"{escape(record['run_id'])} · {escape(record['when'])}</option>"
+            )
+    allowed = setting("QUANT_FUND_RECONCILE_ROOT") or str(Path(runs_root).resolve())
+    batch_confirm = ",".join(BATCH_CONFIRMATION_COLUMNS)
+    batch_receipt = ",".join(BATCH_RECEIPT_COLUMNS)
+    observation_confirm = ",".join(CONFIRMATION_COLUMNS)
+    observation_receipt = ",".join(RECEIPT_COLUMNS)
+    body = f"""<header class="page-head"><p class="kicker">基金</p>
+<h1>外部凭证只读对账</h1><p class="lede">预览路径、表头和摘要后，
+再显式调用quant-fund原生命令。</p></header>
+<section class="panel"><form method="post" action="/fund-reconcile">
+<input type="hidden" name="_csrf_token" value="{escape(csrf_token)}">
+<label>基金运行<select name="run_id" required>
+{"".join(options) or '<option value="">尚无成功基金运行</option>'}</select></label>
+<label>对账模式<select name="mode"><option value="batches">分批确认与分次实收</option>
+<option value="observations">一单一确认与实收</option></select></label>
+<label>确认CSV绝对路径<input name="confirmations" required></label>
+<label>实收CSV绝对路径<input name="receipts" required></label>
+<button class="btn primary">预览对账</button></form>
+<p>允许目录：{escape(allowed)}</p>
+<details><summary>CSV列说明</summary><p>批次确认：</p><pre>{escape(batch_confirm)}</pre>
+<p>批次实收：</p><pre>{escape(batch_receipt)}</pre>
+<p>单笔确认：</p><pre>{escape(observation_confirm)}</pre>
+<p>单笔实收：</p><pre>{escape(observation_receipt)}</pre></details>
+<p class="note">输入须为UTF-8 CSV。source_ref只定位本地脱敏凭证；Studio和quant-fund
+都不认证凭证真伪。对账只读，不把实收或差异记入账户现金。</p></section>"""
+    return _layout("基金对账", body, "fund-reconcile")
+
+
+def render_reconciliation(record: dict, *, csrf_token: str = "") -> str:
+    execute = ""
+    if record["status"] == "previewed":
+        identifier = escape(record["reconciliation_id"])
+        execute = f"""<form method="post"
+ action="/reconciliations/{identifier}/execute">
+<input type="hidden" name="_csrf_token" value="{escape(csrf_token)}">
+<button class="btn primary">显式执行原生只读对账</button></form>"""
+    report = record.get("report")
+    report_html = ""
+    if isinstance(report, dict):
+        cash_labels = {"paid": "已实收", "unpaid": "未收", "overpaid": "超收"}
+
+        def cash_status(row):
+            value = str(row.get("status", "—"))
+            return cash_labels.get(value, value)
+
+        cash = "".join(
+            "<tr>"
+            f"<td>{escape(str(row.get('confirmation_id', '—')))}</td>"
+            f"<td>{escape(str(row.get('confirmed_net', '—')))}</td>"
+            f"<td>{escape(str(row.get('received', '—')))}</td>"
+            f"<td>{escape(str(row.get('outstanding', '—')))}</td>"
+            f"<td>{escape(cash_status(row))}</td></tr>"
+            for row in report.get("cash_by_confirmation", [])
+            if isinstance(row, dict)
+        )
+        status = escape(str(report.get("status")))
+        as_of = escape(str(report.get("as_of", "unknown")))
+        confirmations = report.get(
+            "confirmation_batches", report.get("confirmations", "—")
+        )
+        receipts = report.get("cash_receipts", report.get("redemption_receipts", "—"))
+        differences = escape(
+            json.dumps(report.get("differences", []), ensure_ascii=False, indent=2)
+        )
+        report_html = f"""<section class="panel"><h2>对账结果</h2>
+<p>状态：{status} · 截止：{as_of}</p>
+<p>批次确认：{escape(str(confirmations))} ·
+实收：{escape(str(receipts))}</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="逐批次到账核对">
+<table><tr><th>确认批次</th><th>确认净额</th><th>实收</th><th>未收/超收差额</th><th>状态</th></tr>
+{cash or '<tr><td colspan="5">没有逐批次实收记录</td></tr>'}</table>
+</div>
+<h3>差异</h3><pre>{differences}</pre>
+<p class="banner">read_only={escape(str(report.get("read_only")))} ·
+real_business_certified={escape(str(report.get("real_business_certified")))} ·
+classification={escape(str(report.get("classification")))}</p></section>"""
+    record_status = escape(str(record["status"]))
+    record_message = escape(str(record.get("message") or ""))
+    run_id = escape(record["run_id"])
+    body = f"""<header class="page-head"><p class="kicker">基金对账</p>
+<h1>{record_status}</h1><p class="lede">{record_message}</p></header>
+<section class="panel"><h2>锁定的预览</h2>
+<p>基金运行：<a href="/runs/{run_id}">{run_id}</a></p>
+<p>模式：{escape(record["mode"])} · 数据性质：{escape(record["classification"])}</p>
+<p>确认：{escape(record["confirmations"])}<br>SHA-256：{escape(record["confirmation_sha256"])}</p>
+<p>实收：{escape(record["receipts"])}<br>SHA-256：{escape(record["receipt_sha256"])}</p>
+<pre>{escape(" ".join(record["argv"]))}</pre>{execute}</section>{report_html}"""
+    return _layout("基金对账记录", body, "fund-reconcile")
 
 
 def render_results(runs_root: Path) -> str:
@@ -513,6 +704,12 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 title="策略净值 · 描述性全区间" if timing_view else "净值曲线",
             )
     notices = []
+    if template.id == "fund-fof" and result["status"] == "succeeded":
+        notices.append(
+            '<p><a class="chip on" href="/fund-reconcile?run='
+            + escape(directory.name)
+            + '">对外部确认与实收做只读对账</a></p>'
+        )
     if verified_evidence is not None:
         notices.append(
             '<section class="panel"><h2>账本重放校验通过</h2>'
@@ -833,6 +1030,21 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
     return path
 
 
+def _job_executor(runs_root: Path):
+    def execute(job, control):
+        options = dict(
+            factors=job.get("factors"),
+            runs_root=runs_root,
+            snapshot=job.get("snapshot"),
+            control=control,
+        )
+        if job["action"] == "check":
+            return preflight(job["template_id"], job["knobs"], **options)
+        return run(job["template_id"], job["knobs"], execute=True, **options)
+
+    return execute
+
+
 def serve(
     host: str = "127.0.0.1",
     port: int = 8770,
@@ -852,6 +1064,8 @@ def serve(
         pass
 
     Handler.runs_root = root
+    Handler.job_manager = None
+    Handler.reconciliation_store = FundReconciliationStore(root)
     Handler.settings_store = SettingsStore(
         Path(settings_path)
         if settings_path is not None
@@ -860,10 +1074,17 @@ def serve(
     Handler.csrf_token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((host, port), Handler)
     try:
+        Handler.job_manager = JobManager(root, execute=_job_executor(root))
+    except Exception:
+        server.server_close()
+        raise
+    try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if Handler.job_manager is not None:
+            Handler.job_manager.close()
         server.server_close()
 
 
@@ -871,11 +1092,14 @@ class _Handler(BaseHTTPRequestHandler):
     runs_root = Path("runs")
     csrf_token = ""
     settings_store = None
+    job_manager = None
+    reconciliation_store = None
 
     def do_GET(self) -> None:
         profile = (
             self.settings_store.snapshot() if self.settings_store is not None else None
         )
+        self._request_profile = profile
         with use_settings(profile):
             self._get()
 
@@ -894,7 +1118,33 @@ class _Handler(BaseHTTPRequestHandler):
             elif path.startswith("/accounts/"):
                 self._send_html(render_accounts(path.removeprefix("/accounts/")))
             elif path == "/data":
-                self._send_html(render_data())
+                self._send_html(render_data(self.runs_root))
+            elif path == "/jobs":
+                self._send_html(render_jobs(self._jobs()))
+            elif path.startswith("/jobs/"):
+                self._send_html(
+                    render_job(
+                        self._jobs(),
+                        path.removeprefix("/jobs/"),
+                        csrf_token=self.csrf_token,
+                    )
+                )
+            elif path == "/fund-reconcile":
+                selected = parse_qs(urlparse(self.path).query).get("run", [None])[0]
+                self._send_html(
+                    render_fund_reconcile(
+                        self.runs_root,
+                        csrf_token=self.csrf_token,
+                        run_id=selected,
+                    )
+                )
+            elif path.startswith("/reconciliations/"):
+                record = self._reconciliations().get(
+                    path.removeprefix("/reconciliations/")
+                )
+                self._send_html(
+                    render_reconciliation(record, csrf_token=self.csrf_token)
+                )
             elif path == "/backtest":
                 self._send_html(render_backtest(self.runs_root))
             elif path == "/results":
@@ -946,6 +1196,7 @@ class _Handler(BaseHTTPRequestHandler):
         profile = (
             self.settings_store.snapshot() if self.settings_store is not None else None
         )
+        self._request_profile = profile
         with use_settings(profile):
             self._post()
 
@@ -955,7 +1206,14 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = unquote(urlparse(self.path).path)
         code_view = False
-        if not path.startswith("/templates/") and path != "/setup":
+        accepted = (
+            path.startswith("/templates/")
+            or path == "/setup"
+            or (path.startswith("/jobs/") and path.endswith("/cancel"))
+            or path == "/fund-reconcile"
+            or (path.startswith("/reconciliations/") and path.endswith("/execute"))
+        )
+        if not accepted:
             self.send_error(404)
             return
         try:
@@ -981,6 +1239,34 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/setup":
                 self._setup_post(data)
                 return
+            if path.startswith("/jobs/") and path.endswith("/cancel"):
+                if data:
+                    raise QuantStudioError("取消请求不接受额外字段")
+                job_id = path.removeprefix("/jobs/").removesuffix("/cancel")
+                self._jobs().cancel(job_id)
+                self._redirect(f"/jobs/{job_id}")
+                return
+            if path == "/fund-reconcile":
+                if set(data) != {"run_id", "mode", "confirmations", "receipts"}:
+                    raise QuantStudioError("基金对账预览字段不完整")
+                fields = {key: _single_form(data, key) for key in data}
+                record = self._reconciliations().preview(
+                    fields["run_id"],
+                    fields["mode"],
+                    fields["confirmations"],
+                    fields["receipts"],
+                )
+                self._redirect(f"/reconciliations/{record['reconciliation_id']}")
+                return
+            if path.startswith("/reconciliations/") and path.endswith("/execute"):
+                if data:
+                    raise QuantStudioError("对账执行请求不接受额外字段")
+                identifier = path.removeprefix("/reconciliations/").removesuffix(
+                    "/execute"
+                )
+                self._reconciliations().execute(identifier)
+                self._redirect(f"/reconciliations/{identifier}")
+                return
             code_view = path.endswith("/code")
             template_id = path.removeprefix("/templates/")
             if code_view:
@@ -996,13 +1282,19 @@ class _Handler(BaseHTTPRequestHandler):
             factors = list(chosen) if factor_form else None
             knobs = _parse_form_knobs(template_id, data)
             options = dict(factors=factors, runs_root=self.runs_root, snapshot=snapshot)
-            if action == "check":
-                result = preflight(template_id, knobs, **options)
+            if action == "preview":
+                result = run(template_id, knobs, execute=False, **options)
+                self._redirect(f"/runs/{result.run_id}")
             else:
-                result = run(template_id, knobs, execute=action == "execute", **options)
-            self.send_response(303)
-            self.send_header("Location", f"/runs/{result.run_id}")
-            self.end_headers()
+                job = self._jobs().submit(
+                    action,
+                    template_id,
+                    knobs,
+                    factors=factors,
+                    snapshot=snapshot,
+                    profile=self._request_profile,
+                )
+                self._redirect(f"/jobs/{job['job_id']}")
         except (QuantStudioError, UnicodeDecodeError, ValueError) as exc:
             if code_view:
                 self._send_text(f"错误: {exc}", status=400)
@@ -1048,6 +1340,25 @@ class _Handler(BaseHTTPRequestHandler):
                 status=400,
                 content_type="text/html; charset=utf-8",
             )
+
+    def _jobs(self) -> JobManager:
+        manager = self.__class__.job_manager
+        if manager is None:
+            manager = JobManager(self.runs_root, execute=_job_executor(self.runs_root))
+            self.__class__.job_manager = manager
+        return manager
+
+    def _reconciliations(self) -> FundReconciliationStore:
+        store = self.__class__.reconciliation_store
+        if store is None:
+            store = FundReconciliationStore(self.runs_root)
+            self.__class__.reconciliation_store = store
+        return store
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.end_headers()
 
     def _allow_request(self, *, require_origin: bool = False) -> bool:
         try:
@@ -1180,6 +1491,13 @@ def _parse_form_knobs(
     return knobs
 
 
+def _single_form(data: dict[str, list[str]], name: str) -> str:
+    values = data.get(name, [])
+    if len(values) != 1 or not values[0]:
+        raise QuantStudioError(f"字段{name}必须且只能提交一次")
+    return values[0]
+
+
 _LABELS = {
     "rebalance_freq": "调仓频率",
     "initial_capital": "初始资金",
@@ -1196,7 +1514,12 @@ _CHOICES = {
 }
 
 _STATUS = {
+    "queued": "排队中",
     "running": "运行尚未完成",
+    "cancelling": "正在取消",
+    "cancelled": "已取消",
+    "cancel_failed": "取消未成功",
+    "interrupted": "服务重启后中断",
     "checking": "预检尚未完成",
     "incomplete": "记录未完成",
     "checked": "预检通过",
@@ -1575,7 +1898,9 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("data", "数据", "/data"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),
+        ("jobs", "任务", "/jobs"),
         ("results", "结果", "/results"),
+        ("fund-reconcile", "基金对账", "/fund-reconcile"),
         ("accounts", "账户", "/accounts"),
     )
     links = []
