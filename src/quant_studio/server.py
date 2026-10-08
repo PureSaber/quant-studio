@@ -343,8 +343,10 @@ def render_data(runs_root: str | Path = "runs") -> str:
 <p class="lede">工作区：{escape(root_text)}</p>
 </header>
 <section class="panel"><h2>原生预检证据</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="数据预检证据表">
 <table><tr><th>模板</th><th>来源</th><th>数据观测截止</th><th>可用时点</th>
 <th>缺失</th><th>阻断原因</th><th>证据</th></tr>{"".join(evidence_rows)}</table>
+</div>
 <p class="note">unknown表示原生预检没有声明该字段。这里不使用文件修改时间冒充行情截止，
 也不推测发布时间、来源真实性或自动下载状态。</p></section>
 <section class="panel"><h2>本机文件目录</h2>
@@ -390,10 +392,13 @@ def render_jobs(manager: JobManager) -> str:
     body = f"""<header class="page-head"><p class="kicker">任务</p>
 <h1>任务中心</h1><p class="lede">显式排队执行；
 每条任务保留阶段、日志和真实取消结果。</p>
-</header><section class="panel"><table>
+</header><section class="panel">
+<div class="table-scroll" tabindex="0" role="region" aria-label="任务列表">
+<table>
 <tr><th>模板</th><th>动作</th><th>状态</th><th>阶段</th><th>更新时间</th></tr>
 {"".join(rows) or '<tr><td colspan="5">还没有排队任务</td></tr>'}
-</table><p class="note">服务重启后，旧的排队或运行任务会标记为中断，不会自动重放。</p>
+</table></div><p class="note">服务重启后，旧的排队或运行任务会标记为中断，
+不会自动重放。</p>
 </section>"""
     return _layout("任务中心", body, "jobs")
 
@@ -504,8 +509,10 @@ def render_reconciliation(record: dict, *, csrf_token: str = "") -> str:
 <p>状态：{status} · 截止：{as_of}</p>
 <p>批次确认：{escape(str(confirmations))} ·
 实收：{escape(str(receipts))}</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="逐批次到账核对">
 <table><tr><th>确认批次</th><th>确认净额</th><th>实收</th><th>未收/超收差额</th><th>状态</th></tr>
 {cash or '<tr><td colspan="5">没有逐批次实收记录</td></tr>'}</table>
+</div>
 <h3>差异</h3><pre>{differences}</pre>
 <p class="banner">read_only={escape(str(report.get("read_only")))} ·
 real_business_certified={escape(str(report.get("real_business_certified")))} ·
