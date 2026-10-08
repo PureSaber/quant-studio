@@ -6,16 +6,17 @@ import json
 import os
 import queue
 import re
-import signal
 import subprocess
 import tempfile
 import threading
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
 from quant_studio import QuantStudioError
+from quant_studio.runner import _terminate_process_scope
 from quant_studio.settings import use_settings
 
 _JOB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}\Z")
@@ -53,13 +54,13 @@ class JobControl:
                 self._process = None
         self.manager._update(self.job_id, child_pid=None)
 
-    def request_cancel(self) -> bool:
+    def request_cancel(self, *, force: bool = False) -> bool:
         self._cancel.set()
         with self._lock:
             process = self._process
             if process is None or process.poll() is not None:
                 return False
-            return _terminate_bound_process(process)
+            return _terminate_bound_process(process, force=force)
 
 
 class JobManager:
@@ -80,13 +81,19 @@ class JobManager:
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._lock = threading.RLock()
         self._closed = False
-        self._audit_orphans()
+        self._root_lock = _acquire_root_lock(self.root / "manager.lock")
         self._worker = None
-        if start_worker:
-            self._worker = threading.Thread(
-                target=self._work, name="quant-studio-jobs", daemon=True
-            )
-            self._worker.start()
+        try:
+            self._audit_orphans()
+            if start_worker:
+                self._worker = threading.Thread(
+                    target=self._work, name="quant-studio-jobs", daemon=True
+                )
+                self._worker.start()
+        except Exception:
+            _release_root_lock(self._root_lock)
+            self._root_lock = None
+            raise
 
     def submit(
         self,
@@ -100,8 +107,6 @@ class JobManager:
     ) -> dict:
         if action not in {"check", "execute"}:
             raise QuantStudioError("只有预检和显式执行可以进入任务队列")
-        if self._closed:
-            raise QuantStudioError("任务队列已经关闭")
         job_id = uuid.uuid4().hex
         now = _now()
         record = {
@@ -126,6 +131,8 @@ class JobManager:
             "profile": profile,
         }
         with self._lock:
+            if self._closed:
+                raise QuantStudioError("任务队列已经关闭")
             self._requests[job_id] = request
             self._write(record)
             self._queue.put(job_id)
@@ -196,12 +203,31 @@ class JobManager:
             return ""
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            controls = list(self._controls.values())
+            for job_id in list(self._requests):
+                try:
+                    record = self.get(job_id)
+                except QuantStudioError:
+                    continue
+                if record.get("status") == "queued":
+                    self._update(
+                        job_id,
+                        status="interrupted",
+                        stage="finished",
+                        message="服务停止前任务尚未开始；未执行且不会自动重放。",
+                    )
+                    self._requests.pop(job_id, None)
+        for control in controls:
+            control.request_cancel(force=True)
         self._queue.put(None)
         if self._worker is not None and self._worker is not threading.current_thread():
-            self._worker.join(timeout=5)
+            self._worker.join()
+        _release_root_lock(self._root_lock)
+        self._root_lock = None
 
     def _work(self) -> None:
         while True:
@@ -241,12 +267,18 @@ class JobManager:
                 run_id = data.get("run_id")
                 actual = str(data.get("status") or "failed")
                 if control.cancel_requested:
-                    status = "cancelled" if actual == "cancelled" else "cancel_failed"
-                    message = (
-                        "本任务原生进程已终止。"
-                        if status == "cancelled"
-                        else "取消请求后任务已完成或返回其他状态，未声称取消成功。"
-                    )
+                    if self._closed:
+                        status = "interrupted"
+                        message = "服务停止时中断了本实例持有的任务；不会自动重放。"
+                    else:
+                        status = (
+                            "cancelled" if actual == "cancelled" else "cancel_failed"
+                        )
+                        message = (
+                            "本任务原生进程已终止。"
+                            if status == "cancelled"
+                            else "取消请求后任务已完成或返回其他状态，未声称取消成功。"
+                        )
                 else:
                     status = actual
                     message = data.get("message")
@@ -259,12 +291,21 @@ class JobManager:
                     child_pid=None,
                 )
             except Exception as exc:  # worker must retain a diagnostic record
-                status = "cancelled" if control.cancel_requested else "failed"
+                status = (
+                    "interrupted"
+                    if self._closed
+                    else ("cancelled" if control.cancel_requested else "failed")
+                )
+                message = (
+                    f"服务停止时任务中断：{exc}"
+                    if self._closed
+                    else f"任务执行失败：{exc}"
+                )
                 self._update(
                     job_id,
                     status=status,
                     stage="finished",
-                    message=f"任务执行失败：{exc}",
+                    message=message,
                     child_pid=None,
                 )
             finally:
@@ -341,29 +382,48 @@ class JobManager:
             Path(temporary).unlink(missing_ok=True)
 
 
-def _terminate_bound_process(process: subprocess.Popen) -> bool:
-    if process.poll() is not None:
-        return False
+def _terminate_bound_process(process: subprocess.Popen, *, force: bool = False) -> bool:
+    # The caller owns this live Popen handle; persisted PIDs are never used.
+    return _terminate_process_scope(process, force=force)
+
+
+def _acquire_root_lock(path: Path):
     try:
+        stream = path.open("a+b")
+        if path.stat().st_size == 0:
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
         if os.name == "nt":
-            # The caller owns this live Popen handle; do not act on persisted PIDs.
-            completed = subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                capture_output=True,
-                check=False,
-                timeout=10,
-            )
-            if completed.returncode and process.poll() is None:
-                process.terminate()
+            import msvcrt
+
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        return True
-    except (OSError, subprocess.SubprocessError):
-        try:
-            process.terminate()
-            return True
-        except OSError:
-            return False
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return stream
+    except OSError as exc:
+        with suppress(NameError, OSError):
+            stream.close()
+        raise QuantStudioError("该 runs_root 已有任务服务持有独占锁") from exc
+
+
+def _release_root_lock(stream) -> None:
+    if stream is None:
+        return
+    try:
+        stream.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    finally:
+        stream.close()
 
 
 def _now() -> str:

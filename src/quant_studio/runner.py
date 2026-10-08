@@ -5,11 +5,13 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,62 @@ class ExecutionCancelled(Exception):
         super().__init__("本任务的原生进程已取消")
         self.stdout = stdout
         self.stderr = stderr
+
+
+_PROCESS_DRAIN_TIMEOUT = 5.0
+
+
+def _terminate_process_scope(process: subprocess.Popen, *, force: bool) -> bool:
+    """Stop only the process group created for this live Popen handle."""
+    if process.poll() is not None:
+        return False
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            if completed.returncode and process.poll() is None:
+                process.kill() if force else process.terminate()
+        else:
+            os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        try:
+            process.kill() if force else process.terminate()
+            return True
+        except OSError:
+            return False
+
+
+def _bounded_process_drain(process: subprocess.Popen) -> tuple[str, str]:
+    """Collect pipes after scope termination without waiting on escaped descendants."""
+    try:
+        return process.communicate(timeout=_PROCESS_DRAIN_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                with suppress(OSError):
+                    stream.close()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(timeout=1)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return _timeout_text(exc.output), _timeout_text(exc.stderr)
+
+
+def _timeout_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def _execute_subprocess(
@@ -83,8 +141,10 @@ def _execute_subprocess(
         while True:
             remaining = timeout - (time.monotonic() - started)
             if remaining <= 0:
-                process.kill()
-                stdout, stderr = process.communicate()
+                _terminate_process_scope(process, force=True)
+                stdout, stderr = _bounded_process_drain(process)
+                control.log("stdout", stdout)
+                control.log("stderr", stderr)
                 raise subprocess.TimeoutExpired(
                     argv, timeout, output=stdout, stderr=stderr
                 )

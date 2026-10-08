@@ -1,4 +1,5 @@
 import json
+import socket
 import threading
 import time
 from http.client import HTTPConnection
@@ -20,6 +21,7 @@ from quant_studio.server import (
     render_run,
     render_template_page,
     resolve_run_asset,
+    serve,
     validate_host,
 )
 
@@ -97,6 +99,34 @@ def test_template_page_contains_knob_form():
 def test_non_loopback_host_is_rejected(host):
     with pytest.raises(QuantStudioError, match="host"):
         validate_host(host)
+
+
+def test_port_bind_failure_does_not_audit_existing_job_records(tmp_path):
+    jobs = tmp_path / ".jobs"
+    jobs.mkdir()
+    record = {
+        "schema_version": "quant-studio.job/v1",
+        "job_id": "active-job",
+        "action": "execute",
+        "template_id": "synthetic-demo",
+        "status": "running",
+        "stage": "native",
+        "message": "active",
+        "created_at": "2026-10-08T00:00:00Z",
+        "updated_at": "2026-10-08T00:00:00Z",
+        "owner_instance_id": "live",
+        "run_id": None,
+        "child_pid": 123,
+    }
+    path = jobs / "active-job.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        with pytest.raises(OSError):
+            serve("127.0.0.1", listener.getsockname()[1], runs_root=tmp_path)
+    assert path.read_bytes() == before
 
 
 def test_http_rejects_dns_rebinding_host(tmp_path):

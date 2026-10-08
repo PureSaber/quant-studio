@@ -179,3 +179,47 @@ def test_cli_cannot_claim_certification_or_change_original_classification(
 
     assert result["status"] == "failed"
     assert "真实性边界" in result["message"] or "数据性质" in result["message"]
+
+
+def test_csv_change_during_native_execution_is_rejected(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    evidence = tmp_path / "evidence"
+    workspace = tmp_path / "workspace"
+    runs.mkdir()
+    evidence.mkdir()
+    (workspace / "quant-fund").mkdir(parents=True)
+    _fund_run(runs, "synthetic")
+    confirmations = evidence / "confirm.csv"
+    receipts = evidence / "receipts.csv"
+    _csv(confirmations, BATCH_CONFIRMATION_COLUMNS)
+    _csv(receipts, BATCH_RECEIPT_COLUMNS)
+    monkeypatch.setenv("QUANT_FUND_RECONCILE_ROOT", str(evidence))
+    monkeypatch.setenv("QUANT_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setattr(
+        "quant_studio.fund_reconciliation.configured_python", lambda *_: sys.executable
+    )
+    payload = {
+        "schema": "quant-fund.batch-reconciliation/v1",
+        "status": "matched",
+        "read_only": True,
+        "real_business_certified": False,
+        "classification": "synthetic",
+        "differences": [],
+        "cash_by_confirmation": [],
+    }
+
+    def invoke(argv, **kwargs):
+        confirmations.write_text(
+            confirmations.read_text() + "changed", encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr("quant_studio.fund_reconciliation.subprocess.run", invoke)
+    store = FundReconciliationStore(runs)
+    preview = store.preview("run-one", "batches", confirmations, receipts)
+
+    result = store.execute(preview["reconciliation_id"])
+
+    assert result["status"] == "failed"
+    assert "期间CSV输入发生改变" in result["message"]
+    assert "report" not in result

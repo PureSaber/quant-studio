@@ -136,6 +136,11 @@ class FundReconciliationStore:
                 check=False,
             )
             self._log(reconciliation_id, completed.stdout, completed.stderr)
+            if (
+                _sha256(confirmations) != record["confirmation_sha256"]
+                or _sha256(receipts) != record["receipt_sha256"]
+            ):
+                raise QuantStudioError("原生对账期间CSV输入发生改变")
             if completed.returncode not in {0, 2}:
                 raise QuantStudioError(
                     completed.stderr.strip()[-1600:] or "原生对账命令失败"

@@ -1,8 +1,12 @@
 import json
+import subprocess
 import sys
 import threading
 import time
 
+import pytest
+
+from quant_studio import QuantStudioError
 from quant_studio.jobs import JobManager
 from quant_studio.runner import ExecutionCancelled, _execute_subprocess
 
@@ -106,6 +110,104 @@ def test_restart_marks_old_queued_and_running_jobs_interrupted_without_replay(tm
             assert "重启" in job["message"]
     finally:
         manager.close()
+
+
+def test_second_manager_cannot_audit_or_take_over_live_runs_root(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def execute(job, control):
+        entered.set()
+        assert release.wait(5)
+        return {"status": "succeeded", "run_id": job["job_id"]}
+
+    manager = JobManager(tmp_path, execute=execute)
+    try:
+        job = manager.submit("execute", "synthetic-demo", {}, profile=None)
+        assert entered.wait(5)
+        assert _wait(manager, job["job_id"], {"running"})["status"] == "running"
+        with pytest.raises(QuantStudioError, match="独占锁"):
+            JobManager(tmp_path, start_worker=False)
+        assert manager.get(job["job_id"])["status"] == "running"
+        release.set()
+        assert _wait(manager, job["job_id"], {"succeeded"})["status"] == "succeeded"
+    finally:
+        release.set()
+        manager.close()
+
+
+def test_close_interrupts_queued_jobs_without_starting_them(tmp_path):
+    entered = []
+    first_started = threading.Event()
+    release = threading.Event()
+
+    def execute(job, control):
+        entered.append(job["job_id"])
+        first_started.set()
+        assert release.wait(5)
+        return {"status": "succeeded", "run_id": job["job_id"]}
+
+    manager = JobManager(tmp_path, execute=execute)
+    first = manager.submit("execute", "synthetic-demo", {}, profile=None)
+    assert first_started.wait(5)
+    second = manager.submit("execute", "synthetic-demo", {}, profile=None)
+    closer = threading.Thread(target=manager.close)
+    closer.start()
+    try:
+        queued = _wait(manager, second["job_id"], {"interrupted"})
+        assert "未执行" in queued["message"]
+        with pytest.raises(QuantStudioError, match="关闭"):
+            manager.submit("execute", "synthetic-demo", {}, profile=None)
+        assert entered == [first["job_id"]]
+    finally:
+        release.set()
+        closer.join(timeout=5)
+    assert not closer.is_alive()
+    assert manager.get(first["job_id"])["status"] == "interrupted"
+    assert manager.get(second["job_id"])["status"] == "interrupted"
+    assert entered == [first["job_id"]]
+
+
+def test_timeout_terminates_owned_process_tree_and_drain_is_bounded(tmp_path):
+    started = tmp_path / "grandchild-started"
+    escaped = tmp_path / "grandchild-escaped"
+    grandchild = (
+        "from pathlib import Path; import time; "
+        f"Path({str(started)!r}).write_text('started'); "
+        "time.sleep(2); "
+        f"Path({str(escaped)!r}).write_text('escaped')"
+    )
+    child = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+        "time.sleep(30)"
+    )
+
+    class Control:
+        cancel_requested = False
+
+        def bind_process(self, process):
+            self.process = process
+
+        def release_process(self, process):
+            assert process is self.process
+
+        def log(self, stream, content):
+            pass
+
+    began = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        _execute_subprocess(
+            [sys.executable, "-c", child],
+            cwd=tmp_path,
+            env=None,
+            timeout=0.8,
+            control=Control(),
+        )
+    assert time.monotonic() - began < 8
+    assert started.is_file()
+    time.sleep(2)
+    assert not escaped.exists()
 
 
 def test_bound_native_process_is_cancelled_by_its_live_job_handle(tmp_path):

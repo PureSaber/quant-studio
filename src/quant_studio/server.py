@@ -1057,7 +1057,7 @@ def serve(
         pass
 
     Handler.runs_root = root
-    Handler.job_manager = JobManager(root, execute=_job_executor(root))
+    Handler.job_manager = None
     Handler.reconciliation_store = FundReconciliationStore(root)
     Handler.settings_store = SettingsStore(
         Path(settings_path)
@@ -1067,11 +1067,17 @@ def serve(
     Handler.csrf_token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((host, port), Handler)
     try:
+        Handler.job_manager = JobManager(root, execute=_job_executor(root))
+    except Exception:
+        server.server_close()
+        raise
+    try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        Handler.job_manager.close()
+        if Handler.job_manager is not None:
+            Handler.job_manager.close()
         server.server_close()
 
 
