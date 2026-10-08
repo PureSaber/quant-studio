@@ -85,3 +85,17 @@ jobs:
         env:
           QUANT_UPSTREAM_REPO: ${{ github.workspace }}/quant-timing
         run: python -m pytest quant-studio/integration/test_timing_upstream.py quant-studio/integration/test_timing_counterfactual.py -q
+  upstream-integration:
+    name: upstream-integration
+    needs: [integration, timing]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every upstream matrix to succeed
+        env:
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          TIMING_RESULT: ${{ needs.timing.result }}
+        run: |
+          test "$INTEGRATION_RESULT" = success
+          test "$TIMING_RESULT" = success
