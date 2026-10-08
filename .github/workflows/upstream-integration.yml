@@ -19,7 +19,7 @@ jobs:
           - {repo: quant-hk-equity, ref: 18cfe93a757e93e0c89875ceff9612350f989359, test: hk}
           - {repo: a-share-multifactor, ref: 6b799c3e4c2871153e399a62ba0b5e1e6c68fc99, test: ashare}
           - {repo: quant-pipeline, ref: b1fce90b85651248e9e60ae857b88fe4d170319e, test: account}
-          - {repo: quant-fund, ref: c0f2c5bc8d52313705a8c07f3081490800693933, test: fund}
+          - {repo: quant-fund, ref: 52042caff6fc60aa6a4b5273946ab2093ba1de5d, test: fund}
           - {repo: quant-futures-spread, ref: 314b889455166c39611285ddd72aa73ee451ec34, test: futures}
           - {repo: quant-crypto-basis, ref: 3b0e68aefe2a013b9c8f8e15b47078cf19c55b54, test: crypto}
     steps:

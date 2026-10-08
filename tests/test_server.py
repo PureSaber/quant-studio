@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
@@ -27,9 +28,15 @@ def _start_http_server(tmp_path):
     class Handler(_Handler):
         pass
 
+    class Server(ThreadingHTTPServer):
+        def server_close(self):
+            if Handler.job_manager is not None:
+                Handler.job_manager.close()
+            super().server_close()
+
     Handler.runs_root = tmp_path
     Handler.csrf_token = "test-only-csrf-token"
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = Server(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
@@ -167,14 +174,22 @@ def test_http_execute_requires_same_origin_and_csrf_token(tmp_path):
             fields={"_csrf_token": "test-only-csrf-token", "action": "execute"},
         )
         assert status == 303
-        assert headers["Location"].startswith("/runs/")
+        assert headers["Location"].startswith("/jobs/")
         assert headers["X-Frame-Options"] == "DENY"
-        assert len(list(tmp_path.iterdir())) == 1
+        manager = server.RequestHandlerClass.job_manager
+        job_id = headers["Location"].removeprefix("/jobs/")
+        deadline = time.monotonic() + 5
+        while manager.get(job_id)["status"] in {"queued", "running"}:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        job = manager.get(job_id)
+        assert job["status"] == "succeeded"
+        run_url = f"/runs/{job['run_id']}"
 
         status, report_headers, _ = _request(
             server,
             "GET",
-            f"{headers['Location']}/files/report.html",
+            f"{run_url}/files/report.html",
             host=authority,
         )
         assert status == 200

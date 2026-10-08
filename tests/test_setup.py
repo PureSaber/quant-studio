@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -195,6 +196,11 @@ def test_running_request_retains_old_snapshot_during_a_configuration_save(
             )
             release.set()
             assert running.result()[0] == 303
+            manager = server.RequestHandlerClass.job_manager
+            deadline = time.monotonic() + 5
+            while manager.list()[0]["status"] in {"queued", "running"}:
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
         assert seen == [str(old), str(old)]
         assert store.snapshot()["environment"]["QUANT_WORKSPACE_ROOT"] == str(new)
     finally:

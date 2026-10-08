@@ -1,10 +1,12 @@
 """Exercise native applications through independently configured Python runtimes."""
 
+import csv
 import hashlib
 import json
 import os
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -86,6 +88,7 @@ def test_native_asset_cli(name, tmp_path, monkeypatch):
     )
     assert result.status == "succeeded", diagnostics(result)
     assert result.evidence_kind == "synthetic"
+    output = result.run_dir / "strategy-output"
     if fund:
         assert result.verification_status == "pass"
         evidence = json.loads(
@@ -93,6 +96,7 @@ def test_native_asset_cli(name, tmp_path, monkeypatch):
         )
         assert evidence["verified_ledger_days"] > 60
         assert "账本重放校验通过" in render_run(result.run_dir)
+        _exercise_fund_reconciliation(python, repo, output, tmp_path)
     assert fingerprint(source) == before
     assert (checked.run_dir / "config.json").read_bytes() == (
         result.run_dir / "config.json"
@@ -100,7 +104,6 @@ def test_native_asset_cli(name, tmp_path, monkeypatch):
     nav = parse_nav_csv(result.run_dir / "nav.csv")
     assert len(nav.rows) > 60
     assert nav.initial_nav == (1 if fund else 250000)
-    output = result.run_dir / "strategy-output"
     native = json.loads(
         (output / ("metrics.json" if fund else "study.json")).read_text(
             encoding="utf-8"
@@ -152,3 +155,116 @@ def test_native_asset_cli(name, tmp_path, monkeypatch):
     assert failed.status == "failed", diagnostics(failed)
     assert not (failed.run_dir / "nav.csv").exists()
     assert fingerprint(source) == broken
+
+
+def _exercise_fund_reconciliation(python, repo, output, tmp_path):
+    from quant_fund.batches import (
+        BATCH_CONFIRMATION_COLUMNS,
+        BATCH_RECEIPT_COLUMNS,
+    )
+    from quant_fund.observations import CONFIRMATION_COLUMNS, RECEIPT_COLUMNS
+
+    with (output / "trades.csv").open(encoding="utf-8") as stream:
+        trades = list(csv.DictReader(stream))
+    with (output / "nav.csv").open(encoding="utf-8") as stream:
+        cutoff = list(csv.DictReader(stream))[-1]["date"]
+    confirmations = [
+        {
+            **{key: trade[key] for key in CONFIRMATION_COLUMNS if key in trade},
+            "evidence_id": f"synthetic-confirm-{trade['order_id']}",
+            "currency": "CNY",
+            "source_ref": "synthetic:studio-integration",
+        }
+        for trade in trades
+    ]
+    receipts = []
+    for trade in trades:
+        if trade["side"] != "SELL" or trade["settle_date"] > cutoff:
+            continue
+        receipts.append(
+            {
+                "evidence_id": f"synthetic-receipt-{trade['order_id']}",
+                "order_id": trade["order_id"],
+                "fund_id": trade["fund_id"],
+                "received": trade["settle_date"],
+                "amount": str(Decimal(trade["gross"]) - Decimal(trade["fee"])),
+                "currency": "CNY",
+                "source_ref": "synthetic:studio-integration",
+            }
+        )
+    evidence = tmp_path / "reconciliation"
+    evidence.mkdir()
+
+    def write(name, columns, rows):
+        path = evidence / name
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(rows)
+        return path
+
+    simple_confirmations = write(
+        "confirmations.csv", CONFIRMATION_COLUMNS, confirmations
+    )
+    simple_receipts = write("receipts.csv", RECEIPT_COLUMNS, receipts)
+    before = fingerprint(output)
+
+    def reconcile(command, confirmation_path, receipt_path):
+        return subprocess.run(
+            [
+                python,
+                "-m",
+                "quant_fund.cli",
+                command,
+                "--run",
+                str(output),
+                "--confirmations",
+                str(confirmation_path),
+                "--receipts",
+                str(receipt_path),
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+
+    checked = reconcile("reconcile-observations", simple_confirmations, simple_receipts)
+    assert checked.returncode == 0, checked.stderr
+    report = json.loads(checked.stdout)
+    assert report["status"] == "matched"
+    assert report["read_only"] is True
+    assert report["real_business_certified"] is False
+    assert report["classification"] == "synthetic"
+
+    batch_confirmations = [{**row, "final": "true"} for row in confirmations]
+    parents = {row["order_id"]: row["evidence_id"] for row in confirmations}
+    batch_receipts = [
+        {**row, "confirmation_id": parents[row["order_id"]]} for row in receipts
+    ]
+    batch_confirmation_path = write(
+        "batch-confirmations.csv", BATCH_CONFIRMATION_COLUMNS, batch_confirmations
+    )
+    batch_receipt_path = write(
+        "batch-receipts.csv", BATCH_RECEIPT_COLUMNS, batch_receipts
+    )
+    batched = reconcile(
+        "reconcile-batches", batch_confirmation_path, batch_receipt_path
+    )
+    assert batched.returncode == 0, batched.stderr
+    batch_report = json.loads(batched.stdout)
+    assert batch_report["status"] == "matched"
+    assert batch_report["real_business_certified"] is False
+    assert all(row["status"] == "paid" for row in batch_report["cash_by_confirmation"])
+    assert fingerprint(output) == before
+
+    duplicate_path = write(
+        "duplicate-batches.csv",
+        BATCH_CONFIRMATION_COLUMNS,
+        [*batch_confirmations, batch_confirmations[0]],
+    )
+    rejected = reconcile("reconcile-batches", duplicate_path, batch_receipt_path)
+    assert rejected.returncode != 0
+    assert fingerprint(output) == before
