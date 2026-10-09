@@ -288,6 +288,7 @@ def preview(
     _isolate_outputs(loaded, rendered.config, run_dir)
     _resolve_input_paths(loaded, rendered.config)
     selected_snapshot = _snapshot_path(loaded, snapshot)
+    selected_snapshot = _recipe_snapshot(loaded, selected_snapshot, run_dir)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(
@@ -302,6 +303,7 @@ def preview(
         run_dir / "request.json",
         {
             "template_id": loaded.id,
+            "recipe": loaded.metadata.get("recipe"),
             "knobs": knobs or {},
             "factors": factors,
             "snapshot": str(selected_snapshot) if selected_snapshot else None,
@@ -346,6 +348,7 @@ def run(
     _isolate_outputs(loaded, rendered.config, run_dir)
     _resolve_input_paths(loaded, rendered.config)
     selected_snapshot = _snapshot_path(loaded, snapshot)
+    selected_snapshot = _recipe_snapshot(loaded, selected_snapshot, run_dir)
     config_path = run_dir / f"config.{loaded.config_format}"
     _write_config(config_path, loaded.config_format, rendered.config)
     argv = _render_argv(
@@ -360,6 +363,7 @@ def run(
         run_dir / "request.json",
         {
             "template_id": loaded.id,
+            "recipe": loaded.metadata.get("recipe"),
             "knobs": knobs or {},
             "factors": factors,
             "execute": True,
@@ -651,7 +655,10 @@ def preflight(
     prepared = preview(
         loaded, knobs, factors=factors, snapshot=snapshot, runs_root=runs_root
     )
-    selected = _snapshot_path(loaded, snapshot)
+    saved_request = json.loads(
+        (prepared.run_dir / "request.json").read_text(encoding="utf-8")
+    )
+    selected = Path(saved_request["snapshot"]) if saved_request["snapshot"] else None
     ready = template_readiness(loaded, snapshot=selected)
     argv = _render_argv(
         declared,
@@ -927,6 +934,21 @@ def _isolate_outputs(template: Template, config: dict[str, Any], run_dir: Path) 
         for key in ("outputs_dir", "state_dir"):
             if key in config:
                 config[key] = str(run_dir / "strategy-output")
+
+
+def _recipe_snapshot(template, selected, run_dir):
+    frozen = (template.metadata.get("recipe") or {}).get("input_config")
+    if (
+        template.metadata.get("recipe")
+        and not frozen
+        and template.metadata.get("input_source", {}).get("kind") == "file"
+    ):
+        raise QuantStudioError("请在研究方案中加载原生配置并保存后再提交任务")
+    if frozen:
+        path = run_dir / "source-config.yaml"
+        _write_config(path, "yaml", frozen["config"])
+        return path
+    return selected
 
 
 def _snapshot_path(template: Template, snapshot: str | Path | None) -> Path | None:

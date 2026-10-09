@@ -1,0 +1,19 @@
+{
+  "id": "custom-example",
+  "title": "自定义模块接入样例",
+  "summary": "演示自己的 Python 研究模块如何接入配置、预检、任务和结果页面。",
+  "kind": "external",
+  "workspace_repo": "quant-studio",
+  "upstream_ref": "owner-registered-module-v1",
+  "base_config": "base.json",
+  "config_format": "json",
+  "knobs": [],
+  "argv": ["python", "-m", "quant_studio.example_research", "--config", "{config}", "--output", "{output}"],
+  "preflight_argv": ["python", "-m", "quant_studio.example_research", "--config", "{config}", "--preflight"],
+  "preflight_contract": {"schema_version": "quant-studio.custom-preflight/v1", "status_field": "software_preflight", "positive_counts": ["rows"]},
+  "output_dirs": ["{output}"],
+  "result_files": {"nav.csv": "nav.csv", "report.html": "report.html"},
+  "nav_initial_value_key": "initial_capital",
+  "report_name": "report.html",
+  "disclaimer": "合成模块接入示例，不是市场数据或投资策略。"
+}

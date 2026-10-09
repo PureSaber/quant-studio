@@ -2,6 +2,7 @@
 # 基本面 / 技术面 / 情感面 / 宏观面 — one representative factor each (plus existing basics)
 
 universe: hs300
+instrument_catalog: null
 start_date: "2023-01-01"
 end_date: "2024-06-30"
 

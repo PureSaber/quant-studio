@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import secrets
+import threading
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +13,12 @@ from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 import yaml
 
 from quant_studio import QuantStudioError
+from quant_studio.access import (
+    AccessHandler,
+    AccessPolicy,
+    tls_context,
+    validate_binding,
+)
 from quant_studio.accounts import account_sources, inspect_source
 from quant_studio.counterfactual_panel import (
     counterfactual_panel,
@@ -41,7 +48,9 @@ from quant_studio.nav import (
     parse_nav_csv,
     validate_comparison,
 )
+from quant_studio.recipes import RecipeStore, recipe_template
 from quant_studio.research_panel import load_timing_view, timing_panel
+from quant_studio.research_web import ResearchHandler
 from quant_studio.run_record import load_run_result
 from quant_studio.runner import preflight, run, safe_run_file, template_readiness
 from quant_studio.settings import setting, use_settings
@@ -631,6 +640,9 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
     result = load_run_result(directory)
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     template = load_template(request["template_id"])
+    recipe = request.get("recipe")
+    if recipe:
+        template.metadata["title"] = recipe["name"]
     if result.get("verification_status") == "failed":
         result = {**result, "status": "verification_failed"}
     if result["status"] in {"running", "checking", "incomplete", "verification_failed"}:
@@ -828,6 +840,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if request.get("factors") is not None:
             fields.append(("factor_form", "1"))
             fields.extend(("factor", factor) for factor in request["factors"])
+        action_url = f"/templates/{escape(template.id)}"
+        if recipe:
+            action_url = f"/research/{recipe['id']}"
+            fields = [
+                ("_csrf_token", csrf_token),
+                ("action", "execute_saved"),
+                ("revision", recipe["revision"]),
+            ]
         inputs = "".join(
             f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
             for key, value in fields
@@ -863,7 +883,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             + "</p><details><summary>上游原始证据</summary><pre>"
             + escape(json.dumps(checked, ensure_ascii=False, indent=2))
             + "</pre></details>"
-            + f'<form method="post" action="/templates/{escape(template.id)}">'
+            + f'<form method="post" action="{action_url}">'
             + inputs
             + '<button class="btn primary">使用相同参数运行</button></form>'
             '<p class="note">运行时上游会重新校验数据；预检不锁定输入。</p></section>'
@@ -875,10 +895,15 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             if template.metadata.get("standard_view")
             else "核对输入路径、源文件及对应环境；保留失败记录，修正输入后重新检查。"
         )
+        back_url = (
+            f"/research/{recipe['id']}"
+            if recipe
+            else f"/templates/{escape(template.id)}"
+        )
         preflight_view = (
             '<section class="panel"><h2>下一步</h2>'
             f"<p>{next_step}</p>"
-            f'<a href="/templates/{escape(template.id)}">返回模板</a></section>'
+            f'<a href="{back_url}">返回配置</a></section>'
         )
     body = f"""<header class="page-head">
 <p class="kicker">结果</p>
@@ -921,6 +946,14 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
     if request.get("factors") is not None:
         fields.append(("factor_form", "1"))
         fields.extend(("factor", factor) for factor in request["factors"])
+    action_url = f"/templates/{escape(template.id)}"
+    if recipe := request.get("recipe"):
+        action_url = f"/research/{recipe['id']}"
+        fields = [
+            ("_csrf_token", csrf_token),
+            ("revision", recipe["revision"]),
+            ("action", "check_saved" if has_preflight else "execute_saved"),
+        ]
     inputs = "".join(
         f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
         for key, value in fields
@@ -949,7 +982,7 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
 <p>{message}</p>
 <p>请先确认原进程已结束。保留当前记录与账本；已有账户先核验并恢复投影，
 不要用初始化覆盖账户。部分产物不能作为完整结果。</p>
-<form method="post" action="/templates/{escape(template.id)}">{inputs}
+<form method="post" action="{action_url}">{inputs}
 <button class="btn primary">{retry_label}</button></form>
 <p class="note">新记录重新读取输入；本次配置、结果与账本继续保留。</p></section>
 <details class="panel" open><summary>配置与执行命令</summary>
@@ -1032,6 +1065,9 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
 
 def _job_executor(runs_root: Path):
     def execute(job, control):
+        template = (
+            recipe_template(job["recipe"]) if job.get("recipe") else job["template_id"]
+        )
         options = dict(
             factors=job.get("factors"),
             runs_root=runs_root,
@@ -1039,8 +1075,8 @@ def _job_executor(runs_root: Path):
             control=control,
         )
         if job["action"] == "check":
-            return preflight(job["template_id"], job["knobs"], **options)
-        return run(job["template_id"], job["knobs"], execute=True, **options)
+            return preflight(template, job["knobs"], **options)
+        return run(template, job["knobs"], execute=True, **options)
 
     return execute
 
@@ -1051,8 +1087,23 @@ def serve(
     *,
     runs_root: str | Path | None = None,
     settings_path: str | Path | None = None,
+    access_path: str | Path | None = None,
+    tls_cert: str | Path | None = None,
+    tls_key: str | Path | None = None,
+    stop_file: str | Path | None = None,
 ) -> None:
-    validate_host(host)
+    if stop_file and Path(stop_file).exists():
+        raise QuantStudioError("停止标记已经存在；确认旧服务停止后再清除标记")
+    access = None
+    context = None
+    if any(value is not None for value in (access_path, tls_cert, tls_key)):
+        if not all(value is not None for value in (access_path, tls_cert, tls_key)):
+            raise QuantStudioError("HTTPS 必须同时配置访问凭据、证书和私钥")
+        access = AccessPolicy(access_path)
+        validate_binding(host, access)
+        context = tls_context(tls_cert, tls_key)
+    else:
+        validate_host(host)
     root = (
         Path(runs_root)
         if runs_root is not None
@@ -1064,7 +1115,9 @@ def serve(
         pass
 
     Handler.runs_root = root
+    Handler.access_policy = access
     Handler.job_manager = None
+    Handler.recipe_store = RecipeStore(root)
     Handler.reconciliation_store = FundReconciliationStore(root)
     Handler.settings_store = SettingsStore(
         Path(settings_path)
@@ -1074,26 +1127,49 @@ def serve(
     Handler.csrf_token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer((host, port), Handler)
     try:
+        if context is not None:
+            server.socket = context.wrap_socket(
+                server.socket, server_side=True, do_handshake_on_connect=False
+            )
         Handler.job_manager = JobManager(root, execute=_job_executor(root))
     except Exception:
         server.server_close()
         raise
+    stopped = threading.Event()
+    watcher = None
+    if stop_file:
+
+        def watch_stop():
+            while not stopped.wait(1):
+                if Path(stop_file).exists():
+                    server.shutdown()
+                    return
+
+        watcher = threading.Thread(target=watch_stop, daemon=True)
+        watcher.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        stopped.set()
         if Handler.job_manager is not None:
             Handler.job_manager.close()
         server.server_close()
+        if watcher is not None:
+            watcher.join(timeout=2)
 
 
-class _Handler(BaseHTTPRequestHandler):
+class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
     runs_root = Path("runs")
     csrf_token = ""
     settings_store = None
     job_manager = None
     reconciliation_store = None
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(15)
 
     def do_GET(self) -> None:
         profile = (
@@ -1105,11 +1181,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _get(self) -> None:
         self._frame_policy = "DENY"
-        if not self._allow_request():
+        if not self._allow_request() or not self._auth_gate():
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path == "/":
+            if path == "/research" or path.startswith("/research/"):
+                self._research_get(path)
+            elif path == "/":
                 self._send_html(render_overview(self.runs_root))
             elif path == "/strategy":
                 self._send_html(render_home())
@@ -1202,12 +1280,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _post(self) -> None:
         self._frame_policy = "DENY"
-        if not self._allow_request(require_origin=True):
+        if not self._allow_request(require_origin=True) or not self._auth_gate():
             return
         path = unquote(urlparse(self.path).path)
         code_view = False
         accepted = (
             path.startswith("/templates/")
+            or path.startswith("/research/")
             or path == "/setup"
             or (path.startswith("/jobs/") and path.endswith("/cancel"))
             or path == "/fund-reconcile"
@@ -1229,12 +1308,19 @@ class _Handler(BaseHTTPRequestHandler):
             if content_type.lower() != "application/x-www-form-urlencoded":
                 raise QuantStudioError("请求类型不受支持")
             length = int(lengths[0])
-            if length < 0 or length > 64_000:
+            limit = 262_144 if path.startswith("/research/") else 64_000
+            if length < 0 or length > limit:
                 raise QuantStudioError("请求过大")
-            data = parse_qs(self.rfile.read(length).decode("utf-8"))
+            data = parse_qs(
+                self.rfile.read(length).decode("utf-8"),
+                keep_blank_values=path.startswith("/research/"),
+            )
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path.startswith("/research/"):
+                self._research_post(path, data)
                 return
             if path == "/setup":
                 self._setup_post(data)
@@ -1299,7 +1385,7 @@ class _Handler(BaseHTTPRequestHandler):
             if code_view:
                 self._send_text(f"错误: {exc}", status=400)
                 return
-            self.send_error(400, str(exc))
+            self._send_text(f"请求未执行：{exc}", status=400)
 
     def _setup_post(self, data) -> None:
         if self.settings_store is None:
@@ -1374,9 +1460,9 @@ class _Handler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     raise QuantStudioError("非法 Origin") from exc
                 if origin_port is None:
-                    origin_port = 80 if parsed.scheme == "http" else -1
+                    origin_port = {"http": 80, "https": 443}.get(parsed.scheme, -1)
                 if (
-                    parsed.scheme != "http"
+                    parsed.scheme != ("https" if self.access_policy else "http")
                     or parsed.hostname is None
                     or parsed.hostname.lower() != hostname
                     or origin_port != port
@@ -1388,9 +1474,32 @@ class _Handler(BaseHTTPRequestHandler):
                 ):
                     raise QuantStudioError("Origin 与本机服务不匹配")
         except (QuantStudioError, ValueError):
+            self._discard_request_body()
             self.send_error(403)
             return False
         return True
+
+    def _discard_request_body(self):
+        """Avoid a Windows TCP reset hiding an early rejection response."""
+        if self.command != "POST" or self.headers.get_all("Transfer-Encoding"):
+            return
+        lengths = self.headers.get_all("Content-Length") or []
+        if len(lengths) != 1:
+            return
+        try:
+            length = int(lengths[0])
+        except ValueError:
+            return
+        if not 0 < length <= 262_144:
+            return
+        previous = self.connection.gettimeout()
+        try:
+            self.connection.settimeout(0.2)
+            self.rfile.read(length)
+        except OSError:
+            pass
+        finally:
+            self.connection.settimeout(previous)
 
     def _valid_csrf_token(self, submitted: list[str]) -> bool:
         if len(submitted) != 1 or not self.csrf_token:
@@ -1416,7 +1525,12 @@ class _Handler(BaseHTTPRequestHandler):
             raise QuantStudioError("非法 Host") from exc
         hostname = parsed.hostname.lower() if parsed.hostname else ""
         if (
-            hostname not in {"127.0.0.1", "localhost"}
+            hostname
+            not in (
+                self.access_policy.hosts
+                if self.access_policy
+                else {"127.0.0.1", "localhost"}
+            )
             or parsed.username is not None
             or parsed.password is not None
             or parsed.path
@@ -1424,12 +1538,19 @@ class _Handler(BaseHTTPRequestHandler):
             or parsed.fragment
         ):
             raise QuantStudioError("Host 不是本机回环地址")
-        port = 80 if port is None else port
+        port = (443 if self.access_policy else 80) if port is None else port
         if port != self.server.server_port:
             raise QuantStudioError("Host 端口与服务不匹配")
         return hostname, port
 
     def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "same-origin")
+        if self.access_policy:
+            self.send_header("Strict-Transport-Security", "max-age=86400")
+        if getattr(self, "_pending_cookie", None):
+            self.send_header("Set-Cookie", self._pending_cookie)
+            self._pending_cookie = None
         policy = getattr(self, "_frame_policy", "DENY")
         ancestors = "'self'" if policy == "SAMEORIGIN" else "'none'"
         self.send_header("Content-Security-Policy", f"frame-ancestors {ancestors}")
@@ -1553,6 +1674,14 @@ window.addEventListener("pageshow", refreshCode);
 
 
 def _request_summary(request: dict[str, object]) -> str:
+    if recipe := request.get("recipe"):
+        label = escape(f"方案：{recipe['name']} · 版本 {recipe['revision'][:12]}")
+        return (
+            f'<span class="meta">{label}</span> '
+            f'<a href="/research/{escape(recipe["id"])}'
+            f'?revision={escape(recipe["revision"])}">'
+            "查看本次配置</a>"
+        )
     knobs = request.get("knobs")
     factors = request.get("factors")
     parts = []
@@ -1645,7 +1774,8 @@ def _data_step(template: object) -> str:
             return "".join(parts)
     if dataset:
         parts.append(
-            f"<p>{dataset.files}个数据文件，最近文件修改{escape(dataset.newest)}</p>"
+            f"<p>仓库默认目录参考（并非当前输入）：{dataset.files}个数据文件，"
+            f"最近文件修改{escape(dataset.newest)}</p>"
             f'<p class="path">{escape(str(dataset.path))}</p>'
         )
     else:
@@ -1898,12 +2028,14 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("setup", "首次配置", "/setup"),
         ("environment", "环境", "/environment"),
         ("data", "数据", "/data"),
+        ("research", "研究方案", "/research"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),
         ("jobs", "任务", "/jobs"),
         ("results", "结果", "/results"),
         ("fund-reconcile", "基金对账", "/fund-reconcile"),
         ("accounts", "账户", "/accounts"),
+        ("logout", "退出登录", "/logout"),
     )
     links = []
     for key, label, href in nav_items:
@@ -1939,6 +2071,15 @@ _FILE_TIME_NOTE = (
 )
 
 _CSS = """
+.recipe-grid { display: grid; gap: 20px; margin: 20px 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.recipe-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.recipe-field small { color: #687789; overflow-wrap: anywhere; }
+textarea { box-sizing: border-box; width: 100%; resize: vertical; min-height: 90px;
+  padding: 12px; border: 1px solid #cfd7df; border-radius: 8px;
+  font: 13px/1.5 Consolas, monospace; }
+.recipe-grid input, .recipe-grid select { box-sizing: border-box; width: 100%; }
+.panel { margin-bottom: 20px; }
 :root {
   --ink: #101828;
   --muted: #667085;
@@ -2276,5 +2417,7 @@ iframe {
   .studio-grid { grid-template-columns: 1fr; }
   .code-card { position: static; }
   .fields, .factor-grid { grid-template-columns: 1fr; }
+  .actions { flex-wrap: wrap; }
+  .actions > .btn { flex: 1 1 130px; white-space: normal; }
 }
 """

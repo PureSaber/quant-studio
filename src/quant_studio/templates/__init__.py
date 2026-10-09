@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import date
 from importlib.resources import files
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -34,19 +36,42 @@ class RenderedTemplate:
 
 def template_ids() -> list[str]:
     root = files(__package__)
-    return sorted(
+    builtin = [
         item.name
         for item in root.iterdir()
         if item.is_dir() and item.joinpath("template.json").is_file()
-    )
+    ]
+    custom = os.environ.get("QUANT_STUDIO_TEMPLATES")
+    if custom:
+        directory = Path(custom)
+        if not directory.is_absolute() or not directory.is_dir():
+            raise QuantStudioError("自定义模块目录须为已存在的绝对路径")
+        builtin.extend(
+            item.name
+            for item in directory.iterdir()
+            if item.is_dir()
+            and item.name.startswith("custom-")
+            and item.joinpath("template.json").is_file()
+        )
+    return sorted(builtin)
 
 
 def load_template(template_id: str) -> Template:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", template_id):
+        raise QuantStudioError("模板标识无效")
     directory = files(__package__).joinpath(template_id)
+    custom = os.environ.get("QUANT_STUDIO_TEMPLATES")
+    if template_id.startswith("custom-") and custom:
+        root = Path(custom).resolve()
+        directory = (root / template_id).resolve()
+        if directory.parent != root:
+            raise QuantStudioError("自定义模块目录越界")
     manifest = directory.joinpath("template.json")
     if not manifest.is_file():
         raise QuantStudioError(f"未知模板: {template_id}")
     metadata = json.loads(manifest.read_text(encoding="utf-8"))
+    if template_id.startswith("custom-"):
+        _validate_custom(metadata, template_id)
     base_path = directory.joinpath(metadata["base_config"])
     text = base_path.read_text(encoding="utf-8")
     if metadata["config_format"] == "yaml":
@@ -54,6 +79,49 @@ def load_template(template_id: str) -> Template:
     else:
         base_config = json.loads(text)
     return Template(metadata, base_config, directory)
+
+
+def _validate_custom(metadata, template_id):
+    required = {
+        "id",
+        "title",
+        "summary",
+        "kind",
+        "workspace_repo",
+        "upstream_ref",
+        "base_config",
+        "config_format",
+        "knobs",
+        "argv",
+        "preflight_argv",
+        "preflight_contract",
+        "output_dirs",
+        "result_files",
+        "report_name",
+        "disclaimer",
+    }
+    if not isinstance(metadata, dict) or required - set(metadata):
+        raise QuantStudioError("自定义模块声明字段不完整")
+    if (
+        metadata["id"] != template_id
+        or metadata["kind"] != "external"
+        or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", metadata["workspace_repo"])
+        or metadata["config_format"] not in {"json", "yaml"}
+        or metadata["base_config"] not in {"base.json", "base.yaml"}
+        or metadata["output_dirs"] != ["{output}"]
+        or metadata["report_name"] != "report.html"
+    ):
+        raise QuantStudioError("自定义模块须使用独立输出目录和受支持的配置格式")
+    for key in ("argv", "preflight_argv"):
+        argv = metadata[key]
+        if (
+            not isinstance(argv, list)
+            or len(argv) < 3
+            or not all(isinstance(item, str) for item in argv)
+            or argv[:2] != ["python", "-m"]
+            or not re.fullmatch(r"[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*", argv[2])
+        ):
+            raise QuantStudioError("自定义模块入口须为 python -m package.module")
 
 
 def render_template(
