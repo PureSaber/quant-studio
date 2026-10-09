@@ -1547,6 +1547,8 @@ async function refreshCode() {
 }
 form.addEventListener("input", refreshCode);
 form.addEventListener("change", refreshCode);
+// History navigation can restore form values after the initial HTML is rendered.
+window.addEventListener("pageshow", refreshCode);
 """
 
 
