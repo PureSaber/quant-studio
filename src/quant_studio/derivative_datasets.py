@@ -89,6 +89,10 @@ def command(request, directory, snapshot):
     runtime = template_python(template)
     if not runtime:
         raise QuantStudioError("请先配置该衍生品研究模块的独立 Python 环境")
+    if request.get("free_source"):
+        from quant_studio.free_derivative_datasets import command as free_command
+
+        return free_command(request, runtime, snapshot)
     # Revalidate the persisted request through the same function. No arbitrary
     # executable, module or provider URL can be supplied by a queued job.
     if request["provider"] == "demo":
