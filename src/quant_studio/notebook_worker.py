@@ -58,6 +58,29 @@ def execute(directory, timeout):
     if requested != environment:
         raise RuntimeError("Notebook environment changed after submission")
     notebook = nbformat.read(directory / "source.ipynb", as_version=4)
+    # Parameters are parsed as data, never interpolated into Python source.
+    notebook.cells.insert(
+        0,
+        nbformat.v4.new_code_cell(
+            "import json\nfrom pathlib import Path\n"
+            "context = json.loads(Path('inputs.json').read_text(encoding='utf-8'))\n"
+            "parameters = context.get('parameters', {})",
+            id="studio-runtime-context",
+        ),
+    )
+    notebook.cells.append(
+        nbformat.v4.new_code_cell(
+            "# 将显式声明的研究指标保存为实验产物。\n"
+            "if 'research_metrics' in globals():\n"
+            "    import json as _studio_json\n"
+            "    from pathlib import Path as _StudioPath\n"
+            f"    _StudioPath({str(directory / 'metrics.json')!r}).write_text(\n"
+            "        _studio_json.dumps(research_metrics,\n"
+            "            ensure_ascii=False, allow_nan=False),\n"
+            "        encoding='utf-8')",
+            id="studio-export-metrics",
+        )
+    )
     manager = KernelManager(
         kernel_name="research",
         kernel_spec_manager=KernelSpecManager(

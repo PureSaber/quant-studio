@@ -18,7 +18,13 @@ from quant_studio.recipes import _atomic
 from quant_studio.runner import ExecutionCancelled, _execute_subprocess
 
 _ID = re.compile(r"[a-f0-9]{32}\Z")
-ARTIFACTS = {"report.html", "executed.ipynb", "execution.log", "environment.json"}
+ARTIFACTS = {
+    "report.html",
+    "executed.ipynb",
+    "execution.log",
+    "environment.json",
+    "metrics.json",
+}
 
 
 def notebook_config():
@@ -178,6 +184,7 @@ class NotebookStore:
         return draft
 
     def _context(self, project):
+        from quant_studio.notebook_templates import NotebookTemplateStore
         from quant_studio.research_templates import research_quality_prompts
 
         datasets = []
@@ -195,15 +202,18 @@ class NotebookStore:
                     for name in item["hashes"]
                 ],
                 "hashes": dict(item["hashes"]),
+                "scope": {k: item.get(k) for k in ("start", "end", "symbols")},
             }
             if item.get("kind") == "intake":
                 linked.update(kind="intake", intake=item["intake"])
+                linked["scope"] = item["intake"]["check"]["scope"]
             datasets.append(linked)
         return {
             "question": project["question"],
             "project_revision": project["revision"],
             "datasets": datasets,
             "research_quality": research_quality_prompts(),
+            **NotebookTemplateStore(self.root).binding(project["id"]),
         }
 
     def _install_intake_reader(self, directory, context, record=None):
@@ -458,6 +468,10 @@ class NotebookStore:
                 result.stdout + result.stderr, encoding="utf-8"
             )
             self.verify_inputs(record)
+            if result.returncode == 0 and (directory / "metrics.json").exists():
+                from quant_studio.notebook_metrics import load_metrics
+
+                load_metrics(directory / "metrics.json")
             record.update(
                 status="succeeded" if result.returncode == 0 else "failed",
                 message="Notebook执行完成"
@@ -478,6 +492,8 @@ class NotebookStore:
             )
             if (directory / name).is_file() and not (directory / name).is_symlink()
         }
+        if record["status"] == "succeeded" and (directory / "metrics.json").is_file():
+            record["artifacts"]["metrics.json"] = file_hash(directory / "metrics.json")
         self._save(directory, record)
         return {"status": record["status"], "message": record.get("message", "")}
 

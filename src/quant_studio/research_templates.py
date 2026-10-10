@@ -97,8 +97,18 @@ def compatible_datasets(template: str, context: dict) -> list[dict]:
 
 
 def _common_cells(project: dict, template: str, context: dict) -> list[dict]:
-    selected = compatible_datasets(template, context)
-    selected_ids = [item["id"] for item in selected]
+    compatible_datasets(template, context)
+    purpose, columns = {
+        "data-quality-exploration": (None, []),
+        "price-return-missingness": (
+            "daily_bars_research",
+            ["symbol", "date", "close"],
+        ),
+        "historical-financial-availability": (
+            "historical_financial_factor_backtest",
+            ["available_at"],
+        ),
+    }[template]
     prompts = research_quality_prompts()
     quality = (
         "## 研究质量边界\n\n**自动检查**\n- "
@@ -110,8 +120,16 @@ def _common_cells(project: dict, template: str, context: dict) -> list[dict]:
         "import json\nfrom pathlib import Path\nimport pandas as pd\n"
         "from notebook_data_reader import read_intake_dataset\n\n"
         "context = json.loads(Path('inputs.json').read_text(encoding='utf-8'))\n"
-        f"selected_ids = {selected_ids!r}\n"
-        "selected = [d for d in context['datasets'] if d['id'] in selected_ids]\n"
+        "parameters = context.get('parameters', {})\n"
+        f"required_purpose, required_columns = {purpose!r}, {columns!r}\n"
+        "selected = [d for d in context['datasets']\n"
+        "    if d.get('kind') == 'intake'\n"
+        "    and d['intake']['check'].get('allowed') is True\n"
+        "    and (required_purpose is None\n"
+        "         or d['intake']['purpose'] == required_purpose)\n"
+        "    and set(required_columns) <= set(\n"
+        "        d['intake']['check']['scope']['columns'])]\n"
+        "assert selected, '请选择已按模板用途准入且含所需字段的数据版本'\n"
         "reads = {d['id']: read_intake_dataset(\n"
         "    d, context['intake_runtime'], base=Path.cwd()) for d in selected}\n"
         "dataset = selected[0]\nresult = reads[dataset['id']]\n"
@@ -247,6 +265,43 @@ def notebook_cells(template: str, project: dict, context: dict) -> list[dict]:
                 ),
             ]
         )
+    metric_source = (
+        "# 指标仅描述首个匹配数据集；登记范围与统计口径随实验一起保存。\n"
+        "research_metrics = {\n"
+        "    '样本数': {'value': len(data), 'unit': '行',\n"
+        "        'definition': '首个匹配数据集在登记范围内实际读取的记录数'},\n"
+        "    '字段数': {'value': len(data.columns), 'unit': '列',\n"
+        "        'definition': '首个匹配数据集在登记范围内实际读取的字段数'}\n"
+        "}\n"
+    )
+    if template == "data-quality-exploration":
+        metric_source += (
+            "research_metrics['缺失单元格数'] = {\n"
+            "    'value': int(data.isna().sum().sum()), 'unit': '个',\n"
+            "    'definition': '首个匹配数据集全部读取字段的空值总数'}\n"
+            "research_metrics['重复行数'] = {\n"
+            "    'value': int(data.duplicated().sum()), 'unit': '行',\n"
+            "    'definition': '首个匹配数据集按全部读取字段判重，扣除首次出现'}\n"
+        )
+    elif template == "price-return-missingness":
+        metric_source += (
+            "research_metrics['缺失收盘价数'] = {\n"
+            "    'value': checks['missing_close'], 'unit': '行',\n"
+            "    'definition': '首个匹配数据集中close转为数值后为空的记录数'}\n"
+            "research_metrics['有效区间收益数'] = {\n"
+            "    'value': int(prices['return'].notna().sum()), 'unit': '个',\n"
+            "    'definition': '首个匹配数据集按标的日期排序后相邻记录收益的非空数，'"
+            "'不填充缺失价格、不视为等长日收益'}\n"
+        )
+    else:
+        metric_source += (
+            "research_metrics['缺失可用时点数'] = {\n"
+            "    'value': availability['missing_available_at'], 'unit': '行',\n"
+            "    'definition': '首个匹配数据集在UTC转换后available_at为空的记录数'}\n"
+        )
+    cells.append(
+        _source("code", "research-metrics", metric_source + "research_metrics")
+    )
     return cells
 
 

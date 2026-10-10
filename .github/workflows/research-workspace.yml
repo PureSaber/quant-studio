@@ -72,4 +72,4 @@ jobs:
           QUANT_TEST_INTAKE_SOURCE: ${{ github.workspace }}/quant-data-kit
           QUANT_TEST_INTAKE_IMPORT_PYTHON: ${{ github.workspace }}/qdk-env/Scripts/python.exe
           QUANT_TEST_INTAKE_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
-        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py -q
+        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py tests/test_notebook_templates.py tests/test_notebook_metrics.py tests/test_notebook_template_workflow.py -q
