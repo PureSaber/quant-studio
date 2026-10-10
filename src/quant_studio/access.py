@@ -177,6 +177,12 @@ class AccessHandler:
         if self.access_policy is None:
             return True
         path = urlsplit(self.path).path
+        if path == "/favicon.ico" and self.command == "GET":
+            # Browsers fetch the icon independently of the visible login form.
+            # Redirecting it to /login would replace that form's nonce cookie.
+            self.send_response(204)
+            self.end_headers()
+            return False
         if path == "/login":
             if self.command == "POST":
                 self._login_post()

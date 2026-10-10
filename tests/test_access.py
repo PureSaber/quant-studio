@@ -136,3 +136,78 @@ def test_controlled_mesh_binding_still_requires_explicit_host():
     for address in ("0.0.0.0", "8.8.8.8", "100.101.102.104"):
         with pytest.raises(QuantStudioError):
             validate_binding(address, policy)
+
+
+@pytest.mark.parametrize("entry", ["fresh", "expired", "mismatched", "wrong_password"])
+def test_browser_favicon_does_not_invalidate_login_form(tmp_path, entry):
+    import re
+    from http.cookies import SimpleCookie
+    from urllib.parse import urlencode
+
+    from quant_studio.access import NONCE
+
+    password = "test-password-long-enough"
+    access_path = tmp_path / "access.json"
+    access_path.write_text(json.dumps(password_record(password, ["localhost"])))
+    server, thread = _start_http_server(tmp_path / "runs")
+    server.RequestHandlerClass.access_policy = AccessPolicy(access_path)
+    authority = f"localhost:{server.server_port}"
+    cookies = SimpleCookie()
+
+    def request(method, path, fields=None):
+        body = urlencode(fields or {})
+        headers = [("Host", authority)]
+        if cookies:
+            headers.append(("Cookie", cookies.output(header="", sep=";").strip()))
+        if method == "POST":
+            headers.extend(
+                [
+                    ("Origin", f"https://{authority}"),
+                    ("Content-Type", "application/x-www-form-urlencoded"),
+                    ("Content-Length", str(len(body.encode()))),
+                ]
+            )
+        status, response_headers, page = _raw_request(
+            server, method, path, headers=headers, body=body
+        )
+        if "Set-Cookie" in response_headers:
+            parsed = SimpleCookie(response_headers["Set-Cookie"])
+            for name, morsel in parsed.items():
+                cookies[name] = morsel.value
+        return status, response_headers, page
+
+    def form(page):
+        nonce = re.search(rb'name="nonce" value="([^"]+)"', page).group(1).decode()
+        return {"password": password, "nonce": nonce}
+
+    try:
+        status, _, page = request("GET", "/login")
+        assert status == 200
+        if entry != "fresh":
+            fields = form(page)
+            if entry == "expired":
+                # A browser drops the five-minute cookie while an old form stays open.
+                del cookies[NONCE]
+            elif entry == "mismatched":
+                fields["nonce"] = "not-the-cookie-token"
+            else:
+                fields["password"] = "incorrect-password"
+            status, _, page = request("POST", "/login", fields)
+            assert status == (401 if entry == "wrong_password" else 400)
+
+        # Browsers fetch the icon separately and follow redirects, updating cookies
+        # without replacing the visible form. Reproduce that full request sequence.
+        visible_form = form(page)
+        icon_status, icon_headers, _ = request("GET", "/favicon.ico")
+        if icon_status in (302, 303):
+            request("GET", icon_headers["Location"])
+        status, _, _ = request("POST", "/login", visible_form)
+        assert status == 303
+        assert request("GET", "/research")[0] == 200
+        assert icon_status == 204
+        assert "Set-Cookie" not in icon_headers
+        assert "Location" not in icon_headers
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
