@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from quant_studio import QuantStudioError
 from quant_studio.datasets import DatasetStore, collection_request
+from quant_studio.derivative_datasets import form as derivative_form
 from quant_studio.experiments import ExperimentStore, configuration_diff
 from quant_studio.templates import load_template, template_ids
 
@@ -193,6 +194,7 @@ href="/data">查看原生预检证据与缺失项</a>
 </header>
 <div
 class="recipe-grid">{cards_html}</div>
+{derivative_form(csrf(token))}
 <section
 class="panel">
 <h2>采集真实港股日线</h2>
@@ -552,8 +554,33 @@ class WorkbenchHandler:
                 raise QuantStudioError("未知数据集字段")
             item = store.register(name, template, source)
             self._redirect(f"/datasets?verify={item['id']}")
-        elif path in {"/datasets/collect", "/datasets/refresh"}:
-            if path.endswith("/refresh"):
+        elif path in {
+            "/datasets/collect",
+            "/datasets/refresh",
+            "/datasets/derivatives",
+        }:
+            if path.endswith("/derivatives"):
+                from quant_studio.derivative_datasets import (
+                    collection_request as derivative_request,
+                )
+
+                request = derivative_request(
+                    *(
+                        field(data, name, "")
+                        for name in (
+                            "name",
+                            "template",
+                            "provider",
+                            "contracts_path",
+                            "start",
+                            "end",
+                            "rights_note",
+                            "dataset",
+                            "max_cost_usd",
+                        )
+                    )
+                )
+            elif path.endswith("/refresh"):
                 previous = store.get(field(data, "id"))
                 request = collection_request(
                     previous["name"] + " · 更新",

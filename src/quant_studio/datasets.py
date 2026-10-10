@@ -251,15 +251,17 @@ def collect_dataset(runs_root, job, control):
     root = Path(runs_root)
     request = job["collection"]
     # Revalidate persisted job fields; no caller-controlled executable or output path.
-    request = collection_request(
-        request["name"],
-        request["template_id"],
-        " ".join(request["symbols"]),
-        request["start"],
-        request["end"],
-        request["provider"],
-        request.get("parent"),
-    )
+    derivative = request.get("collection_type") == "derivatives"
+    if not derivative:
+        request = collection_request(
+            request["name"],
+            request["template_id"],
+            " ".join(request["symbols"]),
+            request["start"],
+            request["end"],
+            request["provider"],
+            request.get("parent"),
+        )
     identifier = uuid.uuid4().hex
     directory = root / ".collections" / identifier
     directory.mkdir(parents=True)
@@ -272,7 +274,9 @@ def collect_dataset(runs_root, job, control):
     }
     path = directory / "receipt.json"
     _atomic(path, json.dumps(receipt, ensure_ascii=False))
-    runtime = configured_python("quant-hk-equity") or sys.executable
+    runtime = (
+        configured_python("quant-hk-equity") if not derivative else None
+    ) or sys.executable
     program = (
         "import json,sys; from pathlib import Path; "
         "from quant_data_kit.hong_kong import capture_hk_snapshot; "
@@ -281,6 +285,10 @@ def collect_dataset(runs_root, job, control):
     )
     argv = [runtime, "-X", "utf8", "-c", program, json.dumps(request), str(snapshot)]
     try:
+        if derivative:
+            from quant_studio.derivative_datasets import command
+
+            argv = command(request, directory, snapshot)
         control.stage("native", "正在调用已选数据源；新建快照，不覆盖旧数据")
         outcome = _execute_subprocess(
             argv,

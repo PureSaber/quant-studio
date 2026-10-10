@@ -47,15 +47,28 @@ def _leaves(value, prefix=""):
             yield path, key, child
 
 
-def _fields(value, prefix):
+def _fields(value, prefix, knobs=()):
     from quant_studio.form_controls import ADVANCED, LABELS, help_text, special_control
 
     parts, advanced = [], []
     for path, key, child in _leaves(value):
         name = escape(prefix + path, quote=True)
-        label = escape(_LABELS.get(key, LABELS.get(key, key)))
+        knob = next(
+            (k for k in knobs if k.get("path") == path[1:].replace("/", ".")), None
+        )
+        label = escape(
+            knob["label"] if knob else _LABELS.get(key, LABELS.get(key, key))
+        )
         special = special_control(name, key, child)
-        if special is not None:
+        if knob and knob["type"] == "enum":
+            options = "".join(
+                f'<option value="{escape(str(v), quote=True)}"'
+                + (" selected" if child == v else "")
+                + f">{escape(knob.get('choice_labels', {}).get(v, str(v)))}</option>"
+                for v in knob["choices"]
+            )
+            control = f'<select name="{name}">{options}</select>'
+        elif special is not None:
             control = special
         elif isinstance(child, (dict, list)) or child is None:
             raw = json.dumps(child, ensure_ascii=False, indent=2)
@@ -102,9 +115,11 @@ name="{name}" '''
             )
             + f'<small class="field-help">{escape(help_text(key))}</small></div>'
         )
-        (advanced if key in ADVANCED or key not in _LABELS | LABELS else parts).append(
-            field
-        )
+        (
+            advanced
+            if not knob and (key in ADVANCED or key not in _LABELS | LABELS)
+            else parts
+        ).append(field)
     if advanced:
         parts.append(
             '<details class="wide"><summary>高级参数与数据口径</summary>'
@@ -325,6 +340,9 @@ href="{target}/config?revision={revision}">导出原生配置</a>
     )
     external_fields = ""
     parameter_help = "名单可逐项编辑，复杂配置保留高级导入入口。"
+    derivative = template_id in {"options-research", "global-futures-research"}
+    if derivative:
+        parameter_help = template.metadata["data_help"]
     if template_id == "hk-equity-daily":
         parameter_help += "模板中的五只港股是可替换示例。"
     if source.get("kind") == "file":
@@ -393,7 +411,9 @@ placeholder="例如：将形成窗口从 120 改为 100">
 <h2>研究参数</h2>
 <p>{parameter_help}</p>
 <div
-class="recipe-grid">{_fields(config, "cfg:")}{_fields(cli, "cli:")}</div>
+class="recipe-grid">{_fields(config, "cfg:", template.knobs if derivative else ())}{
+        _fields(cli, "cli:")
+    }</div>
 <div
 class="actions">
 <button
