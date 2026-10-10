@@ -179,11 +179,11 @@ required maxlength="120">
 placeholder="Cboe: 2025-02-19,2025-03-18"
 required>
 </label>
-<label>开始日期（UTC 日期）<input name="start"
+<label>开始日期<input name="start"
 type="date"
 required>
 </label>
-<label>结束日期（UTC 日期）<input name="end"
+<label>结束日期<input name="end"
 type="date"
 required>
 </label>
@@ -201,6 +201,7 @@ required maxlength="1000">
 Deribit 历史例：BTC-31JAN25-100000-C。
 Cboe 请填写官方实际到期日（节假日可能调整）。
 历史示例日期可用 2025-01-08 至 2025-01-10；
+日线按交易所交易日期，Deribit 按 UTC 日期。
 当前快照须选择仍在交易的合约并填写今天 UTC 日期。</p>
 <details>
 <summary>价格步长与保证金研究假设</summary>
