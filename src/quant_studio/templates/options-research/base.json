@@ -1,0 +1,17 @@
+{
+  "mode": "replay",
+  "legs": "DEMO:M-C100=1,DEMO:M-P100=1",
+  "initial_cash": 100000,
+  "rate": 0.03,
+  "dividend": 0,
+  "volatility": 0.25,
+  "fee_per_contract": 1,
+  "slippage_ticks": 1,
+  "scenario_days": 7,
+  "binomial_steps": 200,
+  "max_quote_age_days": 5,
+  "as_of": "",
+  "start": "",
+  "end": "",
+  "close_before_expiry_days": 2
+}

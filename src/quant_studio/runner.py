@@ -21,7 +21,7 @@ import yaml
 from quant_studio import QuantStudioError
 from quant_studio.flow import format_argv
 from quant_studio.nav import collect_outputs
-from quant_studio.runtime import configured_python
+from quant_studio.runtime import template_python
 from quant_studio.settings import current_settings, setting, subprocess_environment
 from quant_studio.templates import (
     Template,
@@ -183,7 +183,7 @@ def template_readiness(
     if not (Path(root) / repo).is_dir():
         return Readiness(False, f"工作区里没有 {repo}，只能预览")
     try:
-        python = configured_python(template.workspace_repo)
+        python = template_python(template)
     except QuantStudioError as exc:
         return Readiness(False, str(exc))
     executable = _executable(template.argv[0], python=python)
@@ -297,7 +297,7 @@ def preview(
         run_dir,
         config_path,
         selected_snapshot,
-        python=configured_python(loaded.metadata.get("workspace_repo")),
+        python=template_python(loaded),
     )
     _write_json(
         run_dir / "request.json",
@@ -360,7 +360,7 @@ def run(
         run_dir,
         config_path,
         selected_snapshot,
-        python=configured_python(loaded.metadata.get("workspace_repo")),
+        python=template_python(loaded),
     )
     _write_json(
         run_dir / "request.json",
@@ -557,7 +557,9 @@ def run(
                 cwd,
                 run_dir,
                 _output_dirs(loaded, rendered.config),
-                result_files=loaded.metadata.get("result_files"),
+                result_files=loaded.metadata.get("result_files_by_mode", {}).get(
+                    rendered.config.get("mode"), loaded.metadata.get("result_files")
+                ),
                 nav_column=loaded.metadata.get("nav_column"),
                 nav_strategy=loaded.metadata.get("nav_strategy"),
                 initial_nav=(
@@ -612,7 +614,7 @@ def _verify_account_output(
         run_dir,
         config_path,
         snapshot,
-        python=configured_python(template.workspace_repo),
+        python=template_python(template),
     )
     _write_json(run_dir / "verification-command.json", {"argv": argv})
     try:
@@ -674,7 +676,7 @@ def preflight(
         prepared.run_dir,
         prepared.run_dir / f"config.{loaded.config_format}",
         selected,
-        python=configured_python(loaded.metadata.get("workspace_repo")),
+        python=template_python(loaded),
     )
     _write_json(prepared.run_dir / "command.json", {"argv": argv})
     result = RunResult("blocked", prepared.run_id, prepared.run_dir, argv)
@@ -778,10 +780,7 @@ def _project_standard_output(template, run_dir, argv, cwd, timeout, *, control=N
     if template.argv[:2] != ["python", "-m"]:
         raise QuantStudioError("标准账本模板必须通过明确Python模块入口运行")
     python = argv[0]
-    if (
-        _executable(template.argv[0], python=configured_python(template.workspace_repo))
-        != python
-    ):
+    if _executable(template.argv[0], python=template_python(template)) != python:
         raise QuantStudioError("运行环境配置在执行期间改变，请重新运行")
     if not Path(python).is_file():
         raise QuantStudioError("无法定位原生核验环境的Python，请配置运行环境")
