@@ -1959,6 +1959,28 @@ def _artifact_tables(
         "event_type": "事件类型",
         "ledger_account": "账本科目",
         "quantity_delta": "数量变动",
+        "expiry": "到期时刻",
+        "right": "看涨/看跌",
+        "strike": "执行价",
+        "underlying": "标的价格",
+        "premium": "观察权利金",
+        "iv": "隐含波动率（比例）",
+        "iv_status": "IV 来源状态",
+        "model": "定价模型",
+        "greeks_vol_basis": "Greeks 波动率依据",
+        "vega_1pct": "Vega（波动率变动1个百分点）",
+        "rho_1pct": "Rho（利率变动1个百分点）",
+        "theta_day": "Theta（每日）",
+        "underlying_shock": "标的价格变动（比例）",
+        "volatility_shock": "波动率变动（绝对值）",
+        "days_forward": "向前天数",
+        "portfolio_value": "组合理论价值",
+        "model_pnl_vs_current": "相对当前理论损益",
+        "days_to_expiry": "距到期天数",
+        "close": "收盘价",
+        "settlement": "结算价",
+        "near_minus_far": "近月减远月价格",
+        "spread_value_per_pair": "每组价差价值",
     }
     numeric_columns = {
         "nav",
@@ -1994,6 +2016,24 @@ def _artifact_tables(
         "fee",
         "stale_days",
         "lot_lock_days",
+        "strike",
+        "underlying",
+        "premium",
+        "iv",
+        "delta",
+        "gamma",
+        "vega_1pct",
+        "rho_1pct",
+        "theta_day",
+        "portfolio_value",
+        "model_pnl_vs_current",
+        "underlying_shock",
+        "volatility_shock",
+        "days_to_expiry",
+        "close",
+        "settlement",
+        "near_minus_far",
+        "spread_value_per_pair",
     }
     parts = []
     for name, title in titles.items():
@@ -2008,6 +2048,11 @@ def _artifact_tables(
                     else {}
                 )
                 | (column_labels or {})
+                | (
+                    {"price": "理论价值（非成交价）"}
+                    if name in {"chain.csv", "portfolio_greeks.csv"}
+                    else {}
+                )
             )
             parts.append(
                 html_table(
