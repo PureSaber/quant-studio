@@ -74,7 +74,9 @@ def execute(directory, timeout):
     )
     failed = False
     try:
-        client.execute(cwd=str(directory))
+        # Supplying a KernelManager disables nbclient's ownership-based cleanup.
+        # This worker owns that manager and must shut it down on success or error.
+        client.execute(cwd=str(directory), cleanup_kc=True)
     except Exception as exc:
         failed = True
         print(str(exc), file=sys.stderr)

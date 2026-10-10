@@ -86,6 +86,9 @@ def test_real_notebook_kernel_execution_and_failure_evidence(
     assert ("42" if expected == "succeeded" else "ZeroDivisionError") in (
         directory / "report.html"
     ).read_text(encoding="utf-8")
+    assert "Parent appears to have exited" not in (
+        directory / "execution.log"
+    ).read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(
