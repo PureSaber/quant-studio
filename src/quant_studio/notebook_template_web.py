@@ -195,9 +195,11 @@ def comparison_body(root, query):
 .notebook-comparison table{table-layout:fixed;min-width:680px;width:100%}
 .notebook-comparison th,.notebook-comparison td{
 white-space:normal;overflow-wrap:anywhere}
+.notebook-comparison th:first-child{width:110px}
 </style><div class="notebook-comparison">
 <header class="page-head"><h1>Notebook实验比较</h1>
 <p>先核对条件，再看指标。缺失、失败或不同口径不会被当成可排名的数值。</p>
+<p>屏幕较窄时，可左右滑动表格查看全部实验。</p>
 <a href="/projects">返回研究项目</a> ·
 <a href="/projects/templates">打开模板库</a></header>"""
     if len(selected) >= 2:

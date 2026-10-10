@@ -17,7 +17,8 @@ from quant_studio.workbench_web import csrf, field
 
 def table(headers, rows):
     return (
-        '<div class="table-scroll"><table><thead><tr>'
+        '<div class="table-scroll" tabindex="0" role="region" '
+        'aria-label="可左右滚动的表格"><table><thead><tr>'
         + "".join(f"<th>{escape(str(h))}</th>" for h in headers)
         + "</tr></thead><tbody>"
         + "".join(
