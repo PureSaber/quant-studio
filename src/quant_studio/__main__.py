@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 
@@ -12,15 +13,26 @@ from quant_studio.templates import load_template
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    actual = list(argv) if argv is not None else sys.argv[1:]
+    if actual and actual[0] == "modules":
+        from quant_studio.module_tools import main as modules_main
+
+        return modules_main(actual[1:])
     parser = _parser()
     args = parser.parse_args(argv)
     try:
         if args.command == "serve":
+            if args.templates:
+                os.environ["QUANT_STUDIO_TEMPLATES"] = args.templates
             serve(
                 args.host,
                 args.port,
                 runs_root=args.runs_root,
                 settings_path=args.settings,
+                access_path=args.access,
+                tls_cert=args.tls_cert,
+                tls_key=args.tls_key,
+                stop_file=args.stop_file,
             )
             return 0
         knobs = _parse_sets(args.template_id, args.settings)
@@ -38,12 +50,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="quant_studio")
+    parser = argparse.ArgumentParser(
+        prog="quant_studio",
+        epilog=(
+            "本地模块：quant_studio modules init/register --help；"
+            "运维：python -m quant_studio.operations --help"
+        ),
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     serve_parser = commands.add_parser("serve", help="启动本机页面")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8770)
     serve_parser.add_argument("--runs-root", help="研究记录目录；可放在源码仓库外")
+    serve_parser.add_argument("--access", help="受控访问凭据文件（仅密码哈希）")
+    serve_parser.add_argument("--tls-cert", help="HTTPS 证书 PEM")
+    serve_parser.add_argument("--tls-key", help="HTTPS 私钥 PEM")
+    serve_parser.add_argument("--templates", help="管理员注册的本机自定义研究模块目录")
+    serve_parser.add_argument(
+        "--stop-file", help="本机停止标记；出现后安全关闭服务与任务"
+    )
     serve_parser.add_argument(
         "--settings",
         help="本地配置保存文件；默认使用研究记录目录下的studio-settings.json",

@@ -1,0 +1,32 @@
+
+<style>.instrument-row>label:last-child{grid-column:2/-1;display:flex;align-items:center;gap:6px;white-space:nowrap}.recipe-field.wide,details.wide{grid-column:1/-1}.recipe-field{min-width:0}.recipe-grid input,.recipe-grid textarea{box-sizing:border-box;min-width:0;width:100%}input[type=checkbox]{width:auto!important}@media(max-width:600px){.recipe-grid{grid-template-columns:1fr!important}.instrument-row{grid-template-columns:24px repeat(3,minmax(0,1fr))!important}.instrument-row input{padding:7px 3px!important}}.instrument-row {display:grid;grid-template-columns:30px repeat(3,minmax(70px,1fr));gap:8px;border-bottom:1px solid #ddd;padding:12px 0}.instrument-row label{min-width:0}.instrument-row input{max-width:100%}.instrument-editor{grid-column:1/-1}.instrument-row small{display:block}.field-help{color:#667085}.diff-value{white-space:pre-wrap;overflow-wrap:anywhere;max-width:420px}</style>
+<script>
+document.querySelectorAll('.instrument-editor').forEach(editor=>{
+ const raw=editor.querySelector('.instrument-json'), container=editor.querySelector('.instrument-rows');
+ let values; try{values=JSON.parse(raw.value)}catch(e){return}
+ function add(item){
+  const row=document.createElement('div');row.className='instrument-row'; row._original=item;
+  const selected=document.createElement('input');selected.type='checkbox';selected.checked=true;selected.setAttribute('aria-label','纳入研究');row.append(selected);
+  [['symbol','代码','text'],['name','名称','text'],['lot_size','每手股数','number']].forEach(([key,label,type])=>{
+   const wrap=document.createElement('label'), title=document.createElement('small'), input=document.createElement('input');
+   title.textContent=label;input.type=type;input.dataset.key=key;input.value=item[key]??'';input.setAttribute('aria-label',label);
+   if(type==='number'){input.min='1';input.step='1'}wrap.append(title,input);row.append(wrap);
+  });
+  const exempt=document.createElement('label'), check=document.createElement('input');check.type='checkbox';check.dataset.key='stamp_exempt';check.checked=!!item.stamp_exempt;exempt.append(check,document.createTextNode('印花税豁免'));row.append(exempt);container.append(row);
+ }
+ values.forEach(add);
+ editor.querySelector('.add-instrument').onclick=()=>add({symbol:'',name:'',lot_size:'',stamp_exempt:false});
+ editor.querySelector('.instrument-search').oninput=(event)=>{const text=event.target.value.toLowerCase();container.querySelectorAll('.instrument-row').forEach(row=>{row.hidden=![...row.querySelectorAll('input[data-key]')].some(el=>el.value.toLowerCase().includes(text));row.style.display=row.hidden?'none':''})};
+ raw.addEventListener('input',()=>{raw.dataset.manual='true'});
+ editor.closest('form').addEventListener('submit',event=>{
+  if(raw.dataset.manual==='true')return;
+  const selected=[];
+  for(const row of container.querySelectorAll('.instrument-row')){
+   if(!row.firstChild.checked)continue;
+   const item={...row._original};row.querySelectorAll('[data-key]').forEach(el=>{item[el.dataset.key]=el.type==='checkbox'?el.checked:el.type==='number'?Number(el.value):el.value.trim()});
+   if(!/^\d{5}$/.test(item.symbol)||!Number.isInteger(item.lot_size)||item.lot_size<1){event.preventDefault();alert('请填写五位港股代码和正整数整手股数');return}selected.push(item);
+  }
+  if(!selected.length){event.preventDefault();alert('请至少选择一只证券');return}raw.value=JSON.stringify(selected);
+ });
+});
+</script>

@@ -12,6 +12,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -104,9 +105,13 @@ class JobManager:
         factors: list[str] | None = None,
         snapshot: str | None = None,
         profile: dict | None,
+        recipe: dict | None = None,
+        collection: dict | None = None,
     ) -> dict:
-        if action not in {"check", "execute"}:
+        if action not in {"check", "execute", "collect"}:
             raise QuantStudioError("只有预检和显式执行可以进入任务队列")
+        if (action == "collect") != (collection is not None):
+            raise QuantStudioError("数据采集任务必须绑定采集参数")
         job_id = uuid.uuid4().hex
         now = _now()
         record = {
@@ -122,13 +127,15 @@ class JobManager:
             "owner_instance_id": self.instance_id,
             "run_id": None,
             "child_pid": None,
+            "recipe": deepcopy(recipe),
+            "collection": deepcopy(collection),
         }
         request = {
             **record,
             "knobs": dict(knobs),
             "factors": None if factors is None else list(factors),
             "snapshot": snapshot,
-            "profile": profile,
+            "profile": deepcopy(profile),
         }
         with self._lock:
             if self._closed:
