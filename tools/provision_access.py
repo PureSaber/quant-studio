@@ -1,7 +1,6 @@
 """Create owner-only local TLS credentials; only the CA certificate is shareable."""
 
 import argparse
-import ipaddress
 import json
 import os
 import secrets
@@ -9,13 +8,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from quant_studio.access import password_record
+from quant_studio.access import controlled_address, password_record
 
 
 def provision(directory: Path, host: str, openssl: str):
-    ip = ipaddress.ip_address(host)
-    if not (ip.is_private or ip.is_loopback) or ip.is_unspecified:
-        raise ValueError("Use a specific LAN IPv4 address")
+    if not controlled_address(host):
+        raise ValueError("Use a specific LAN or controlled mesh IPv4 address")
     if directory.exists():
         raise ValueError("Choose a new private directory; existing credentials are never overwritten")
     directory.mkdir(parents=True, mode=0o700)

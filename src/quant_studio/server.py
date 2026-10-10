@@ -58,6 +58,7 @@ from quant_studio.setup import SettingsStore, profile_from_form
 from quant_studio.setup_view import setup_body
 from quant_studio.table_view import html_table
 from quant_studio.templates import load_template, template_ids
+from quant_studio.workbench_web import WorkbenchHandler
 
 
 def validate_host(host: str) -> str:
@@ -1065,6 +1066,16 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
 
 def _job_executor(runs_root: Path):
     def execute(job, control):
+        if job["action"] == "collect":
+            from quant_studio.datasets import collect_dataset
+
+            return collect_dataset(runs_root, job, control)
+        if (job.get("recipe") or {}).get("dataset_id"):
+            from quant_studio.datasets import DatasetStore
+
+            DatasetStore(runs_root).select(
+                job["recipe"]["dataset_id"], job["template_id"]
+            )
         template = (
             recipe_template(job["recipe"]) if job.get("recipe") else job["template_id"]
         )
@@ -1160,7 +1171,9 @@ def serve(
             watcher.join(timeout=2)
 
 
-class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
+class _Handler(
+    AccessHandler, ResearchHandler, WorkbenchHandler, BaseHTTPRequestHandler
+):
     runs_root = Path("runs")
     csrf_token = ""
     settings_store = None
@@ -1185,7 +1198,11 @@ class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path == "/research" or path.startswith("/research/"):
+            if path in {"/datasets", "/experiments", "/operations"} or path.startswith(
+                "/experiments/"
+            ):
+                self._workbench_get(path)
+            elif path == "/research" or path.startswith("/research/"):
                 self._research_get(path)
             elif path == "/":
                 self._send_html(render_overview(self.runs_root))
@@ -1267,7 +1284,7 @@ class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
                 self._send_html(render_run(run_dir, csrf_token=self.csrf_token))
             else:
                 self.send_error(404)
-        except (QuantStudioError, FileNotFoundError, KeyError, json.JSONDecodeError):
+        except (QuantStudioError, FileNotFoundError, KeyError, ValueError):
             self.send_error(404)
 
     def do_POST(self) -> None:
@@ -1287,6 +1304,8 @@ class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
         accepted = (
             path.startswith("/templates/")
             or path.startswith("/research/")
+            or path.startswith("/datasets/")
+            or (path.startswith("/experiments/") and path.endswith("/note"))
             or path == "/setup"
             or (path.startswith("/jobs/") and path.endswith("/cancel"))
             or path == "/fund-reconcile"
@@ -1313,7 +1332,9 @@ class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
                 raise QuantStudioError("请求过大")
             data = parse_qs(
                 self.rfile.read(length).decode("utf-8"),
-                keep_blank_values=path.startswith("/research/"),
+                keep_blank_values=path.startswith(
+                    ("/research/", "/datasets/", "/experiments/")
+                ),
             )
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
@@ -1321,6 +1342,9 @@ class _Handler(AccessHandler, ResearchHandler, BaseHTTPRequestHandler):
                 return
             if path.startswith("/research/"):
                 self._research_post(path, data)
+                return
+            if path.startswith(("/datasets/", "/experiments/")):
+                self._workbench_post(path, data)
                 return
             if path == "/setup":
                 self._setup_post(data)
@@ -2028,13 +2052,16 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("setup", "首次配置", "/setup"),
         ("environment", "环境", "/environment"),
         ("data", "数据", "/data"),
+        ("datasets", "数据集", "/datasets"),
         ("research", "研究方案", "/research"),
+        ("experiments", "实验笔记", "/experiments"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),
         ("jobs", "任务", "/jobs"),
         ("results", "结果", "/results"),
         ("fund-reconcile", "基金对账", "/fund-reconcile"),
         ("accounts", "账户", "/accounts"),
+        ("operations", "服务状态", "/operations"),
         ("logout", "退出登录", "/logout"),
     )
     links = []

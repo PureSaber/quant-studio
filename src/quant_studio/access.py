@@ -135,15 +135,23 @@ def tls_context(cert, key):
     return context
 
 
+def controlled_address(host):
+    ip = ipaddress.ip_address(host)
+    return (
+        ip.version == 4
+        and (
+            ip.is_loopback
+            or ip.is_private
+            or ip in ipaddress.ip_network("100.64.0.0/10")
+        )
+        and not (ip.is_unspecified or ip.is_multicast or ip.is_reserved)
+    )
+
+
 def validate_binding(host, access):
     _host(host)
     try:
-        ip = ipaddress.ip_address(host)
-        if (
-            not (ip.is_loopback or ip.is_private)
-            or ip.is_unspecified
-            or ip.is_multicast
-        ):
+        if not controlled_address(host):
             raise QuantStudioError("受控服务只接受明确的本机或私网 IPv4 地址")
     except ValueError as exc:
         raise QuantStudioError("监听须填写本机或私网 IPv4 地址") from exc

@@ -181,10 +181,19 @@ def _validate(record: dict) -> Template:
     if (
         not isinstance(record, dict)
         or required - set(record)
-        or set(record) - required - {"input_config"}
+        or set(record) - required - {"input_config", "note", "dataset_id"}
     ):
         raise QuantStudioError("研究方案格式错误")
     _check_tree(record)
+    if record.get("dataset_id") is not None and not _ID.fullmatch(
+        str(record["dataset_id"])
+    ):
+        raise QuantStudioError("数据集标识无效")
+    if (
+        not isinstance(record.get("note", ""), str)
+        or len(record.get("note", "")) > 2000
+    ):
+        raise QuantStudioError("版本说明须为不超过 2000 字的文本")
     if record["schema_version"] != SCHEMA or not _ID.fullmatch(str(record["id"])):
         raise QuantStudioError("研究方案标识无效")
     if (
@@ -282,6 +291,21 @@ class RecipeStore:
             reverse=True,
         )
 
+    def history(self, recipe_id: str) -> list[dict]:
+        """Follow the committed parent chain, excluding unpublished partial saves."""
+        rows, seen = [], set()
+        current = self.get(recipe_id)
+        while current:
+            revision = current["revision"]
+            if revision in seen or len(rows) >= 10000:
+                raise QuantStudioError("版本历史存在循环或过长")
+            seen.add(revision)
+            rows.append(current)
+            current = (
+                self.get(recipe_id, current["parent"]) if current["parent"] else None
+            )
+        return list(reversed(rows))
+
     def save(
         self,
         name,
@@ -293,6 +317,8 @@ class RecipeStore:
         recipe_id=None,
         expected=None,
         input_config=None,
+        note="",
+        dataset_id=None,
     ) -> dict:
         with self._lock:
             previous = self.get(recipe_id) if recipe_id else None
@@ -316,6 +342,8 @@ class RecipeStore:
                 "created_at": datetime.now(UTC).isoformat(),
                 "parent": previous["revision"] if previous else None,
                 "input_config": _normalize_input(template_id, input_config),
+                "note": note,
+                "dataset_id": dataset_id,
             }
             _check_tree(record)
             record["revision"] = _digest(record)
@@ -339,6 +367,7 @@ class RecipeStore:
             cli=record["cli"],
             snapshot=record["snapshot"],
             input_config=record.get("input_config"),
+            note=record.get("note", ""),
         )
 
 

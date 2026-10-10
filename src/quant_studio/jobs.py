@@ -106,9 +106,12 @@ class JobManager:
         snapshot: str | None = None,
         profile: dict | None,
         recipe: dict | None = None,
+        collection: dict | None = None,
     ) -> dict:
-        if action not in {"check", "execute"}:
+        if action not in {"check", "execute", "collect"}:
             raise QuantStudioError("只有预检和显式执行可以进入任务队列")
+        if (action == "collect") != (collection is not None):
+            raise QuantStudioError("数据采集任务必须绑定采集参数")
         job_id = uuid.uuid4().hex
         now = _now()
         record = {
@@ -125,6 +128,7 @@ class JobManager:
             "run_id": None,
             "child_pid": None,
             "recipe": deepcopy(recipe),
+            "collection": deepcopy(collection),
         }
         request = {
             **record,

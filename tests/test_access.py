@@ -121,3 +121,18 @@ def test_authenticated_routes_csrf_login_logout_and_authority(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_controlled_mesh_binding_still_requires_explicit_host():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from quant_studio import QuantStudioError
+    from quant_studio.access import validate_binding
+
+    policy = SimpleNamespace(hosts={"100.101.102.103"})
+    validate_binding("100.101.102.103", policy)
+    for address in ("0.0.0.0", "8.8.8.8", "100.101.102.104"):
+        with pytest.raises(QuantStudioError):
+            validate_binding(address, policy)

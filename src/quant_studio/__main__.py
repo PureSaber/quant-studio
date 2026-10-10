@@ -13,6 +13,11 @@ from quant_studio.templates import load_template
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    actual = list(argv) if argv is not None else sys.argv[1:]
+    if actual and actual[0] == "modules":
+        from quant_studio.module_tools import main as modules_main
+
+        return modules_main(actual[1:])
     parser = _parser()
     args = parser.parse_args(argv)
     try:
@@ -45,7 +50,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="quant_studio")
+    parser = argparse.ArgumentParser(
+        prog="quant_studio",
+        epilog=(
+            "本地模块：quant_studio modules init/register --help；"
+            "运维：python -m quant_studio.operations --help"
+        ),
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     serve_parser = commands.add_parser("serve", help="启动本机页面")
     serve_parser.add_argument("--host", default="127.0.0.1")

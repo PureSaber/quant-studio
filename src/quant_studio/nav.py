@@ -254,6 +254,9 @@ def comparison_fragment(
     *,
     benchmark_label: str,
     currency: str,
+    strategy_label: str = "策略",
+    comparison_title: str = "策略与基准累计收益",
+    difference_label: str = "收益差（策略减基准）",
 ) -> str:
     validate_comparison(strategy, benchmark)
     if strategy.initial_nav is None:
@@ -295,23 +298,25 @@ def comparison_fragment(
         )
     axis = _date_axis([date for date, _ in strategy.plot_rows], left, right)
     label = escape(benchmark_label)
+    first_label = escape(strategy_label)
+    title = escape(comparison_title)
     difference = (strategy.period_return - benchmark.period_return) * 100
     return f"""<section class="chart-card benchmark-comparison"><style>{_CHART_CSS}
 @media (max-width: 600px) {{ .benchmark-comparison svg text {{ font-size: 24px; }} }}
 </style>
-<h2>策略与基准累计收益</h2>
+<h2>{title}</h2>
 <p>相同观测日期：{escape(strategy.rows[0][0])}至{escape(strategy.rows[-1][0])}；
 各自期初本金{opening:f}{escape(currency)}，首日损益计入。</p>
 <div class="stats">
-<div class="stat"><span>策略区间收益</span>
+<div class="stat"><span>{first_label}区间收益</span>
 <b>{strategy.period_return * 100:+.2f}%</b></div>
 <div class="stat"><span>{label}区间收益</span>
 <b>{benchmark.period_return * 100:+.2f}%</b></div>
-<div class="stat"><span>收益差（策略减基准）</span>
+<div class="stat"><span>{escape(difference_label)}</span>
 <b>{difference:+.2f}个百分点</b></div>
 </div>
-<p>蓝色实线：策略；棕色虚线：{label}。收益差为区间收益相减，不是年化或风险调整后收益。</p>
-<svg viewBox="0 0 940 360" role="img" aria-label="策略与基准累计收益">
+<p>蓝色实线：{first_label}；棕色虚线：{label}。收益差为区间收益相减，不是年化或风险调整后收益。</p>
+<svg viewBox="0 0 940 360" role="img" aria-label="{title}">
 {"".join(grids)}{"".join(lines)}{axis}
 </svg>
 </section>"""

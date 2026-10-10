@@ -48,23 +48,31 @@ def _leaves(value, prefix=""):
 
 
 def _fields(value, prefix):
-    parts = []
+    from quant_studio.form_controls import ADVANCED, LABELS, help_text, special_control
+
+    parts, advanced = [], []
     for path, key, child in _leaves(value):
         name = escape(prefix + path, quote=True)
-        label = escape(_LABELS.get(key, key))
-        if isinstance(child, (dict, list)) or child is None:
+        label = escape(_LABELS.get(key, LABELS.get(key, key)))
+        special = special_control(name, key, child)
+        if special is not None:
+            control = special
+        elif isinstance(child, (dict, list)) or child is None:
             raw = json.dumps(child, ensure_ascii=False, indent=2)
             control = (
-                f'<textarea name="{name}" rows="5" spellcheck="false">'
-                f"{escape(raw)}</textarea>"
+                f'''<textarea
+name="{name}" rows="5" spellcheck="false">'''
+                f"""{escape(raw)}</textarea>"""
             )
         elif isinstance(child, bool):
             control = (
-                f'<select name="{name}">'
+                f'''<select
+name="{name}">'''
                 + "".join(
-                    f'<option value="{val}" '
+                    f'''<option
+value="{val}" '''
                     f"{'selected' if child == (val == 'true') else ''}>"
-                    f"{label}</option>"
+                    f"""{label}</option>"""
                     for val, label in (("true", "是"), ("false", "否"))
                 )
                 + "</select>"
@@ -79,12 +87,29 @@ def _fields(value, prefix):
             ):
                 kind = "date"
             control = (
-                f'<input type="{kind}" step="any" name="{name}" '
+                f'''<input
+type="{kind}" step="any"
+name="{name}" '''
                 f'value="{escape(str(child), quote=True)}">'
             )
+        wide = key == "instruments"
+        field = (
+            f'<div class="recipe-field{" wide" if wide else ""}">'
+            + (
+                f"<h3>{label}</h3>{control}"
+                if wide
+                else f"<label>{label}{control}</label>"
+            )
+            + f'<small class="field-help">{escape(help_text(key))}</small></div>'
+        )
+        (advanced if key in ADVANCED or key not in _LABELS | LABELS else parts).append(
+            field
+        )
+    if advanced:
         parts.append(
-            f'<label class="recipe-field">{label}<small>{escape(path)}</small>'
-            f"{control}</label>"
+            '<details class="wide"><summary>高级参数与数据口径</summary>'
+            "<p>这些字段定义原生研究契约。修改前请核对数据与上游模块说明。</p>"
+            '<div class="recipe-grid">' + "".join(advanced) + "</div></details>"
         )
     return "".join(parts)
 
@@ -97,7 +122,20 @@ def _read_fields(base, data, prefix):
             try:
                 parsed = json.loads(raw)
             except ValueError as exc:
-                raise QuantStudioError(f"{path} 须为有效 JSON") from exc
+                if (
+                    isinstance(old, list)
+                    and old
+                    and all(isinstance(v, str) for v in old)
+                ):
+                    import re
+
+                    parsed = list(
+                        dict.fromkeys(
+                            v for v in re.split(r"[,，\s]+", raw.strip()) if v
+                        )
+                    )
+                else:
+                    raise QuantStudioError(f"{path} 须为有效 JSON") from exc
         elif isinstance(old, bool):
             if raw not in {"true", "false"}:
                 raise QuantStudioError("布尔值无效")
@@ -122,36 +160,68 @@ def _single(data, key, default=None):
 
 
 def _csrf(token):
-    return (
-        f'<input type="hidden" name="_csrf_token" value="{escape(token, quote=True)}">'
-    )
+    return f'''<input
+type="hidden"
+name="_csrf_token"
+value="{escape(token, quote=True)}">'''
 
 
 def list_body(store, token):
     cards = "".join(
-        f'<a class="panel" href="/research/{r["id"]}"><h2>{escape(r["name"])}</h2>'
-        f"<p>{escape(load_template(r['template_id']).title)}</p>"
-        f"<small>版本 {r['revision'][:12]}</small></a>"
+        f"""<a
+class="panel"
+href="/research/{r["id"]}">
+<h2>{escape(r["name"])}</h2>"""
+        f"""<p>{escape(load_template(r["template_id"]).title)}</p>"""
+        f"""<small>版本 {r["revision"][:12]}</small>
+</a>"""
         for r in store.list()
     )
     choices = "".join(
-        f'<option value="{key}">{escape(load_template(key).title)}</option>'
+        f'''<option
+value="{key}">{escape(load_template(key).title)}</option>'''
         for key in template_ids()
     )
-    return f"""<header class="page-head"><h1>研究方案</h1>
-<p>选模板，改参数，保存并复用。任务使用提交时的固定版本。</p></header>
-<section class="panel"><h2>新建研究</h2>
-<form method="get" action="/research/new"><label>研究类型
-<select name="template">{choices}</select></label>
-<button class="btn">创建方案</button></form></section>
-<div class="recipe-grid">{cards or "<p>还没有保存的研究方案。</p>"}</div>
-<details class="panel"><summary>导入已导出的研究方案</summary>
-<form method="post" action="/research/import">{_csrf(token)}<label>方案 JSON
-<textarea name="document" rows="8" required></textarea></label>
-<button class="btn">导入为新方案</button></form></details>"""
+    return f"""<header
+class="page-head">
+<h1>研究方案</h1>
+<p>选模板，改参数，保存并复用。任务使用提交时的固定版本。</p>
+</header>
+<section
+class="panel">
+<h2>新建研究</h2>
+<form
+method="get"
+action="/research/new">
+<label>研究类型
+<select
+name="template">{choices}</select>
+</label>
+<button
+class="btn">创建方案</button>
+</form>
+</section>
+<div
+class="recipe-grid">{cards or "<p>还没有保存的研究方案。</p>"}</div>
+<details
+class="panel">
+<summary>导入已导出的研究方案</summary>
+<form
+method="post"
+action="/research/import">{_csrf(token)}<label>方案 JSON
+<textarea
+name="document" rows="8" required>
+</textarea>
+</label>
+<button
+class="btn">导入为新方案</button>
+</form>
+</details>"""
 
 
-def editor_body(template_id, token, record=None):
+def editor_body(template_id, token, record=None, datasets=None, selected_dataset=None):
+    from quant_studio.form_controls import EDITOR_SCRIPT
+
     template = load_template(template_id)
     config = record["config"] if record else render_template(template).config
     cli = (
@@ -168,6 +238,50 @@ def editor_body(template_id, token, record=None):
         (record or {}).get("snapshot") or setting(source.get("environment", "")) or ""
     )
     revision = (record or {}).get("revision", "")
+    selected_dataset = selected_dataset or (record or {}).get("dataset_id")
+    selected_item = next(
+        (r for r in datasets or [] if r["id"] == selected_dataset), None
+    )
+    if selected_item:
+        snapshot = selected_item["path"]
+        if record is None and template_id == "hk-equity-daily":
+            from datetime import date, timedelta
+
+            config = copy.deepcopy(config)
+            try:
+                first, last = (
+                    date.fromisoformat(selected_item["start"]),
+                    date.fromisoformat(selected_item["end"]),
+                )
+                config.update(
+                    data_start=str(first),
+                    data_end=str(last),
+                    train_start=str(first + timedelta(days=35)),
+                    test_start=str(first + (last - first) // 2),
+                )
+            except (ValueError, TypeError):
+                pass
+            known = [
+                i
+                for i in config["instruments"]
+                if i["symbol"] in selected_item["symbols"]
+            ]
+            if known:
+                config["instruments"] = known
+                config["top_n"] = min(config["top_n"], len(known))
+    options = '<option value="">使用下方已有路径（高级）</option>'
+    for item in datasets or []:
+        selected = " selected" if item["id"] == selected_dataset else ""
+        options += f'''<option
+value="{item["id"]}"{selected}>{escape(item["name"])} ·
+{escape(str(item["start"]))} 至 {escape(str(item["end"]))}</option>'''
+    data_picker = f"""<label>数据集<select
+name="dataset_id">{options}</select>
+</label>
+<p>
+<a
+href="/datasets">选择、登记或更新数据集</a>
+</p>"""
     frozen = ""
     if record:
         actions = (
@@ -183,20 +297,34 @@ def editor_body(template_id, token, record=None):
             '<button class="btn primary" name="action" value="execute_saved">'
             "运行已保存版本</button>"
         )
-        frozen = f'''<section class="panel"><h2>运行保存的版本</h2>
+        frozen = f'''<section
+class="panel">
+<h2>运行保存的版本</h2>
 <p>版本 <code>{revision[:12]}</code>。下方参数编辑后，请先保存；这里始终运行此版本。</p>
-<form method="post" action="{target}">{_csrf(token)}
-<input type="hidden" name="revision" value="{revision}">
-<div class="actions">{actions}
-<a class="btn" href="{target}/export?revision={revision}">导出方案</a>
-<a class="btn" href="{target}/config?revision={revision}">导出原生配置</a>
-</div></form></section>'''
+<form
+method="post"
+action="{target}">{_csrf(token)}
+<input
+type="hidden"
+name="revision"
+value="{revision}">
+<div
+class="actions">{actions}
+<a
+class="btn"
+href="{target}/export?revision={revision}">导出方案</a>
+<a
+class="btn"
+href="{target}/config?revision={revision}">导出原生配置</a>
+</div>
+</form>
+</section>'''
     help_text = (
         "输入路径是这台服务端电脑的路径；远程设备使用同一份数据。"
         "日期、名单和规则应与所选数据一致，保存后先预检。"
     )
     external_fields = ""
-    parameter_help = "字段来自原生研究模块；名单使用 JSON 数组，可增减条目。"
+    parameter_help = "名单可逐项编辑，复杂配置保留高级导入入口。"
     if template_id == "hk-equity-daily":
         parameter_help += "模板中的五只港股是可替换示例。"
     if source.get("kind") == "file":
@@ -213,29 +341,84 @@ def editor_body(template_id, token, record=None):
                 + _fields(frozen_input["config"], "source:")
                 + "</div>"
             )
-    return f'''<header class="page-head"><h1>{escape(name)}</h1>
+    return f'''<header
+class="page-head">
+<h1>{escape(name)}</h1>
 <p>{escape(template.summary)}</p>
-<a href="/research">返回方案列表</a></header>{frozen}
-<form class="panel" method="post" action="{target}">{_csrf(token)}
-<input type="hidden" name="template_id" value="{escape(template_id, quote=True)}">
-<input type="hidden" name="revision" value="{revision}">
-<h2>方案设置</h2><div class="recipe-grid"><label>名称
-<input name="name" maxlength="120" value="{escape(name, quote=True)}" required></label>
-<label>服务端输入路径<input name="snapshot" value="{escape(snapshot, quote=True)}"
-placeholder="留空时使用首次配置中该研究类型的输入"></label></div><p>{help_text}</p>
+<a
+href="/research">返回方案列表</a> {
+        f'''<a
+href="{target}/history">版本历史与改动对比</a>'''
+        if record
+        else ""
+    }</header>{frozen}
+<form
+class="panel"
+method="post"
+action="{target}">{_csrf(token)}
+<input
+type="hidden"
+name="template_id"
+value="{escape(template_id, quote=True)}">
+<input
+type="hidden"
+name="revision"
+value="{revision}">
+<h2>方案设置</h2>
+<div
+class="recipe-grid">
+<label>名称
+<input
+name="name"
+maxlength="120"
+value="{escape(name, quote=True)}" required>
+</label>
+{data_picker}<details>
+<summary>高级：服务端输入路径</summary>
+<label>输入路径<input
+name="snapshot"
+value="{escape(snapshot, quote=True)}"
+placeholder="留空时使用首次配置中该研究类型的输入">
+</label>
+</details>
+</div>
+<p>{help_text}</p>
+<label>本次修改说明<textarea
+name="note"
+maxlength="2000" rows="2"
+placeholder="例如：将形成窗口从 120 改为 100">
+</textarea>
+</label>
 {external_fields}
-<h2>研究参数</h2><p>{parameter_help}</p>
-<div class="recipe-grid">{_fields(config, "cfg:")}{_fields(cli, "cli:")}</div>
-<div class="actions"><button class="btn primary" name="action" value="save">
+<h2>研究参数</h2>
+<p>{parameter_help}</p>
+<div
+class="recipe-grid">{_fields(config, "cfg:")}{_fields(cli, "cli:")}</div>
+<div
+class="actions">
+<button
+class="btn primary"
+name="action"
+value="save">
 保存方案</button>
-<button class="btn" name="action" value="copy">另存为新方案</button></div>
-<details><summary>导入原生 YAML / JSON 配置</summary>
+<button
+class="btn"
+name="action"
+value="copy">另存为新方案</button>
+</div>
+<details>
+<summary>导入原生 YAML / JSON 配置</summary>
 <p>此按钮使用文本框内容替代上面的研究参数，并保存为新版本。
 运行参数与输入路径沿用表单。</p>
-<textarea name="native_config" rows="14" spellcheck="false">
+<textarea
+name="native_config" rows="14" spellcheck="false">
 {escape(json.dumps(config, ensure_ascii=False, indent=2))}</textarea>
-<button class="btn" name="action" value="import_config">导入配置并保存</button>
-</details></form>'''
+<button
+class="btn"
+name="action"
+value="import_config">导入配置并保存</button>
+</details>
+</form>{EDITOR_SCRIPT}'''
 
 
 class ResearchHandler:
@@ -247,7 +430,9 @@ class ResearchHandler:
         return self.recipe_store
 
     def _research_get(self, path):
+        from quant_studio.datasets import DatasetStore
         from quant_studio.server import _layout
+        from quant_studio.workbench_web import history_body
 
         store = self._recipes()
         query = parse_qs(urlparse(self.path).query)
@@ -255,10 +440,25 @@ class ResearchHandler:
             body = list_body(store, self.csrf_token)
         elif path == "/research/new":
             template_id = query.get("template", ["synthetic-demo"])[0]
-            body = editor_body(template_id, self.csrf_token)
+            datasets = DatasetStore(self.runs_root)
+            selected = query.get("dataset", [None])[0]
+            if selected:
+                datasets.select(selected, template_id)
+            body = editor_body(
+                template_id,
+                self.csrf_token,
+                datasets=datasets.list(template_id),
+                selected_dataset=selected,
+            )
         else:
             parts = path.removeprefix("/research/").split("/")
             record = store.get(parts[0], query.get("revision", [None])[0])
+            if len(parts) == 2 and parts[1] == "history":
+                body = history_body(
+                    store, record["id"], parse_qs(urlparse(self.path).query)
+                )
+                self._send_html(_layout("版本历史", body, "research"))
+                return
             if len(parts) == 2 and parts[1] in {"export", "config"}:
                 content = record if parts[1] == "export" else record["config"]
                 self._send_text(
@@ -268,7 +468,12 @@ class ResearchHandler:
                 return
             if len(parts) != 1:
                 raise QuantStudioError("未知研究方案路径")
-            body = editor_body(record["template_id"], self.csrf_token, record)
+            body = editor_body(
+                record["template_id"],
+                self.csrf_token,
+                record,
+                DatasetStore(self.runs_root).list(record["template_id"]),
+            )
         self._send_html(_layout("研究方案", body, "research"))
 
     def _research_post(self, path, data):
@@ -314,7 +519,13 @@ class ResearchHandler:
                 raise QuantStudioError("不可改变已有方案的研究类型")
             template = load_template(template_id)
             name = _single(data, "name")
+            note = _single(data, "note", "")
+            dataset_id = _single(data, "dataset_id", "") or None
             snapshot = _single(data, "snapshot", "")
+            if dataset_id:
+                from quant_studio.datasets import DatasetStore
+
+                snapshot = DatasetStore(self.runs_root).select(dataset_id, template_id)
             source = template.metadata.get("input_source", {})
             snapshot = snapshot or setting(source.get("environment", "")) or ""
             native = _single(data, "native_config", "")
@@ -362,5 +573,7 @@ class ResearchHandler:
                 recipe_id=None if action == "copy" else recipe_id,
                 expected=revision,
                 input_config=input_config,
+                note=note,
+                dataset_id=dataset_id,
             )
         self._redirect(f"/research/{record['id']}")

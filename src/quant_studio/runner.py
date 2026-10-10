@@ -310,6 +310,9 @@ def preview(
         },
     )
     _write_json(run_dir / "command.json", {"argv": argv})
+    from quant_studio.provenance import capture
+
+    capture(run_dir, loaded, selected_snapshot)
     result = RunResult("previewed", identifier, run_dir, argv)
     _write_json(run_dir / "result.json", result.as_json())
     return result
@@ -372,6 +375,10 @@ def run(
     )
     _write_json(run_dir / "command.json", {"argv": argv})
 
+    from quant_studio.provenance import capture
+
+    capture(run_dir, loaded, selected_snapshot)
+
     _write_json(
         run_dir / "result.json",
         RunResult("running", identifier, run_dir, argv).as_json(),
@@ -420,6 +427,7 @@ def run(
         raise QuantStudioError("运行环境配置在预检期间改变，请重新预览")
     workspace_root = Path(setting("QUANT_WORKSPACE_ROOT")).resolve()
     cwd = (workspace_root / loaded.workspace_repo).resolve()
+    capture(run_dir, loaded, selected_snapshot, probe=True)
 
     if control is not None:
         control.stage("native", "正在执行原生 runner")

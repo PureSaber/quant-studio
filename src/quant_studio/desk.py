@@ -88,7 +88,7 @@ def scan_datasets(root: Path | None = None) -> list[Dataset]:
     return found
 
 
-def list_runs(runs_root: Path) -> list[dict[str, str]]:
+def list_runs(runs_root: Path, *, limit: int | None = 40) -> list[dict[str, str]]:
     if not runs_root.is_dir():
         return []
     records = []
@@ -132,7 +132,7 @@ def list_runs(runs_root: Path) -> list[dict[str, str]]:
             }
         )
     records.sort(key=lambda item: float(item["mtime"]), reverse=True)
-    return records[:40]
+    return records[:limit] if limit is not None else records
 
 
 def _format_time(stamp: float) -> str:

@@ -18,7 +18,7 @@ dev = ["pytest", "ruff"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-quant_studio = ["templates/*/*.json", "templates/*/*.yaml", "templates/*/*.csv"]
+quant_studio = ["templates/*/*.json", "templates/*/*.yaml", "templates/*/*.csv", "assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
