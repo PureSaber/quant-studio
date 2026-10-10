@@ -1908,6 +1908,15 @@ def _artifact_tables(
         "margin.csv": "保证金",
         "costs.csv": "费用与资金费",
         "cash_ledger.csv": "现金账本",
+        "chain.csv": "期权链与 Greeks",
+        "surface.csv": "波动率观察值",
+        "portfolio_greeks.csv": "组合敏感度",
+        "scenarios.csv": "组合风险情景",
+        "curve.csv": "期货期限结构",
+        "spreads.csv": "跨月价差",
+        "rolls.csv": "换月决策",
+        "ledger.csv": "账户分录",
+        "lifecycle.csv": "结算与到期事件",
     }
     labels = {
         "event_time": "事件时间（UTC）" if native else "事件时间（原时区）",

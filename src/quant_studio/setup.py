@@ -20,7 +20,11 @@ SCHEMA = "quant-studio.settings/v1"
 
 def repositories() -> list[str]:
     return sorted(
-        {load_template(key).metadata.get("workspace_repo") for key in template_ids()}
+        {
+            load_template(key).metadata.get("runtime_key")
+            or load_template(key).metadata.get("workspace_repo")
+            for key in template_ids()
+        }
         - {None}
     ) + ["quant-pipeline"]
 
@@ -157,7 +161,15 @@ def validate_profile(profile: dict) -> list[tuple[str, str]]:
     with use_settings(profile):
         root = setting("QUANT_WORKSPACE_ROOT")
         for repo in profile["python_by_repo"]:
-            if not root or not (Path(root) / repo).is_dir():
+            checkout = next(
+                (
+                    load_template(key).metadata.get("workspace_repo")
+                    for key in template_ids()
+                    if load_template(key).metadata.get("runtime_key") == repo
+                ),
+                repo,
+            )
+            if not root or not (Path(root) / checkout).is_dir():
                 raise QuantStudioError(
                     f"工作区缺少{repo}；请先填写含该仓库的工作区目录"
                 )
@@ -167,8 +179,9 @@ def validate_profile(profile: dict) -> list[tuple[str, str]]:
             source = template.metadata.get("input_source", {})
             selected_input = profile["environment"].get(source.get("environment"))
             selected_python = (
-                template.metadata.get("workspace_repo") in profile["python_by_repo"]
-            )
+                template.metadata.get("runtime_key")
+                or template.metadata.get("workspace_repo")
+            ) in profile["python_by_repo"]
             if not ready.runnable and (
                 selected_input or (selected_python and not ready.needs_input)
             ):

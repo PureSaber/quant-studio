@@ -22,6 +22,15 @@ TABLE_FILES = {
     "margin.csv",
     "costs.csv",
     "cash_ledger.csv",
+    "chain.csv",
+    "surface.csv",
+    "portfolio_greeks.csv",
+    "scenarios.csv",
+    "curve.csv",
+    "spreads.csv",
+    "rolls.csv",
+    "ledger.csv",
+    "lifecycle.csv",
 }
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 
@@ -376,7 +385,14 @@ def _collect_declared(run_dir, result_files, nav_column, nav_strategy, initial_n
     sources = {}
     for target, relative in result_files.items():
         source = (root / relative).resolve()
-        if target not in {"nav.csv", "benchmark_nav.csv", "report.html", *TABLE_FILES}:
+        if target not in {
+            "nav.csv",
+            "benchmark_nav.csv",
+            "report.html",
+            "study.json",
+            "artifacts.json",
+            *TABLE_FILES,
+        }:
             raise QuantStudioError(f"未知结果类型: {target}")
         if root not in source.parents or not source.is_file():
             raise QuantStudioError(f"本次运行结果缺失或路径非法: {relative}")
