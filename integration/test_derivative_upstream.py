@@ -33,6 +33,9 @@ def test_derivative_native_contract(kind, tmp_path):
         checked = preflight(template, {}, snapshot=source, runs_root=tmp_path / "runs")
         assert checked.status == "checked", checked.as_json()
         assert checked.evidence_kind == "synthetic"
+        checked_page = render_run(checked.run_dir)
+        assert "数据预检证据" in checked_page
+        assert f"数据行数：{258 if option else 43}" in checked_page
         assert not (checked.run_dir / "strategy-output").exists()
         for mode in ["replay", "analysis"]:
             result = run(
