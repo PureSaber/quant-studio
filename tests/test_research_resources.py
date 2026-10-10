@@ -89,21 +89,22 @@ def test_process_tree_rss_sampling_observes_child_memory():
         [
             sys.executable,
             "-c",
-            "import time; payload=bytearray(12_000_000); time.sleep(3)",
-        ]
+            "import sys; payload=bytearray(12_000_000); "
+            "print('ready', flush=True); sys.stdin.read(1)",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
     )
     try:
-        deadline = time.monotonic() + 2
-        observed = None
-        while time.monotonic() < deadline:
-            observed = sample_process_tree_rss(process.pid)
-            if observed:
-                break
-            time.sleep(0.03)
+        assert process.stdout.readline().strip() == "ready"
+        observed = sample_process_tree_rss(process.pid)
         assert observed is not None and observed > 1_000_000
     finally:
         process.terminate()
         process.wait(timeout=5)
+        process.stdin.close()
+        process.stdout.close()
 
 
 def test_output_limit_uses_attached_directory_and_sampling_failure_is_not_pass(
