@@ -1,0 +1,75 @@
+name: Research workspace integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research-workspace:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: quant-studio
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-agent
+          ref: 887bec50d530a06171756204281c7322a4855d3c
+          path: quant-agent
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-data-kit
+          ref: 902eb095f922429f327d7c713adde79a6787839c
+          path: quant-data-kit
+          persist-credentials: false
+      - name: Install Studio and three independent locked runtimes
+        shell: pwsh
+        run: |
+          python -m pip install --no-deps -r quant-studio/requirements.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip install --no-deps --no-build-isolation -e quant-studio
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m venv notebook-env
+          ./notebook-env/Scripts/python -m pip install --no-deps -r quant-studio/optional/notebook-windows-py312.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./notebook-env/Scripts/python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m venv agent-env
+          ./agent-env/Scripts/python -m pip install --no-deps -r quant-agent/requirements.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./agent-env/Scripts/python -m pip install --no-deps --no-build-isolation -e quant-agent
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./agent-env/Scripts/python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m venv qdk-env
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./qdk-env/Scripts/python -m pip install --no-deps -r quant-data-kit/requirements.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./qdk-env/Scripts/python -m pip install --no-deps --no-build-isolation -e quant-data-kit
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./qdk-env/Scripts/python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Exercise real Lab, data admission, frozen reads and agent subprocess
+        working-directory: quant-studio
+        env:
+          PYTHONUTF8: '1'
+          QUANT_TEST_NOTEBOOK_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
+          QUANT_TEST_AGENT_SOURCE: ${{ github.workspace }}/quant-agent
+          QUANT_TEST_AGENT_PYTHON: ${{ github.workspace }}/agent-env/Scripts/python.exe
+          QUANT_TEST_INTAKE_SOURCE: ${{ github.workspace }}/quant-data-kit
+          QUANT_TEST_INTAKE_IMPORT_PYTHON: ${{ github.workspace }}/qdk-env/Scripts/python.exe
+          QUANT_TEST_INTAKE_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
+        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py -q

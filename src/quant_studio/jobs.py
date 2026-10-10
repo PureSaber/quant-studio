@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -107,11 +108,32 @@ class JobManager:
         profile: dict | None,
         recipe: dict | None = None,
         collection: dict | None = None,
+        notebook: dict | None = None,
+        assistant: dict | None = None,
+        intake: dict | None = None,
+        dispatch_key: str | None = None,
+        batch: dict | None = None,
     ) -> dict:
-        if action not in {"check", "execute", "collect"}:
+        if action not in {
+            "check",
+            "execute",
+            "collect",
+            "workflow",
+            "notebook",
+            "assistant",
+            "intake",
+        }:
             raise QuantStudioError("只有预检和显式执行可以进入任务队列")
         if (action == "collect") != (collection is not None):
             raise QuantStudioError("数据采集任务必须绑定采集参数")
+        if (action == "notebook") != (notebook is not None):
+            raise QuantStudioError("Notebook任务必须绑定冻结实验")
+        if (action == "assistant") != (assistant is not None):
+            raise QuantStudioError("助手任务必须绑定已审阅证据")
+        if (action == "intake") != (intake is not None):
+            raise QuantStudioError("数据导入必须绑定原件与映射契约")
+        if dispatch_key is not None and not re.fullmatch(r"[a-f0-9]{64}", dispatch_key):
+            raise QuantStudioError("派发标识无效")
         job_id = uuid.uuid4().hex
         now = _now()
         record = {
@@ -129,6 +151,11 @@ class JobManager:
             "child_pid": None,
             "recipe": deepcopy(recipe),
             "collection": deepcopy(collection),
+            "notebook": deepcopy(notebook),
+            "assistant": deepcopy(assistant),
+            "intake": deepcopy(intake),
+            "dispatch_key": dispatch_key,
+            "batch": deepcopy(batch),
         }
         request = {
             **record,
@@ -137,9 +164,50 @@ class JobManager:
             "snapshot": snapshot,
             "profile": deepcopy(profile),
         }
+        identity = hashlib.sha256(
+            json.dumps(
+                {
+                    key: request[key]
+                    for key in (
+                        "action",
+                        "template_id",
+                        "knobs",
+                        "factors",
+                        "snapshot",
+                        "profile",
+                        "recipe",
+                        "collection",
+                        "notebook",
+                        "assistant",
+                        "intake",
+                        "batch",
+                    )
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        record["request_identity"] = request["request_identity"] = identity
         with self._lock:
             if self._closed:
                 raise QuantStudioError("任务队列已经关闭")
+            if dispatch_key is not None:
+                for previous in self.list():
+                    if previous.get("dispatch_key") == dispatch_key:
+                        if previous.get("request_identity") != identity:
+                            raise QuantStudioError("相同派发标识的请求身份不一致")
+                        return previous
+            linked = self._linked_record(record)
+            if linked:
+                path, value = linked
+                expected = "ready" if notebook else "prepared"
+                if value["status"] != expected or value.get("job_id"):
+                    raise QuantStudioError("此实验或证据已提交，请创建新记录")
+                from quant_studio.recipes import _atomic
+
+                value.update(status="queued", job_id=job_id)
+                _atomic(path, json.dumps(value, ensure_ascii=False))
             self._requests[job_id] = request
             self._write(record)
             self._queue.put(job_id)
@@ -297,6 +365,7 @@ class JobManager:
                     message=message,
                     run_id=run_id,
                     child_pid=None,
+                    result_url=data.get("result_url"),
                 )
             except Exception as exc:  # worker must retain a diagnostic record
                 status = (
@@ -350,12 +419,57 @@ class JobManager:
                 owner_instance_id=self.instance_id,
                 child_pid=None,
             )
+            self._sync_linked_record(value)
             self._write(value)
+
+    def _linked_record(self, job):
+        if job.get("intake"):
+            from quant_studio.intake_tools import IntakeWorkspace
+
+            store = IntakeWorkspace(self.runs_root)
+            identifier = job["intake"]["request_id"]
+            record = store.request(identifier)
+            return store.root / "requests" / identifier / "request.json", record
+        if job.get("notebook"):
+            from quant_studio.notebooks import NotebookStore
+
+            store, payload, filename = (
+                NotebookStore(self.runs_root),
+                job["notebook"],
+                "run.json",
+            )
+        elif job.get("assistant"):
+            from quant_studio.project_assistant import AssistantStore
+
+            store, payload, filename = (
+                AssistantStore(self.runs_root),
+                job["assistant"],
+                "request.json",
+            )
+        else:
+            return None
+        record = store.get(payload["project_id"], payload["id"])
+        return store.directory(payload["project_id"], payload["id"]) / filename, record
+
+    def _sync_linked_record(self, job):
+        if job["status"] in _ACTIVE:
+            return
+        from quant_studio.recipes import _atomic
+
+        try:
+            linked = self._linked_record(job)
+            if linked:
+                path, record = linked
+                record.update(status=job["status"], message=job.get("message"))
+                _atomic(path, json.dumps(record, ensure_ascii=False))
+        except (QuantStudioError, OSError, KeyError, TypeError) as exc:
+            job["linked_record_error"] = str(exc)
 
     def _update(self, job_id: str, **changes) -> dict:
         with self._lock:
             record = self.get(job_id)
             record.update(changes, updated_at=_now())
+            self._sync_linked_record(record)
             self._write(record)
             return dict(record)
 
