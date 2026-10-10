@@ -873,7 +873,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             "instrument_ids_required"
         ):
             symbol_count = len(checked["instrument_ids"])
-            row_count = checked["event_count"]
+            row_count = checked.get("event_count", row_count)
         preflight_view = (
             '<section class="panel"><h2>数据预检证据</h2>'
             f"<p>{escape(summary)}</p>"
