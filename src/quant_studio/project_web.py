@@ -111,19 +111,27 @@ def project_body(root, token, identifier=None, query=None):
         )
     selected = {(r["id"], r["revision"]) for r in project["recipes"]}
     choices = "".join(
-        f'''<label><input type="checkbox" name="dataset" value="{item["id"]}"
+        f'''<label class="check"><input type="checkbox" name="dataset"
+value="{item["id"]}"
 {"checked" if item["id"] in project["datasets"] else ""}>
 {escape(item["name"])}</label>'''
         for item in inputs
     )
     recipe_choices = "".join(
-        f'''<label><input type="checkbox" name="recipe" value="{rid}@{rev}"
+        f'''<label class="check"><input type="checkbox" name="recipe"
+value="{rid}@{rev}"
 {"checked" if (rid, rev) in selected else ""}>
 {escape(record["name"])} · {rev[:12]}</label>'''
         for (rid, rev), record in recipe_options.items()
     )
-    body = f'''<header class="page-head"><h1>{escape(project["name"])}</h1>
-<p>{escape(project["question"])}</p></header><section class="panel">
+    body = f"""<header class="page-head"><h1>{escape(project["name"])}</h1>
+<p>{escape(project["question"])}</p>
+<p>已连接{len(project["datasets"])}个数据集、{len(project["recipes"])}个方案版本。</p>
+</header>"""
+    body += notebook_body(root, token, project)
+    edit_open = "" if project["datasets"] or project["recipes"] else " open"
+    body += f'''<details class="panel"{edit_open}>
+<summary>编辑研究问题、数据、方案与笔记</summary>
 <form method="post" action="/projects/{identifier}/save">{csrf(token)}
 <input type="hidden" name="revision" value="{project["revision"]}">
 <label>名称<input name="name" value="{escape(project["name"], quote=True)}"
@@ -136,7 +144,7 @@ maxlength="120" required></label>
 <a href="/research">创建或编辑方案</a>
 <label>研究笔记与结论<textarea name="notes" rows="6" maxlength="16000"
 >{escape(project["notes"])}</textarea></label>
-<button class="btn primary">保存新项目版本</button></form></section>'''
+<button class="btn primary">保存新项目版本</button></form></details>'''
     body += """<section class="panel"><h2>运行已连接方案</h2>
 <p>每项先执行原生预检，通过后运行；提交时固定方案版本。失败保留诊断。</p>"""
     for ref in project["recipes"]:
@@ -151,16 +159,16 @@ maxlength="120" required></label>
     body += """</section><section class="panel"><h2>项目实验</h2>
 <form method="get" action="/experiments/compare">"""
     for record in store.experiments(identifier):
-        body += f'''<p><input type="checkbox" name="run" value="{record["run_id"]}">
+        body += f'''<label class="check"><input type="checkbox" name="run"
+value="{record["run_id"]}">
 <a href="/experiments/{record["run_id"]}">{escape(record["title"])}</a>
- · {escape(record["status"])}</p>'''
+ · {escape(record["status"])}</label>'''
     body += '<button class="btn">比较所选实验</button></form></section>'
-    body += '<section class="panel"><h2>项目版本记录</h2>'
+    body += '<details class="panel"><summary>项目版本记录</summary>'
     for version in store.history(identifier):
         body += f"""<p><a href="/projects/{identifier}?revision={version["revision"]}">
 {version["revision"][:12]}</a> · {escape(version["created_at"])}</p>"""
-    body += "</section>"
-    body += notebook_body(root, token, project)
+    body += "</details>"
     body += f'''<section class="panel"><h2>研究助手</h2>
 <p>根据本项目的数据、方案和实验记录整理问题，先检查证据再选择是否调用模型。</p>
 <form method="post" action="/projects/{identifier}/assistant-prepare">{csrf(token)}
