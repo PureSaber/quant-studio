@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -109,6 +110,9 @@ class JobManager:
         collection: dict | None = None,
         notebook: dict | None = None,
         assistant: dict | None = None,
+        intake: dict | None = None,
+        dispatch_key: str | None = None,
+        batch: dict | None = None,
     ) -> dict:
         if action not in {
             "check",
@@ -117,6 +121,7 @@ class JobManager:
             "workflow",
             "notebook",
             "assistant",
+            "intake",
         }:
             raise QuantStudioError("只有预检和显式执行可以进入任务队列")
         if (action == "collect") != (collection is not None):
@@ -125,6 +130,10 @@ class JobManager:
             raise QuantStudioError("Notebook任务必须绑定冻结实验")
         if (action == "assistant") != (assistant is not None):
             raise QuantStudioError("助手任务必须绑定已审阅证据")
+        if (action == "intake") != (intake is not None):
+            raise QuantStudioError("数据导入必须绑定原件与映射契约")
+        if dispatch_key is not None and not re.fullmatch(r"[a-f0-9]{64}", dispatch_key):
+            raise QuantStudioError("派发标识无效")
         job_id = uuid.uuid4().hex
         now = _now()
         record = {
@@ -144,6 +153,9 @@ class JobManager:
             "collection": deepcopy(collection),
             "notebook": deepcopy(notebook),
             "assistant": deepcopy(assistant),
+            "intake": deepcopy(intake),
+            "dispatch_key": dispatch_key,
+            "batch": deepcopy(batch),
         }
         request = {
             **record,
@@ -152,9 +164,40 @@ class JobManager:
             "snapshot": snapshot,
             "profile": deepcopy(profile),
         }
+        identity = hashlib.sha256(
+            json.dumps(
+                {
+                    key: request[key]
+                    for key in (
+                        "action",
+                        "template_id",
+                        "knobs",
+                        "factors",
+                        "snapshot",
+                        "profile",
+                        "recipe",
+                        "collection",
+                        "notebook",
+                        "assistant",
+                        "intake",
+                        "batch",
+                    )
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        record["request_identity"] = request["request_identity"] = identity
         with self._lock:
             if self._closed:
                 raise QuantStudioError("任务队列已经关闭")
+            if dispatch_key is not None:
+                for previous in self.list():
+                    if previous.get("dispatch_key") == dispatch_key:
+                        if previous.get("request_identity") != identity:
+                            raise QuantStudioError("相同派发标识的请求身份不一致")
+                        return previous
             linked = self._linked_record(record)
             if linked:
                 path, value = linked
@@ -322,6 +365,7 @@ class JobManager:
                     message=message,
                     run_id=run_id,
                     child_pid=None,
+                    result_url=data.get("result_url"),
                 )
             except Exception as exc:  # worker must retain a diagnostic record
                 status = (
@@ -379,6 +423,13 @@ class JobManager:
             self._write(value)
 
     def _linked_record(self, job):
+        if job.get("intake"):
+            from quant_studio.intake_tools import IntakeWorkspace
+
+            store = IntakeWorkspace(self.runs_root)
+            identifier = job["intake"]["request_id"]
+            record = store.request(identifier)
+            return store.root / "requests" / identifier / "request.json", record
         if job.get("notebook"):
             from quant_studio.notebooks import NotebookStore
 
