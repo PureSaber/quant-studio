@@ -20,6 +20,7 @@ from quant_studio.access import (
     validate_binding,
 )
 from quant_studio.accounts import account_sources, inspect_source
+from quant_studio.batch_web import BatchHandler
 from quant_studio.counterfactual_panel import (
     counterfactual_panel,
     load_counterfactual_view,
@@ -40,6 +41,7 @@ from quant_studio.fund_reconciliation import (
     RECEIPT_COLUMNS,
     FundReconciliationStore,
 )
+from quant_studio.intake_web import IntakeHandler
 from quant_studio.jobs import JobManager
 from quant_studio.nav import (
     chart_fragment,
@@ -50,6 +52,7 @@ from quant_studio.nav import (
 )
 from quant_studio.project_web import ProjectHandler
 from quant_studio.recipes import RecipeStore, recipe_template
+from quant_studio.research_batches import BatchStore, BatchSupervisor
 from quant_studio.research_panel import load_timing_view, timing_panel
 from quant_studio.research_web import ResearchHandler
 from quant_studio.run_record import load_run_result
@@ -437,6 +440,38 @@ def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str
                 f'<p><a href="/projects/{escape(item["project_id"])}/{route}/'
                 f'{escape(item["id"])}">打开项目实验记录</a></p>'
             )
+    if job.get("intake"):
+        identifier = job["intake"]["request_id"]
+        run_link += (
+            f'<p><a href="/intake/requests/{escape(identifier)}">查看导入报告</a></p>'
+        )
+    resource_body = ""
+    if job.get("batch"):
+        from quant_studio.research_resources import ResourceStore
+
+        batch_id = escape(job["batch"]["batch_id"])
+        run_link += f'<p><a href="/batches/{batch_id}">返回批量实验</a></p>'
+        try:
+            usage = ResourceStore(manager.runs_root).get(job_id)
+            labels = {
+                "queue_wait_seconds": "排队等待（秒）",
+                "running_seconds": "运行耗时（秒）",
+                "peak_rss_bytes": "观测内存峰值（字节）",
+                "output_bytes": "输出体积（字节）",
+                "termination_reason": "触发终止的限额",
+            }
+            rows = "".join(
+                f"<tr><th>{label}</th><td>"
+                + (escape(str(usage[key])) if usage[key] is not None else "未观测")
+                + "</td></tr>"
+                for key, label in labels.items()
+            )
+            resource_body = (
+                '<section class="panel"><h2>资源使用</h2><table>' + rows + "</table>"
+                "<p>资源限额按间隔采样执行，可能短暂超限；未观测不代表用量为零。</p></section>"
+            )
+        except QuantStudioError:
+            resource_body = '<section class="panel"><p>尚无可用资源记录。</p></section>'
     body = f"""{refresh}<header class="page-head"><p class="kicker">任务</p>
 <h1>{escape(str(job.get("template_id", "")))}</h1>
 <p class="lede">{escape(_STATUS.get(job["status"], job["status"]))}</p></header>
@@ -445,7 +480,7 @@ def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str
 <section class="panel"><h2>任务日志</h2><pre>{escape(log) if log else "尚无日志"}</pre>
 <p class="note">取消只作用于当前服务实例持有的本任务进程句柄；
 取消失败不会显示为成功。</p>
-</section>"""
+</section>{resource_body}"""
     return _layout("任务详情", body, "jobs")
 
 
@@ -1074,6 +1109,12 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
 
 def _job_executor(runs_root: Path):
     def execute(job, control):
+        if job["action"] == "intake":
+            from quant_studio.intake_tools import IntakeWorkspace
+
+            return IntakeWorkspace(runs_root).execute(
+                job["intake"]["request_id"], control
+            )
         if job["action"] == "assistant":
             from quant_studio.project_assistant import AssistantStore
 
@@ -1113,7 +1154,38 @@ def _job_executor(runs_root: Path):
             control.stage("executing", "预检通过，开始运行已保存方案")
         return run(template, job["knobs"], execute=True, **options)
 
-    return execute
+    def monitored(job, control):
+        if not job.get("batch"):
+            return execute(job, control)
+        from quant_studio.research_resources import (
+            MonitoredControl,
+            ResourceBudget,
+            ResourceMonitor,
+            ResourceStore,
+        )
+
+        monitor = ResourceMonitor(
+            job["job_id"],
+            ResourceBudget(**job["batch"]["budget"]),
+            store=ResourceStore(runs_root),
+            queued_at=job["created_at"],
+        )
+        with MonitoredControl(control, monitor) as monitored_control:
+            return execute(job, monitored_control)
+
+    return monitored
+
+
+def _batch_profile(settings_store):
+    from quant_studio.setup import inherited_profile
+
+    profile = settings_store.snapshot() if settings_store else None
+    with use_settings(profile):
+        inherited = inherited_profile()
+    if profile:
+        inherited["environment"].update(profile["environment"])
+        inherited["python_by_repo"].update(profile["python_by_repo"])
+    return inherited
 
 
 def serve(
@@ -1152,6 +1224,8 @@ def serve(
     Handler.runs_root = root
     Handler.access_policy = access
     Handler.job_manager = None
+    Handler.batch_store = BatchStore(root)
+    Handler.batch_supervisor = None
     Handler.recipe_store = RecipeStore(root)
     Handler.reconciliation_store = FundReconciliationStore(root)
     Handler.settings_store = SettingsStore(
@@ -1167,6 +1241,11 @@ def serve(
                 server.socket, server_side=True, do_handshake_on_connect=False
             )
         Handler.job_manager = JobManager(root, execute=_job_executor(root))
+        Handler.batch_supervisor = BatchSupervisor(
+            Handler.job_manager,
+            store=Handler.batch_store,
+            profile=lambda: _batch_profile(Handler.settings_store),
+        )
     except Exception:
         server.server_close()
         raise
@@ -1188,6 +1267,8 @@ def serve(
         pass
     finally:
         stopped.set()
+        if Handler.batch_supervisor is not None:
+            Handler.batch_supervisor.close()
         if Handler.job_manager is not None:
             Handler.job_manager.close()
         server.server_close()
@@ -1200,6 +1281,8 @@ class _Handler(
     ResearchHandler,
     WorkbenchHandler,
     ProjectHandler,
+    IntakeHandler,
+    BatchHandler,
     BaseHTTPRequestHandler,
 ):
     runs_root = Path("runs")
@@ -1207,6 +1290,7 @@ class _Handler(
     settings_store = None
     job_manager = None
     reconciliation_store = None
+    _services_lock = threading.RLock()
 
     def setup(self):
         super().setup()
@@ -1226,7 +1310,26 @@ class _Handler(
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path in {"/projects", "/catalog"} or path.startswith("/projects/"):
+            if path == "/onboarding":
+                from quant_studio.onboarding import onboarding_body
+
+                self._send_html(
+                    _layout(
+                        "开始研究",
+                        onboarding_body(
+                            self.runs_root,
+                            self.csrf_token,
+                            settings_store=self.settings_store,
+                        ),
+                        "onboarding",
+                    )
+                )
+            elif path == "/batches" or path.startswith("/batches/"):
+                self._ensure_batch_services()
+                self._batch_get(path)
+            elif path == "/intake" or path.startswith("/intake/"):
+                self._intake_get(path)
+            elif path in {"/projects", "/catalog"} or path.startswith("/projects/"):
                 self._project_get(path)
             elif path in {
                 "/datasets",
@@ -1316,8 +1419,21 @@ class _Handler(
                 self._send_html(render_run(run_dir, csrf_token=self.csrf_token))
             else:
                 self.send_error(404)
-        except (QuantStudioError, FileNotFoundError, KeyError, ValueError):
-            self.send_error(404)
+        except (QuantStudioError, FileNotFoundError, KeyError, ValueError) as exc:
+            if path.startswith(("/intake", "/batches", "/onboarding")):
+                body = (
+                    '<header class="page-head"><h1>此操作尚未完成</h1></header>'
+                    f'<section class="panel"><p role="alert">{escape(str(exc))}</p>'
+                    '<p><a href="/intake">查看保留的导入记录</a> · '
+                    '<a href="/onboarding">查看下一步</a></p></section>'
+                )
+                self._send_text(
+                    _layout("请检查输入", body),
+                    status=400,
+                    content_type="text/html; charset=utf-8",
+                )
+            else:
+                self.send_error(404)
 
     def do_POST(self) -> None:
         profile = (
@@ -1337,6 +1453,8 @@ class _Handler(
             path.startswith("/templates/")
             or path.startswith("/research/")
             or path.startswith("/datasets/")
+            or path.startswith("/intake/")
+            or path.startswith("/batches/")
             or path.startswith("/projects/")
             or (path.startswith("/experiments/") and path.endswith("/note"))
             or path == "/setup"
@@ -1360,18 +1478,38 @@ class _Handler(
             if content_type.lower() != "application/x-www-form-urlencoded":
                 raise QuantStudioError("请求类型不受支持")
             length = int(lengths[0])
-            limit = 262_144 if path.startswith(("/research/", "/projects/")) else 64_000
+            limit = (
+                40 * 1024 * 1024
+                if path == "/intake/upload"
+                else 262_144
+                if path.startswith(("/research/", "/projects/", "/intake/"))
+                else 64_000
+            )
             if length < 0 or length > limit:
                 raise QuantStudioError("请求过大")
             data = parse_qs(
                 self.rfile.read(length).decode("utf-8"),
                 keep_blank_values=path.startswith(
-                    ("/research/", "/datasets/", "/experiments/", "/projects/")
+                    (
+                        "/research/",
+                        "/datasets/",
+                        "/experiments/",
+                        "/projects/",
+                        "/intake/",
+                        "/batches/",
+                    )
                 ),
             )
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path.startswith("/intake/"):
+                self._intake_post(path, data)
+                return
+            if path.startswith("/batches/"):
+                self._ensure_batch_services()
+                self._batch_post(path, data)
                 return
             if path.startswith("/research/"):
                 self._research_post(path, data)
@@ -1488,11 +1626,27 @@ class _Handler(
             )
 
     def _jobs(self) -> JobManager:
-        manager = self.__class__.job_manager
-        if manager is None:
-            manager = JobManager(self.runs_root, execute=_job_executor(self.runs_root))
-            self.__class__.job_manager = manager
-        return manager
+        with self._services_lock:
+            manager = self.__class__.job_manager
+            if manager is None:
+                manager = JobManager(
+                    self.runs_root, execute=_job_executor(self.runs_root)
+                )
+                self.__class__.job_manager = manager
+            return manager
+
+    def _ensure_batch_services(self):
+        with self._services_lock:
+            if self.__class__.batch_supervisor is None:
+
+                def profile():
+                    return _batch_profile(self.settings_store)
+
+                self.__class__.batch_supervisor = BatchSupervisor(
+                    self._jobs(),
+                    store=self._batches(),
+                    profile=profile,
+                )
 
     def _reconciliations(self) -> FundReconciliationStore:
         store = self.__class__.reconciliation_store
@@ -2085,13 +2239,16 @@ def _choice_label(name: str, choice: object) -> str:
 def _layout(title: str, body: str, active: str = "strategy") -> str:
     nav_items = (
         ("overview", "总览", "/"),
+        ("onboarding", "开始研究", "/onboarding"),
         ("setup", "首次配置", "/setup"),
         ("environment", "环境", "/environment"),
         ("data", "数据", "/data"),
         ("datasets", "数据集", "/datasets"),
         ("catalog", "数据目录", "/catalog"),
+        ("intake", "导入与质量", "/intake"),
         ("projects", "研究项目", "/projects"),
         ("research", "研究方案", "/research"),
+        ("batches", "批量实验", "/batches"),
         ("experiments", "实验笔记", "/experiments"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),

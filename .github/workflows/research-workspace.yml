@@ -27,7 +27,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Install Studio and two independent locked runtimes
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-data-kit
+          ref: 0dae9b570cf23ee4f8c1091699194b4ec03cb2da
+          path: quant-data-kit
+          persist-credentials: false
+      - name: Install Studio and three independent locked runtimes
         shell: pwsh
         run: |
           python -m pip install --no-deps -r quant-studio/requirements.lock
@@ -48,11 +54,22 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./agent-env/Scripts/python -m pip check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Exercise real Lab, notebooks, Parquet and agent subprocess
+          python -m venv qdk-env
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./qdk-env/Scripts/python -m pip install --no-deps -r quant-data-kit/requirements.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./qdk-env/Scripts/python -m pip install --no-deps --no-build-isolation -e quant-data-kit
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./qdk-env/Scripts/python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Exercise real Lab, data admission, frozen reads and agent subprocess
         working-directory: quant-studio
         env:
           PYTHONUTF8: '1'
           QUANT_TEST_NOTEBOOK_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
           QUANT_TEST_AGENT_SOURCE: ${{ github.workspace }}/quant-agent
           QUANT_TEST_AGENT_PYTHON: ${{ github.workspace }}/agent-env/Scripts/python.exe
-        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py -q
+          QUANT_TEST_INTAKE_SOURCE: ${{ github.workspace }}/quant-data-kit
+          QUANT_TEST_INTAKE_IMPORT_PYTHON: ${{ github.workspace }}/qdk-env/Scripts/python.exe
+          QUANT_TEST_INTAKE_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
+        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py -q

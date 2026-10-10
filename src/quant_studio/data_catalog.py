@@ -68,9 +68,14 @@ def preview_file(root, identifier, filename, *, max_rows=10000):
     item, path = registered_file(root, identifier, filename)
     descriptions = column_descriptions(root, identifier, filename)
     if path.suffix.lower() == ".parquet":
-        python = configured_python(
-            load_template(item["template_id"]).metadata.get("workspace_repo")
-        )
+        if item.get("kind") == "intake":
+            from quant_studio.intake_tools import IntakeWorkspace
+
+            python, _ = IntakeWorkspace(root).runtime()
+        else:
+            python = configured_python(
+                load_template(item["template_id"]).metadata.get("workspace_repo")
+            )
         if not python:
             raise QuantStudioError(
                 "Parquet预览需要为此应用配置含PyArrow的独立Python环境"

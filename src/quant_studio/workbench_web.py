@@ -152,18 +152,31 @@ value="{date.today().isoformat()}" required>
 <button
 class="btn">重新采集为新版本</button>
 </form>'''
+        label = (
+            "已准入研究数据"
+            if item.get("kind") == "intake"
+            else load_template(item["template_id"]).title
+        )
+        destination = (
+            "/projects"
+            if item.get("kind") == "intake"
+            else "/research/new?template="
+            + item["template_id"]
+            + "&dataset="
+            + item["id"]
+        )
         cards.append(
             f"""<section
 class="panel">
 <h2>{escape(item["name"])}</h2>
-<p>{escape(load_template(item["template_id"]).title)} · {escape(item["provider"])}</p>
+<p>{escape(label)} · {escape(item["provider"])}</p>
 <p>覆盖：{escape(str(item["start"]))} → {escape(str(item["end"]))}<br>
 标的：{escape(symbols)}</p>
 <p
 class="note">{escape(item["evidence"])}<br>{escape(state)}<br>{escape(item["limits"])}</p>
 <p>
 <a
-href="/research/new?template={item["template_id"]}&dataset={item["id"]}">
+href="{escape(destination, quote=True)}">
 用此数据新建研究</a> · <a
 href="/datasets?verify={item["id"]}">检查文件完整性</a>
 </p>{refresh}<details>
@@ -419,7 +432,7 @@ class="panel">
 
 
 def compare_body(root, identifiers):
-    from quant_studio.nav import NavSeries, comparison_fragment
+    from quant_studio.result_explorer import comparison_explorer
 
     result = ExperimentStore(root).compare(identifiers)
 
@@ -442,28 +455,7 @@ href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
     )
     chart = ""
     if result["comparable"]:
-        normalized = []
-        for row in result["runs"][:2]:
-            series = row["series"]
-            opening = (
-                series.initial_nav
-                if series.initial_nav is not None
-                else series.rows[0][1]
-            )
-            normalized.append(
-                NavSeries(
-                    [(d, v / opening) for d, v in series.rows],
-                    initial_nav=opening / opening,
-                )
-            )
-        chart = comparison_fragment(
-            *normalized,
-            benchmark_label="实验二",
-            currency="归一化",
-            strategy_label="实验一",
-            comparison_title="实验累计收益",
-            difference_label="收益差（实验一减实验二）",
-        )
+        chart = comparison_explorer(result["runs"])
     warning = (
         "观测日期、研究类型与币种一致，可查看描述性差异；未据此评选有效策略。"
         if result["comparable"]
@@ -500,7 +492,7 @@ class="table-scroll">
 <th>最大回撤</th>
 </tr>{rows}</table>
 </div>{chart}<p
-class="note">图中展示前两个实验，以各自期初归一化；表格保留全部选择。费用、数据性质和模型假设请结合各自报告。</p>
+class="note">图中展示全部所选实验，以各自原始期初归一化；缩放不改变表格的全区间指标。费用、数据性质和模型假设请结合各自报告。</p>
 </section>
 <section
 class="panel">

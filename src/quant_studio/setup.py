@@ -22,7 +22,7 @@ def repositories() -> list[str]:
     return sorted(
         {load_template(key).metadata.get("workspace_repo") for key in template_ids()}
         - {None}
-    ) + ["quant-pipeline"]
+    ) + ["quant-pipeline", "quant-data-kit"]
 
 
 def input_sources() -> dict[str, dict]:
