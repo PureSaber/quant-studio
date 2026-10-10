@@ -1,0 +1,209 @@
+{
+  "id": "global-futures-research",
+  "title": "海外期货与换月研究",
+  "summary": "选择明确的数据包和研究参数，生成行情分析、组合风险及可复查的账户回放。",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "upstream_ref": "302fc65c03ff00755672c21c6134f3e616e4608e",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "海外期货与换月研究数据包目录",
+    "environment": "QUANT_GLOBAL_FUTURES_BUNDLE",
+    "required_files": [
+      "manifest.json",
+      "contracts.json",
+      "quotes.csv"
+    ]
+  },
+  "data_help": "先到“数据集”生成演示数据或登记真实数据包。DEMO 参数只适用于演示数据；真实研究须填写包内合约。缺少结算价、标的价格或规则时按预检提示补齐。",
+  "knobs": [
+    {
+      "name": "mode",
+      "label": "研究范围",
+      "default": "replay",
+      "path": "mode",
+      "type": "enum",
+      "choices": [
+        "replay",
+        "analysis"
+      ],
+      "choice_labels": {
+        "replay": "分析并回放账户",
+        "analysis": "只分析行情和风险"
+      }
+    },
+    {
+      "name": "initial_cash",
+      "label": "初始资金（合约币种）",
+      "default": 100000,
+      "path": "initial_cash",
+      "type": "int",
+      "minimum": 1,
+      "maximum": 1000000000
+    },
+    {
+      "name": "fee_per_contract",
+      "label": "每手单边手续费",
+      "default": 1.0,
+      "path": "fee_per_contract",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    {
+      "name": "slippage_ticks",
+      "label": "每次成交不利滑点（最小跳数）",
+      "default": 1,
+      "path": "slippage_ticks",
+      "type": "int",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "product",
+      "label": "数据包内品种 ID",
+      "default": "DEMO",
+      "path": "product",
+      "type": "text",
+      "max_length": 2000,
+      "pattern": "[^\\r\\n\\x00]{1,2000}"
+    },
+    {
+      "name": "strategy",
+      "label": "研究组合",
+      "default": "nearby",
+      "path": "strategy",
+      "type": "enum",
+      "choices": [
+        "nearby",
+        "calendar_spread"
+      ],
+      "choice_labels": {
+        "nearby": "单合约换月",
+        "calendar_spread": "近月多头＋次月空头"
+      }
+    },
+    {
+      "name": "roll_rule",
+      "label": "换月依据",
+      "default": "expiry",
+      "path": "roll_rule",
+      "type": "enum",
+      "choices": [
+        "expiry",
+        "volume"
+      ],
+      "choice_labels": {
+        "expiry": "按到期时间排序",
+        "volume": "按已观察到的成交量排序"
+      }
+    },
+    {
+      "name": "roll_days",
+      "label": "距最后交易日最少日历天数",
+      "default": 3,
+      "path": "roll_days",
+      "type": "int",
+      "minimum": 1,
+      "maximum": 60
+    },
+    {
+      "name": "contracts",
+      "label": "每条腿手数",
+      "default": 1,
+      "path": "contracts",
+      "type": "int",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    {
+      "name": "start",
+      "label": "回放开始日期（留空使用全部）",
+      "type": "text",
+      "pattern": "(?:\\d{4}-\\d{2}-\\d{2})?",
+      "max_length": 10,
+      "default": "",
+      "path": "start"
+    },
+    {
+      "name": "end",
+      "label": "回放结束日期（留空使用全部）",
+      "type": "text",
+      "pattern": "(?:\\d{4}-\\d{2}-\\d{2})?",
+      "max_length": 10,
+      "default": "",
+      "path": "end"
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "qfs_global.cli",
+    "run",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "qfs_global.cli",
+    "preflight",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读验证数据身份、合约规则、研究范围及关键字段；不会生成交易或研究报告。",
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "nav.csv": "nav.csv",
+    "fills.csv": "fills.csv",
+    "positions.csv": "positions.csv",
+    "report.html": "report.html",
+    "study.json": "study.json",
+    "curve.csv": "curve.csv",
+    "spreads.csv": "spreads.csv",
+    "rolls.csv": "rolls.csv",
+    "ledger.csv": "ledger.csv",
+    "artifacts.json": "artifacts.json",
+    "lifecycle.csv": "lifecycle.csv"
+  },
+  "nav_initial_value_key": "initial_cash",
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "仅研究和历史回放；合成数据、理论值和市场观察分别标明。费用与保证金使用明确假设，不证明真实成交或策略盈利。",
+  "runtime_key": "quant-futures-global",
+  "preflight_contract": {
+    "schema_version": "qdk.derivatives.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "result_files_by_mode": {
+    "analysis": {
+      "report.html": "report.html",
+      "study.json": "study.json",
+      "curve.csv": "curve.csv",
+      "spreads.csv": "spreads.csv",
+      "artifacts.json": "artifacts.json"
+    }
+  }
+}

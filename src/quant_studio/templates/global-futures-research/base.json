@@ -1,0 +1,13 @@
+{
+  "mode": "replay",
+  "product": "DEMO",
+  "strategy": "nearby",
+  "roll_rule": "expiry",
+  "roll_days": 3,
+  "contracts": 1,
+  "initial_cash": 100000,
+  "fee_per_contract": 1,
+  "slippage_ticks": 1,
+  "start": "",
+  "end": ""
+}

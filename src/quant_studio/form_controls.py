@@ -72,7 +72,7 @@ def help_text(key):
     if key in {"symbols", "factors", "candidates"}:
         return "每行一个，或用英文逗号分隔。代码保留前导零。"
     if key in {"minimum_commission", "min_commission", "platform_fee", "initial_cash"}:
-        return "使用本次研究市场的计价币种；港股为港元。"
+        return "使用所选数据和合约的计价币种；不会自动换汇。"
     return ""
 
 

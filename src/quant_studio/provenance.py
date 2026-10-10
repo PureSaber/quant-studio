@@ -7,12 +7,12 @@ from pathlib import Path
 
 from quant_studio.datasets import DatasetStore, file_hash
 from quant_studio.recipes import _atomic
-from quant_studio.runtime import configured_python
+from quant_studio.runtime import template_python
 from quant_studio.settings import setting
 
 
 def capture(run_dir, template, snapshot, *, probe=False):
-    configured = configured_python(template.metadata.get("workspace_repo"))
+    configured = template_python(template)
     receipt = {
         "schema": "quant-studio.provenance/v1",
         "python": configured or sys.executable,
