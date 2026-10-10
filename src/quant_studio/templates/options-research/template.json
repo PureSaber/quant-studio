@@ -1,0 +1,217 @@
+{
+  "id": "options-research",
+  "title": "期权链与组合研究",
+  "summary": "选择明确的数据包和研究参数，生成行情分析、组合风险及可复查的账户回放。",
+  "kind": "external",
+  "workspace_repo": "quant-options",
+  "upstream_ref": "bda1d7702068176c0167b0246cdefe04969e4cc8",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "期权链与组合研究数据包目录",
+    "environment": "QUANT_OPTIONS_BUNDLE",
+    "required_files": [
+      "manifest.json",
+      "contracts.json",
+      "quotes.csv"
+    ]
+  },
+  "data_help": "先到“数据集”生成演示数据或登记真实数据包。DEMO 参数只适用于演示数据；真实研究须填写包内合约。缺少结算价、标的价格或规则时按预检提示补齐。",
+  "knobs": [
+    {
+      "name": "mode",
+      "label": "研究范围",
+      "default": "replay",
+      "path": "mode",
+      "type": "enum",
+      "choices": [
+        "replay",
+        "analysis"
+      ],
+      "choice_labels": {
+        "replay": "分析并回放账户",
+        "analysis": "只分析行情和风险"
+      }
+    },
+    {
+      "name": "initial_cash",
+      "label": "初始资金（合约币种）",
+      "default": 100000,
+      "path": "initial_cash",
+      "type": "int",
+      "minimum": 1,
+      "maximum": 1000000000
+    },
+    {
+      "name": "fee_per_contract",
+      "label": "每手单边手续费",
+      "default": 1.0,
+      "path": "fee_per_contract",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    {
+      "name": "slippage_ticks",
+      "label": "每次成交不利滑点（最小跳数）",
+      "default": 1,
+      "path": "slippage_ticks",
+      "type": "int",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "legs",
+      "label": "组合：合约 ID=手数，逗号分隔；负数表示卖出",
+      "default": "DEMO:M-C100=1,DEMO:M-P100=1",
+      "path": "legs",
+      "type": "text",
+      "max_length": 2000,
+      "pattern": "[^\\r\\n\\x00]{1,2000}"
+    },
+    {
+      "name": "rate",
+      "label": "年化无风险利率（0.03 表示 3%）",
+      "default": 0.03,
+      "path": "rate",
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1
+    },
+    {
+      "name": "dividend",
+      "label": "年化连续股息率",
+      "default": 0.0,
+      "path": "dividend",
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1
+    },
+    {
+      "name": "volatility",
+      "label": "无法反解 IV 时的情景波动率假设",
+      "default": 0.25,
+      "path": "volatility",
+      "type": "number",
+      "minimum": 0.001,
+      "maximum": 5
+    },
+    {
+      "name": "scenario_days",
+      "label": "情景向前天数",
+      "default": 7,
+      "path": "scenario_days",
+      "type": "int",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    {
+      "name": "close_before_expiry_days",
+      "label": "到期前停止持有的日历天数",
+      "default": 2,
+      "path": "close_before_expiry_days",
+      "type": "int",
+      "minimum": 1,
+      "maximum": 30
+    },
+    {
+      "name": "start",
+      "label": "回放开始日期（留空使用全部）",
+      "type": "text",
+      "pattern": "(?:\\d{4}-\\d{2}-\\d{2})?",
+      "max_length": 10,
+      "default": "",
+      "path": "start"
+    },
+    {
+      "name": "end",
+      "label": "回放结束日期（留空使用全部）",
+      "type": "text",
+      "pattern": "(?:\\d{4}-\\d{2}-\\d{2})?",
+      "max_length": 10,
+      "default": "",
+      "path": "end"
+    },
+    {
+      "name": "as_of",
+      "label": "分析时刻（带时区；留空为最新）",
+      "type": "text",
+      "pattern": "[^\\r\\n\\x00]{0,64}",
+      "max_length": 64,
+      "default": "",
+      "path": "as_of"
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "quant_options.cli",
+    "run",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_options.cli",
+    "preflight",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读验证数据身份、合约规则、研究范围及关键字段；不会生成交易或研究报告。",
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "nav.csv": "nav.csv",
+    "fills.csv": "fills.csv",
+    "positions.csv": "positions.csv",
+    "report.html": "report.html",
+    "study.json": "study.json",
+    "chain.csv": "chain.csv",
+    "portfolio_greeks.csv": "portfolio_greeks.csv",
+    "scenarios.csv": "scenarios.csv",
+    "ledger.csv": "ledger.csv",
+    "artifacts.json": "artifacts.json",
+    "surface.csv": "surface.csv",
+    "lifecycle.csv": "lifecycle.csv"
+  },
+  "nav_initial_value_key": "initial_cash",
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "仅研究和历史回放；合成数据、理论值和市场观察分别标明。费用与保证金使用明确假设，不证明真实成交或策略盈利。",
+  "preflight_contract": {
+    "schema_version": "qdk.derivatives.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "result_files_by_mode": {
+    "analysis": {
+      "report.html": "report.html",
+      "study.json": "study.json",
+      "chain.csv": "chain.csv",
+      "portfolio_greeks.csv": "portfolio_greeks.csv",
+      "scenarios.csv": "scenarios.csv",
+      "artifacts.json": "artifacts.json",
+      "surface.csv": "surface.csv"
+    }
+  }
+}

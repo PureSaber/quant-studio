@@ -10,6 +10,13 @@ from quant_studio import QuantStudioError
 from quant_studio.settings import current_settings
 
 
+def template_python(template):
+    """A research subproject may use a separate explicitly configured environment."""
+    return configured_python(
+        template.metadata.get("runtime_key") or template.metadata.get("workspace_repo")
+    )
+
+
 def configured_python(repository: str | None) -> str | None:
     profile = current_settings()
     if profile is not None and repository in profile["python_by_repo"]:

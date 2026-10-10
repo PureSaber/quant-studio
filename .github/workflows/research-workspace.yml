@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-data-kit
-          ref: 0dae9b570cf23ee4f8c1091699194b4ec03cb2da
+          ref: 902eb095f922429f327d7c713adde79a6787839c
           path: quant-data-kit
           persist-credentials: false
       - name: Install Studio and three independent locked runtimes
