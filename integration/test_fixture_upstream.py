@@ -25,7 +25,19 @@ import csv, json, sys
 from decimal import Decimal
 from pathlib import Path
 import pandas as pd
+import pyarrow.parquet as pq
 from quant_lab import load_and_validate_standard_run
+
+# These are individual fixture files. Finish reads and release file handles
+# before interpreter shutdown instead of starting a dataset scanner whose
+# background cleanup can outlive Python (apache/arrow#34314).
+def read_native(path, *, arrow_types=False):
+    with pq.ParquetFile(path, pre_buffer=False) as parquet:
+        return parquet.read(use_threads=False).to_pandas(
+            use_threads=False,
+            types_mapper=pd.ArrowDtype if arrow_types else None,
+        )
+
 run, view = map(Path, sys.argv[1:])
 manifest = load_and_validate_standard_run(run)
 native = run / 'standard/v2'
@@ -33,7 +45,7 @@ mapping = {'account':'portfolio_snapshots', 'positions':'positions',
            'orders':'orders', 'fills':'fills', 'margin':'margin',
            'costs':'costs', 'cash_ledger':'cash_ledger'}
 for target, source in mapping.items():
-    frame = pd.read_parquet(native / (source + '.parquet'), dtype_backend='pyarrow')
+    frame = read_native(native / (source + '.parquet'), arrow_types=True)
     with (view / (target + '.csv')).open(encoding='utf-8', newline='') as stream:
         projected = list(csv.DictReader(stream))
     assert len(projected) == len(frame)
@@ -49,7 +61,7 @@ for target, source in mapping.items():
                 if name in ['initial_margin', 'maintenance_margin']:
                     scale = 'margin_scale'
                 assert Decimal(row[name]) * 10 ** int(record[scale]) == int(value)
-snapshots = pd.read_parquet(native / 'portfolio_snapshots.parquet')
+snapshots = read_native(native / 'portfolio_snapshots.parquet')
 rows = [[row.event_time.isoformat(),
          str(Decimal(int(row.nav_units)).scaleb(-int(row.nav_scale)))]
         for row in snapshots.itertuples()]
