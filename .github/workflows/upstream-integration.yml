@@ -55,6 +55,14 @@ jobs:
         env:
           QUANT_UPSTREAM_REPO: ${{ github.workspace }}/${{ matrix.upstream.repo }}
         run: python -m pytest quant-studio/integration -k ${{ matrix.upstream.test }} -q
+      - name: Exercise real batch dispatch and resource accounting
+        if: matrix.upstream.test == 'crypto'
+        shell: bash
+        env:
+          QUANT_TEST_BATCH_SOURCE: ${{ github.workspace }}/quant-crypto-basis
+        run: |
+          export QUANT_TEST_BATCH_PYTHON="$(python -c 'import sys; print(sys.executable)')"
+          python -m pytest quant-studio/tests/test_batch_runtime.py -q
   timing:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15

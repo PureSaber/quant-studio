@@ -191,10 +191,49 @@ class DatasetStore:
         root = Path(item["path"])
         for name, digest in item["hashes"].items():
             path = root if name == "." else root / name
-            if not path.is_file() or file_hash(path) != digest:
+            if (
+                not path.resolve().is_relative_to(root.resolve())
+                or path.is_symlink()
+                or not path.is_file()
+                or file_hash(path) != digest
+            ):
                 problems.append(f"文件缺失或发生变化：{name}")
         try:
-            current = describe_input(item["template_id"], item["path"])
+            if item.get("kind") == "intake":
+                from quant_studio.intake_tools import IntakeWorkspace, _safe_directory
+
+                link = item["intake"]
+                _safe_directory(root)
+                arguments = ["--snapshot", str(root), "--purpose", link["purpose"]]
+                for key, value in link["scope"].items():
+                    if key not in {"columns", "symbols", "start", "end"}:
+                        raise QuantStudioError("登记范围包含未知字段")
+                    if value:
+                        arguments += [
+                            "--" + key,
+                            *(value if isinstance(value, list) else [value]),
+                        ]
+                result = IntakeWorkspace(self.runs_root).backend(
+                    "check-snapshot", arguments
+                )
+                checked = result.get("data") or {}
+                if (
+                    not result.get("ok")
+                    or not checked.get("allowed")
+                    or checked.get("version_id") != link["version"]
+                ):
+                    problems.append("已登记用途的数据准入复核失败")
+                for path in root.rglob("*"):
+                    _safe_directory(root, path.relative_to(root))
+                current = {
+                    "hashes": {
+                        p.relative_to(root).as_posix(): file_hash(p)
+                        for p in root.rglob("*")
+                        if p.is_file()
+                    }
+                }
+            else:
+                current = describe_input(item["template_id"], item["path"])
             if set(current["hashes"]) != set(item["hashes"]):
                 problems.append("数据文件集合发生变化，请登记新版本")
         except (OSError, ValueError, QuantStudioError) as exc:

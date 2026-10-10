@@ -16,6 +16,8 @@
 
 服务必须创建`BatchSupervisor(manager, store=BatchStore(root), profile=...)`。协调器扫描持久化活动批次，因此浏览器关闭后仍会推进“预检→运行→下一候选”。关闭服务时先`supervisor.close()`，再`manager.close()`。新服务的`owner_id`不同；它会读取被现有JobManager标为`interrupted`的旧Job并终结批次，不会自动派发剩余候选。用户需要显式选择失败项创建新attempt。
 
+首次派发会把该批次的环境配置保存到`.batch-profiles/<batch_id>.json`并记录摘要；后续预检、执行和重试复用这个配置。修改工作台设置不会改变正在进行的批次。需要改环境时创建新批次；Job记录保存`batch.profile_digest`。这冻结的是配置和路径，实际环境与输入内容仍由原生预检及运行记录核验。
+
 ## JobManager最小集成
 
 `job_manager_enqueue`兼容当前`JobManager.submit`，也会在签名支持时传递下面两个参数：

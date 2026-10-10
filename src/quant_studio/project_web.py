@@ -44,11 +44,14 @@ def catalog_body(root, query):
     for item in items:
         link = urlencode({"dataset": item["id"]})
         create = urlencode({"template": item["template_id"], "dataset": item["id"]})
+        destination = (
+            "/projects" if item.get("kind") == "intake" else f"/research/new?{create}"
+        )
         body += f"""<section class="panel"><h2><a href="/catalog?{link}">
 {escape(item["name"])}</a></h2><p>{escape(item["provider"])} ·
 {escape(str(item["start"]))}至{escape(str(item["end"]))}</p>
 <p>{escape(item["limits"])}</p>
-<a href="/research/new?{create}">用此数据创建方案</a>"""
+<a href="{destination}">用此数据开展研究</a>"""
         if selected:
             for name in item["hashes"]:
                 file_link = urlencode({"dataset": item["id"], "file": name})
@@ -191,6 +194,13 @@ def notebook_body(root, token, project):
     )
     body += f'''<form method="post" action="/projects/{identifier}/notebook-init">
 {csrf(token)}<input type="hidden" name="revision" value="{project["revision"]}">
+<label>新草稿起点<select name="template">
+<option value="">空白研究草稿</option>
+<option value="data-quality-exploration">这份数据能回答什么：分布、缺失与质量</option>
+<option value="price-return-missingness">价格收益与观测缺口</option>
+<option value="historical-financial-availability">历史财务数据何时真实可得</option>
+</select></label>
+<p>模板需要连接已通过对应用途检查的数据版本。已有草稿保留原代码。</p>
 <button class="btn">创建草稿或刷新数据上下文</button></form>'''
     try:
         link = store.lab_link(identifier)
@@ -337,12 +347,17 @@ class ProjectHandler:
                 self._redirect(f"/jobs/{job['job_id']}")
                 return
             if action in {"notebook-init", "notebook-run"}:
+                template = (
+                    field(data, "template", "") or None
+                    if action == "notebook-init"
+                    else None
+                )
                 if data:
                     raise QuantStudioError("未知Notebook字段")
                 project = store.get(identifier, revision)
                 notebooks = NotebookStore(self.runs_root)
                 if action == "notebook-init":
-                    notebooks.initialize(identifier, revision)
+                    notebooks.initialize(identifier, revision, template=template)
                     self._redirect(f"/projects/{identifier}")
                 else:
                     record = notebooks.prepare(identifier, revision)

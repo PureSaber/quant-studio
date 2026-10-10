@@ -32,6 +32,8 @@ def _start_http_server(tmp_path):
 
     class Server(ThreadingHTTPServer):
         def server_close(self):
+            if Handler.batch_supervisor is not None:
+                Handler.batch_supervisor.close()
             if Handler.job_manager is not None:
                 Handler.job_manager.close()
             super().server_close()

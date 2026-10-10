@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_studio import QuantStudioError
-from quant_studio.recipes import RecipeStore, recipe_template
+from quant_studio.recipes import RecipeStore, _atomic, recipe_template
 from quant_studio.templates import render_template
 
 SCHEMA = "quant-studio.research-batch/v1"
@@ -484,20 +484,33 @@ class BatchStore:
             ]
         )
         attempt[f"{phase}_dispatch_key"] = key
-        job = enqueue(
-            action=action,
-            recipe=copy.deepcopy(record["recipe"]),
-            knobs=copy.deepcopy(candidate["knobs"]),
-            snapshot=record["recipe"].get("snapshot"),
-            dispatch_key=key,
-            batch={
-                "batch_id": record["batch_id"],
-                "candidate_id": candidate["candidate_id"],
-                "attempt_no": attempt["attempt_no"],
-                "phase": phase,
-                "budget": copy.deepcopy(record["budget"]),
-            },
-        )
+        try:
+            job = enqueue(
+                action=action,
+                recipe=copy.deepcopy(record["recipe"]),
+                knobs=copy.deepcopy(candidate["knobs"]),
+                snapshot=record["recipe"].get("snapshot"),
+                dispatch_key=key,
+                batch={
+                    "batch_id": record["batch_id"],
+                    "candidate_id": candidate["candidate_id"],
+                    "attempt_no": attempt["attempt_no"],
+                    "phase": phase,
+                    "budget": copy.deepcopy(record["budget"]),
+                },
+            )
+        except (OSError, QuantStudioError) as exc:
+            # The queue write may have partially succeeded. Preserve uncertainty,
+            # stop automatic dispatch, and require an explicit new attempt.
+            attempt.update(status="interrupted", finished_at=_now())
+            attempt[f"{phase}_status"] = "interrupted"
+            attempt[f"{phase}_message"] = "派发中断，请核对任务记录：" + str(exc)
+            candidate["status"] = "interrupted"
+            for remaining in record["candidates"]:
+                if remaining["status"] == "prepared":
+                    remaining["status"] = "interrupted"
+            record["status"] = "interrupted"
+            return
         if not isinstance(job, dict) or not _JOB_ID.fullmatch(
             str(job.get("job_id", ""))
         ):
@@ -716,7 +729,38 @@ def job_manager_enqueue(manager, *, profile=None) -> Callable[..., dict]:
     supports_batch = "batch" in parameters
 
     def enqueue(**request) -> dict:
-        selected_profile = profile() if callable(profile) else profile
+        batch_id = request["batch"]["batch_id"]
+        if not _ID.fullmatch(batch_id):
+            raise QuantStudioError("批次配置标识无效")
+        directory = Path(manager.runs_root).resolve() / ".batch-profiles"
+        if directory.is_symlink() or (
+            directory.exists() and directory.resolve() != directory
+        ):
+            raise QuantStudioError("批次配置目录不可为链接")
+        path = directory / f"{batch_id}.json"
+        # BatchStore holds its process lock while dispatching. Freeze before the
+        # external queue write so retries retain the same environment identity.
+        if path.exists():
+            try:
+                frozen = json.loads(path.read_text(encoding="utf-8"))
+                if (
+                    path.is_symlink()
+                    or frozen["batch_id"] != batch_id
+                    or _digest(frozen["profile"]) != frozen["digest"]
+                ):
+                    raise ValueError("identity mismatch")
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise QuantStudioError("冻结批次配置完整性失败") from exc
+        else:
+            selected = copy.deepcopy(profile() if callable(profile) else profile)
+            frozen = {
+                "batch_id": batch_id,
+                "profile": selected,
+                "digest": _digest(selected),
+            }
+            directory.mkdir(parents=True, exist_ok=True)
+            _atomic(path, json.dumps(frozen, ensure_ascii=False, allow_nan=False))
+        selected_profile = frozen["profile"]
         options = {
             "snapshot": request["snapshot"],
             "profile": selected_profile,
@@ -725,7 +769,7 @@ def job_manager_enqueue(manager, *, profile=None) -> Callable[..., dict]:
         if supports_dispatch:
             options["dispatch_key"] = request["dispatch_key"]
         if supports_batch:
-            options["batch"] = request["batch"]
+            options["batch"] = {**request["batch"], "profile_digest": frozen["digest"]}
         return manager.submit(
             request["action"],
             request["recipe"]["template_id"],

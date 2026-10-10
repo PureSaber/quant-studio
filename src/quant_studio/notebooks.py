@@ -119,45 +119,54 @@ class NotebookStore:
             raise QuantStudioError("实验目录不可为链接")
         return directory
 
-    def initialize(self, identifier, revision=None):
+    def initialize(self, identifier, revision=None, template=None):
         project = ProjectStore(self.root).get(identifier, revision)
         directory = self.workspace(identifier)
         directory.mkdir(parents=True, exist_ok=True)
         draft = directory / "research.ipynb"
         # Refresh the input map explicitly without overwriting the user's code.
         context = self._context(project)
+        cells = None
+        if not draft.exists() and template:
+            from quant_studio.research_templates import notebook_cells
+
+            # Validate data-purpose compatibility before requiring a QDK runtime.
+            cells = notebook_cells(template, project, context)
+        if any(item.get("kind") == "intake" for item in context["datasets"]):
+            self._install_intake_reader(directory, context)
         _atomic(directory / "inputs.json", json.dumps(context, ensure_ascii=False))
         if draft.exists():
             return draft
-        cells = [
-            {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": project["question"],
-                "id": "question",
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "execution_count": None,
-                "outputs": [],
-                "id": "inputs",
-                "source": "import json\nfrom pathlib import Path\n"
-                "context = json.loads(\n"
-                '    Path("inputs.json").read_text(encoding="utf-8"))\n'
-                "context",
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "execution_count": None,
-                "outputs": [],
-                "id": "explore",
-                "source": "# 在这里编写数据探索、统计检验或绘图。\n"
-                '# 数据路径来自context["datasets"]，提交实验会复制已登记输入。\n'
-                'print("研究问题：", context["question"])',
-            },
-        ]
+        if cells is None:
+            cells = [
+                {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": project["question"],
+                    "id": "question",
+                },
+                {
+                    "cell_type": "code",
+                    "metadata": {},
+                    "execution_count": None,
+                    "outputs": [],
+                    "id": "inputs",
+                    "source": "import json\nfrom pathlib import Path\n"
+                    "context = json.loads(\n"
+                    '    Path("inputs.json").read_text(encoding="utf-8"))\n'
+                    "context",
+                },
+                {
+                    "cell_type": "code",
+                    "metadata": {},
+                    "execution_count": None,
+                    "outputs": [],
+                    "id": "explore",
+                    "source": "# 在这里编写数据探索、统计检验或绘图。\n"
+                    '# 数据路径来自context["datasets"]，提交实验会复制已登记输入。\n'
+                    'print("研究问题：", context["question"])',
+                },
+            ]
         _atomic(directory / "inputs.json", json.dumps(context, ensure_ascii=False))
         # Exclusive creation avoids overwriting a concurrent browser editor.
         with draft.open("x", encoding="utf-8") as stream:
@@ -169,28 +178,87 @@ class NotebookStore:
         return draft
 
     def _context(self, project):
+        from quant_studio.research_templates import research_quality_prompts
+
+        datasets = []
+        for identifier in project["datasets"]:
+            item = DatasetStore(self.root).get(identifier)
+            linked = {
+                "id": item["id"],
+                "name": item["name"],
+                "path": str(Path(item["path"]).parent)
+                if "." in item["hashes"]
+                else item["path"],
+                "identity": item["identity"],
+                "files": [
+                    Path(item["path"]).name if name == "." else name
+                    for name in item["hashes"]
+                ],
+                "hashes": dict(item["hashes"]),
+            }
+            if item.get("kind") == "intake":
+                linked.update(kind="intake", intake=item["intake"])
+            datasets.append(linked)
         return {
             "question": project["question"],
             "project_revision": project["revision"],
-            "datasets": [
-                {
-                    "id": item["id"],
-                    "name": item["name"],
-                    "path": str(Path(item["path"]).parent)
-                    if "." in item["hashes"]
-                    else item["path"],
-                    "identity": item["identity"],
-                    "files": [
-                        Path(item["path"]).name if n == "." else n
-                        for n in item["hashes"]
-                    ],
-                }
-                for item in (
-                    DatasetStore(self.root).get(identifier)
-                    for identifier in project["datasets"]
-                )
-            ],
+            "datasets": datasets,
+            "research_quality": research_quality_prompts(),
         }
+
+    def _install_intake_reader(self, directory, context, record=None):
+        from quant_studio.intake_tools import IntakeWorkspace
+        from quant_studio.notebook_data_reader import probe_python_environment
+
+        python, source_repo = IntakeWorkspace(self.root).runtime()
+        source_repo = Path(source_repo).resolve()
+        source_script = source_repo / "src/quant_data_kit/research_intake.py"
+        reader_source = Path(__file__).with_name("notebook_data_reader.py")
+        if (
+            source_script.is_symlink()
+            or not source_script.is_file()
+            or not source_script.resolve().is_relative_to(source_repo)
+        ):
+            raise QuantStudioError("QDK固定版本读取器不存在、越界或为链接")
+        names = {
+            "script": (source_script, directory / "qdk_research_intake.py"),
+            "reader": (reader_source, directory / "notebook_data_reader.py"),
+        }
+        for source, target in names.values():
+            if target.is_symlink():
+                raise QuantStudioError("Notebook固定读取器目标不可为链接")
+            before = file_hash(source)
+            shutil.copyfile(source, target)
+            if file_hash(source) != before or file_hash(target) != before:
+                raise QuantStudioError("冻结Notebook数据读取器期间源码发生变化")
+        try:
+            environment = probe_python_environment(str(Path(python).resolve()))
+        except RuntimeError as exc:
+            raise QuantStudioError(str(exc)) from exc
+        identity = {
+            "schema": "quant-studio.notebook-intake-runtime/v1",
+            "python": str(Path(python).resolve()),
+            "environment": environment,
+            "source_repo": str(source_repo),
+            "script_sha256": file_hash(directory / "qdk_research_intake.py"),
+            "reader_sha256": file_hash(directory / "notebook_data_reader.py"),
+        }
+        _atomic(
+            directory / "qdk-environment.json",
+            json.dumps(identity, ensure_ascii=False, sort_keys=True),
+        )
+        context["intake_runtime"] = {
+            **identity,
+            "script": "qdk_research_intake.py",
+            "reader": "notebook_data_reader.py",
+        }
+        if record is not None:
+            for name in (
+                "qdk_research_intake.py",
+                "notebook_data_reader.py",
+                "qdk-environment.json",
+            ):
+                record["hashes"][name] = file_hash(directory / name)
 
     def lab_link(self, identifier):
         self.workspace(identifier)
@@ -270,6 +338,8 @@ class NotebookStore:
                     Path(registered["path"]).name if n == "." else n
                     for n in item["files"]
                 ]
+            if any(item.get("kind") == "intake" for item in context["datasets"]):
+                self._install_intake_reader(directory, context, record)
             _atomic(directory / "inputs.json", json.dumps(context, ensure_ascii=False))
             for name in (
                 "source.ipynb",

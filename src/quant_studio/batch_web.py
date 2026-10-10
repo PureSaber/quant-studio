@@ -423,12 +423,12 @@ def _display(value) -> str:
 
 def _csv_cell(value):
     text = _display(value)
-    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
+    return "'" + text if text.lstrip().startswith(("=", "+", "-", "@")) else text
 
 
 def _job_link(attempt: dict | None, phase: str) -> str:
     if not attempt or not attempt.get(f"{phase}_job_id"):
-        return "未创建"
+        return escape((attempt or {}).get(f"{phase}_message") or "未创建")
     job_id = attempt[f"{phase}_job_id"]
     return f'<a href="/jobs/{job_id}"><code>{escape(job_id[:12])}</code></a>'
 

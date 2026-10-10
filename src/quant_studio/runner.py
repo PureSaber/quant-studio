@@ -348,6 +348,8 @@ def run(
     if factors is not None:
         apply_factor_selection(rendered.config, loaded, factors)
     identifier, run_dir = _create_run_dir(runs_root, run_id)
+    if control is not None and hasattr(control, "attach_output"):
+        control.attach_output(run_dir)
     _isolate_outputs(loaded, rendered.config, run_dir)
     _resolve_input_paths(loaded, rendered.config)
     selected_snapshot = _snapshot_path(loaded, snapshot)
@@ -663,6 +665,8 @@ def preflight(
     prepared = preview(
         loaded, knobs, factors=factors, snapshot=snapshot, runs_root=runs_root
     )
+    if control is not None and hasattr(control, "attach_output"):
+        control.attach_output(prepared.run_dir)
     saved_request = json.loads(
         (prepared.run_dir / "request.json").read_text(encoding="utf-8")
     )
