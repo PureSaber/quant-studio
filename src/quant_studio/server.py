@@ -48,6 +48,7 @@ from quant_studio.nav import (
     parse_nav_csv,
     validate_comparison,
 )
+from quant_studio.project_web import ProjectHandler
 from quant_studio.recipes import RecipeStore, recipe_template
 from quant_studio.research_panel import load_timing_view, timing_panel
 from quant_studio.research_web import ResearchHandler
@@ -429,6 +430,13 @@ def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str
         else ""
     )
     log = manager.read_log(job_id)
+    for key, route in (("notebook", "notebook"), ("assistant", "advice")):
+        if job.get(key):
+            item = job[key]
+            run_link += (
+                f'<p><a href="/projects/{escape(item["project_id"])}/{route}/'
+                f'{escape(item["id"])}">打开项目实验记录</a></p>'
+            )
     body = f"""{refresh}<header class="page-head"><p class="kicker">任务</p>
 <h1>{escape(str(job.get("template_id", "")))}</h1>
 <p class="lede">{escape(_STATUS.get(job["status"], job["status"]))}</p></header>
@@ -1066,6 +1074,14 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
 
 def _job_executor(runs_root: Path):
     def execute(job, control):
+        if job["action"] == "assistant":
+            from quant_studio.project_assistant import AssistantStore
+
+            return AssistantStore(runs_root).execute(job["assistant"], control)
+        if job["action"] == "notebook":
+            from quant_studio.notebooks import NotebookStore
+
+            return NotebookStore(runs_root).execute(job["notebook"], control)
         if job["action"] == "collect":
             from quant_studio.datasets import collect_dataset
 
@@ -1087,6 +1103,14 @@ def _job_executor(runs_root: Path):
         )
         if job["action"] == "check":
             return preflight(template, job["knobs"], **options)
+        if (
+            job["action"] == "workflow"
+            and load_template(job["template_id"]).kind != "synthetic"
+        ):
+            checked = preflight(template, job["knobs"], **options)
+            if checked.status != "checked":
+                return checked
+            control.stage("executing", "预检通过，开始运行已保存方案")
         return run(template, job["knobs"], execute=True, **options)
 
     return execute
@@ -1172,7 +1196,11 @@ def serve(
 
 
 class _Handler(
-    AccessHandler, ResearchHandler, WorkbenchHandler, BaseHTTPRequestHandler
+    AccessHandler,
+    ResearchHandler,
+    WorkbenchHandler,
+    ProjectHandler,
+    BaseHTTPRequestHandler,
 ):
     runs_root = Path("runs")
     csrf_token = ""
@@ -1198,9 +1226,13 @@ class _Handler(
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path in {"/datasets", "/experiments", "/operations"} or path.startswith(
-                "/experiments/"
-            ):
+            if path in {"/projects", "/catalog"} or path.startswith("/projects/"):
+                self._project_get(path)
+            elif path in {
+                "/datasets",
+                "/experiments",
+                "/operations",
+            } or path.startswith("/experiments/"):
                 self._workbench_get(path)
             elif path == "/research" or path.startswith("/research/"):
                 self._research_get(path)
@@ -1305,6 +1337,7 @@ class _Handler(
             path.startswith("/templates/")
             or path.startswith("/research/")
             or path.startswith("/datasets/")
+            or path.startswith("/projects/")
             or (path.startswith("/experiments/") and path.endswith("/note"))
             or path == "/setup"
             or (path.startswith("/jobs/") and path.endswith("/cancel"))
@@ -1327,13 +1360,13 @@ class _Handler(
             if content_type.lower() != "application/x-www-form-urlencoded":
                 raise QuantStudioError("请求类型不受支持")
             length = int(lengths[0])
-            limit = 262_144 if path.startswith("/research/") else 64_000
+            limit = 262_144 if path.startswith(("/research/", "/projects/")) else 64_000
             if length < 0 or length > limit:
                 raise QuantStudioError("请求过大")
             data = parse_qs(
                 self.rfile.read(length).decode("utf-8"),
                 keep_blank_values=path.startswith(
-                    ("/research/", "/datasets/", "/experiments/")
+                    ("/research/", "/datasets/", "/experiments/", "/projects/")
                 ),
             )
             submitted_token = data.pop("_csrf_token", [])
@@ -1342,6 +1375,9 @@ class _Handler(
                 return
             if path.startswith("/research/"):
                 self._research_post(path, data)
+                return
+            if path.startswith("/projects/"):
+                self._project_post(path, data)
                 return
             if path.startswith(("/datasets/", "/experiments/")):
                 self._workbench_post(path, data)
@@ -2053,6 +2089,8 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("environment", "环境", "/environment"),
         ("data", "数据", "/data"),
         ("datasets", "数据集", "/datasets"),
+        ("catalog", "数据目录", "/catalog"),
+        ("projects", "研究项目", "/projects"),
         ("research", "研究方案", "/research"),
         ("experiments", "实验笔记", "/experiments"),
         ("strategy", "策略", "/strategy"),
