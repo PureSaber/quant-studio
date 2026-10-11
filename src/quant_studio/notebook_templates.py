@@ -3,13 +3,14 @@
 import json
 import math
 import re
+import shutil
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 from quant_studio import QuantStudioError
 from quant_studio.notebooks import NotebookStore, _notebook
-from quant_studio.projects import ProjectStore, digest
+from quant_studio.projects import _LOCK, ProjectStore, digest
 from quant_studio.recipes import _atomic
 
 _ID = re.compile(r"[a-f0-9]{32}\Z")
@@ -97,6 +98,12 @@ def parameter_schema(schema):
         }:
             raise QuantStudioError("不支持的参数类型")
         for bound in ("min", "max"):
+            if (
+                bound in spec
+                and spec["type"] == "integer"
+                and type(spec[bound]) is not int
+            ):
+                raise QuantStudioError("整数参数的上下限必须为整数")
             if bound in spec and (
                 spec["type"] not in {"integer", "number"}
                 or type(spec[bound]) not in (int, float)
@@ -160,6 +167,8 @@ class NotebookTemplateStore:
             if path.is_symlink() or path.stat().st_size > 3_000_000:
                 raise QuantStudioError("模板文件无效")
             value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                raise QuantStudioError("模板文档必须为对象")
             if value.get("id") != identifier or value.get("revision") != digest(
                 {k: v for k, v in value.items() if k != "revision"}
             ):
@@ -221,27 +230,53 @@ class NotebookTemplateStore:
         if template["revision"] != revision:
             raise QuantStudioError("模板版本不匹配，请刷新页面")
         values = parameter_values(template["parameters"], values)
-        project = ProjectStore(self.root).save(
-            name, template["question"], datasets=datasets
-        )
-        store = NotebookStore(self.root)
-        workspace = store.workspace(project["id"])
-        workspace.mkdir(parents=True)
-        binding = {
-            "template": {
-                "id": identifier,
-                "revision": revision,
-                "name": template["name"],
-            },
-            "parameters": values,
-        }
-        _atomic(workspace / "template.json", json.dumps(binding, ensure_ascii=False))
-        _atomic(
-            workspace / "research.ipynb",
-            json.dumps(template["notebook"], ensure_ascii=False),
-        )
-        store.initialize(project["id"], project["revision"])
-        return project
+        for container in (".projects", ".notebooks"):
+            path = self.root / container
+            if path.resolve() != path:
+                raise QuantStudioError("新研究的存储目录不可为链接")
+        # A failed creation is not a published project. Serialize project writes
+        # while creating its draft, and only roll back this newly allocated ID.
+        with _LOCK:
+            projects = ProjectStore(self.root)
+            project = projects.save(name, template["question"], datasets=datasets)
+            owned = [self.root / c / project["id"] for c in (".notebooks", ".projects")]
+            try:
+                store = NotebookStore(self.root)
+                workspace = store.workspace(project["id"])
+                workspace.mkdir(parents=True)
+                binding = {
+                    "template": {
+                        "id": identifier,
+                        "revision": revision,
+                        "name": template["name"],
+                    },
+                    "parameters": values,
+                }
+                _atomic(
+                    workspace / "template.json", json.dumps(binding, ensure_ascii=False)
+                )
+                _atomic(
+                    workspace / "research.ipynb",
+                    json.dumps(template["notebook"], ensure_ascii=False),
+                )
+                store.initialize(project["id"], project["revision"])
+            except Exception:
+                # Refuse cleanup if another process has edited the new project or
+                # redirected a directory; never delete outside the original root.
+                if projects.get(project["id"])["revision"] != project["revision"]:
+                    raise QuantStudioError(
+                        "初始化失败，但新项目已被修改，已保留：" + project["id"]
+                    ) from None
+                for path in owned:
+                    if path.resolve() != path or not path.is_relative_to(self.root):
+                        raise QuantStudioError(
+                            "初始化失败，新项目目录已改变，未执行清理"
+                        ) from None
+                for path in owned:
+                    if path.exists():
+                        shutil.rmtree(path)
+                raise
+            return project
 
     def binding(self, project_id):
         path = NotebookStore(self.root).workspace(project_id) / "template.json"

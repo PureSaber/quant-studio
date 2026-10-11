@@ -86,6 +86,37 @@ def completed_record(root, project, metrics, *, status="succeeded"):
     return project["id"] + ":" + record["id"]
 
 
+@pytest.mark.parametrize(
+    "component",
+    [
+        "executor.py",
+        "qdk_research_intake.py",
+        "notebook_data_reader.py",
+        "qdk-environment.json",
+    ],
+)
+def test_comparison_reports_frozen_execution_component_drift(
+    tmp_path, monkeypatch, component
+):
+    configure(tmp_path, monkeypatch)
+    project, _, _ = saved_template(tmp_path)
+    first = completed_record(tmp_path, project, {"样本数": metric(1)})
+    second = completed_record(tmp_path, project, {"样本数": metric(2)})
+    store = NotebookStore(tmp_path)
+    for ref, content in ((first, "旧版本"), (second, "新版本")):
+        run_id = ref.split(":")[1]
+        record = store.get(project["id"], run_id)
+        directory = store.directory(project["id"], run_id)
+        (directory / component).write_text(content, encoding="utf-8")
+        record["hashes"][component] = file_hash(directory / component)
+        store._save(directory, record)
+    result = compare_notebooks(tmp_path, [first, second])
+    assert result["records"][0]["code"] == result["records"][1]["code"]
+    assert result["records"][0]["environment"] == result["records"][1]["environment"]
+    assert any("执行器、读取器或读取环境不同" in w for w in result["warnings"])
+    assert component in comparison_csv(result).decode("utf-8-sig")
+
+
 def test_comparison_preserves_conditions_units_missing_failure_and_integrity(
     tmp_path, monkeypatch
 ):

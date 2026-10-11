@@ -85,6 +85,12 @@ def compare_notebooks(root, references):
         environment = record["hashes"].get("requested-environment.json", "未记录")
         # Do not let executable code drift hide behind the name of a saved template.
         code = record["hashes"]["source.ipynb"]
+        components = {
+            name: value
+            for name, value in record["hashes"].items()
+            if name not in {"source.ipynb", "inputs.json", "requested-environment.json"}
+            and not name.startswith("inputs/")
+        }
         datasets = [
             {k: d.get(k) for k in ("id", "identity", "scope")}
             for d in context["datasets"]
@@ -100,6 +106,8 @@ def compare_notebooks(root, references):
                 "metrics": metrics,
                 "code": code,
                 "environment": environment,
+                "execution_components": components,
+                "execution_signature": digest(components),
                 "data_signature": digest(datasets),
                 "created_at": record["created_at"],
             }
@@ -108,6 +116,7 @@ def compare_notebooks(root, references):
     for key, message in (
         ("code", "执行代码不同"),
         ("environment", "运行环境不同"),
+        ("execution_signature", "执行器、读取器或读取环境不同"),
         ("data_signature", "数据版本或登记范围不同"),
     ):
         if len({r[key] for r in records}) > 1:
@@ -210,6 +219,7 @@ def condition_rows(comparison, *, compact=False):
         ],
         ["执行代码SHA-256", *[r["code"] for r in records]],
         ["环境SHA-256", *[r["environment"] for r in records]],
+        ["冻结执行组件SHA-256", *[encoded(r["execution_components"]) for r in records]],
         ["提交时间", *[r["created_at"] for r in records]],
     ]
 

@@ -139,3 +139,72 @@ def test_builtin_templates_can_be_saved_and_declare_metrics(tmp_path, monkeypatc
     source = "\n".join("".join(c["source"]) for c in saved["notebook"]["cells"])
     assert item["id"] not in source
     assert "research_metrics" in source
+
+
+def test_failed_template_initialization_leaves_no_project_or_draft(
+    tmp_path, monkeypatch
+):
+    original, draft, template = saved_template(tmp_path)
+    before = draft.read_bytes()
+
+    def fail_initialize(self, identifier, revision=None, template=None):
+        assert (self.workspace(identifier) / "template.json").is_file()
+        raise QuantStudioError("QDK环境不可用")
+
+    monkeypatch.setattr(NotebookStore, "initialize", fail_initialize)
+    with pytest.raises(QuantStudioError, match="QDK环境不可用"):
+        NotebookTemplateStore(tmp_path).instantiate(
+            template["id"], template["revision"], "创建失败", [], {}
+        )
+    assert [p["id"] for p in ProjectStore(tmp_path).list()] == [original["id"]]
+    assert [p.name for p in (tmp_path / ".notebooks").iterdir()] == [original["id"]]
+    assert draft.read_bytes() == before
+    assert NotebookTemplateStore(tmp_path).get(template["id"]) == template
+
+
+def test_corrupt_template_document_returns_domain_error(tmp_path):
+    _, _, template = saved_template(tmp_path)
+    path = tmp_path / ".notebook-templates" / f"{template['id']}.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(QuantStudioError):
+        NotebookTemplateStore(tmp_path).get(template["id"])
+
+
+@pytest.mark.parametrize("bound", ["min", "max"])
+def test_integer_bounds_reject_fractional_form_step_base(bound):
+    # HTML number inputs use min as their step base. min=0.5 with step=1
+    # otherwise makes every integer invalid in the browser despite server acceptance.
+    schema = {
+        "window": {
+            "label": "窗口",
+            "type": "integer",
+            "default": 1,
+            bound: 0.5 if bound == "min" else 2.5,
+        }
+    }
+    with pytest.raises(QuantStudioError, match="整数参数"):
+        parameter_values(schema, {})
+
+
+def test_failed_initialization_preserves_concurrent_edit(tmp_path, monkeypatch):
+    original, _, template = saved_template(tmp_path)
+    changed = []
+
+    def edit_then_fail(self, identifier, revision=None, template=None):
+        changed.append(
+            ProjectStore(tmp_path).save(
+                "另一次编辑", "保留新输入", project_id=identifier, expected=revision
+            )
+        )
+        raise QuantStudioError("初始化失败")
+
+    monkeypatch.setattr(NotebookStore, "initialize", edit_then_fail)
+    with pytest.raises(QuantStudioError, match="已被修改，已保留"):
+        NotebookTemplateStore(tmp_path).instantiate(
+            template["id"], template["revision"], "新研究", [], {}
+        )
+    assert {p["id"] for p in ProjectStore(tmp_path).list()} == {
+        original["id"],
+        changed[0]["id"],
+    }
+    assert ProjectStore(tmp_path).get(changed[0]["id"])["name"] == "另一次编辑"
