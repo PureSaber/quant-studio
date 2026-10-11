@@ -52,6 +52,10 @@ from quant_studio.nav import (
     parse_nav_csv,
     validate_comparison,
 )
+from quant_studio.platform_status_web import (
+    capture_process_identity,
+    platform_status_body,
+)
 from quant_studio.project_web import ProjectHandler
 from quant_studio.recipes import RecipeStore, recipe_template
 from quant_studio.research_batches import BatchStore, BatchSupervisor
@@ -1240,6 +1244,7 @@ def serve(
         else root / "studio-settings.json"
     )
     Handler.csrf_token = secrets.token_urlsafe(32)
+    Handler.process_identity = capture_process_identity()
     server = ThreadingHTTPServer((host, port), Handler)
     try:
         if context is not None:
@@ -1298,6 +1303,7 @@ class _Handler(
     settings_store = None
     job_manager = None
     reconciliation_store = None
+    process_identity = None
     _services_lock = threading.RLock()
 
     def setup(self):
@@ -1391,6 +1397,14 @@ class _Handler(
                 self._send_html(render_backtest(self.runs_root))
             elif path == "/results":
                 self._send_html(render_results(self.runs_root))
+            elif path == "/platform-status":
+                self._send_html(
+                    _layout(
+                        "平台版本与验收",
+                        platform_status_body(self.runs_root, self.process_identity),
+                        "platform-status",
+                    )
+                )
             elif path == "/environment":
                 self._send_html(render_environment())
             elif path == "/setup" and self.settings_store is not None:
@@ -2330,6 +2344,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("onboarding", "开始研究", "/onboarding"),
         ("setup", "首次配置", "/setup"),
         ("environment", "环境", "/environment"),
+        ("platform-status", "版本与验收", "/platform-status"),
         ("data", "数据", "/data"),
         ("datasets", "数据集", "/datasets"),
         ("catalog", "数据目录", "/catalog"),

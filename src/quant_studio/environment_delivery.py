@@ -15,6 +15,7 @@ from quant_studio.projects import digest
 from quant_studio.recipes import _atomic
 
 ACTIONS = {
+    "platform-status": "核对平台版本与验收",
     "doctor": "检查环境缺口",
     "prepare-preview": "预览候选安装",
     "prepare": "安装到新目录",
@@ -132,7 +133,31 @@ class DeliveryStore:
             config["source_root"],
         ]
         files = [config_path, Path(config["workspace_config"])]
-        if action == "doctor":
+        if action == "platform-status":
+            argv += [
+                "platform-status",
+                "--source-root",
+                config["source_root"],
+                "--profile",
+                config["profile"],
+                "--state-dir",
+                config["state_dir"],
+            ]
+            files.append(Path(config["profile"]))
+            if name:
+                target = config.get("candidates", {}).get(name)
+                if not target:
+                    raise QuantStudioError("请选择已配置候选")
+                argv += [
+                    "--candidate",
+                    target["candidate"],
+                    "--evidence",
+                    target["evidence"],
+                    "--prepared-root",
+                    target["prepared_root"],
+                ]
+                files.extend([Path(target["candidate"]), Path(target["evidence"])])
+        elif action == "doctor":
             argv += ["doctor", "--profile", config["profile"]]
             files.append(Path(config["profile"]))
         elif action.endswith("transfer"):
