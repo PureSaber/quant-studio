@@ -13,6 +13,10 @@ from quant_studio import QuantStudioError
 DATE_COLUMNS = ("date", "trade_date", "datetime", "dt", "session")
 VALUE_COLUMNS = ("nav", "equity", "capital", "net_value", "value")
 TABLE_FILES = {
+    "fixed_cashflows.csv",
+    "floating_cashflows.csv",
+    "quote_repricing.csv",
+    "exposure.csv",
     "positions.csv",
     "holdings.csv",
     "orders.csv",
@@ -31,6 +35,17 @@ TABLE_FILES = {
     "rolls.csv",
     "ledger.csv",
     "lifecycle.csv",
+    "cashflows.csv",
+    "basis.csv",
+    "reference_prices.csv",
+    "valuations.csv",
+    "rate_futures.csv",
+    "etfs.csv",
+    "components.csv",
+    "settlements.csv",
+    "signals.csv",
+    "reference.csv",
+    "coverage.csv",
 }
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 

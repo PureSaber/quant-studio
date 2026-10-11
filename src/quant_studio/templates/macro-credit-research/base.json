@@ -1,0 +1,11 @@
+{
+  "line": "credit",
+  "as_of": "2026-01-05T17:00:00+00:00",
+  "settlement": "2026-01-05",
+  "max_quote_age_days": 3,
+  "max_curve_age_days": 3,
+  "max_holdings_age_days": 31,
+  "stale_policy": "reject",
+  "model_spread": 0.01,
+  "shock_bp": 100
+}

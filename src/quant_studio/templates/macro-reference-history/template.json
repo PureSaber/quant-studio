@@ -1,0 +1,100 @@
+{
+  "id": "macro-reference-history",
+  "title": "公开外汇与国债历史",
+  "summary": "历史输入预检、研究计算和可复算结果。",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "runtime_key": "quant-macro",
+  "upstream_ref": "320e31fd801d5c744fbc56e2e9c4a984f31bc61b",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "公开外汇与国债历史数据包",
+    "environment": "QUANT_MACRO_REFERENCE_HISTORY_BUNDLE",
+    "required_files": [
+      "manifest.json",
+      "data.json"
+    ]
+  },
+  "data_help": "使用 import-public 或 download-public 导入 ECB 汇率、美联储 GSW 零息曲线或 iShares 持仓。参考数据只做历史诊断，不能作为成交报价。",
+  "knobs": [
+    {
+      "name": "series",
+      "path": "series",
+      "label": "序列 ID（空白表示全部）",
+      "default": "",
+      "type": "text",
+      "max_length": 200,
+      "pattern": "[^\\r\\n\\x00]{0,200}"
+    },
+    {
+      "name": "start",
+      "path": "start",
+      "label": "起始日期",
+      "default": "2025-01-01",
+      "type": "date"
+    },
+    {
+      "name": "shock_bp",
+      "path": "shock_bp",
+      "label": "曲线冲击（基点）",
+      "default": 100,
+      "type": "number",
+      "minimum": -1000,
+      "maximum": 1000
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "run",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "preflight",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查可知时刻、计价单位、现金流、曲线范围及完整研究窗口。",
+  "preflight_contract": {
+    "schema_version": "quant.macro.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "reference.csv": "reference.csv",
+    "coverage.csv": "coverage.csv",
+    "study.json": "study.json",
+    "report.html": "report.html",
+    "artifacts.json": "artifacts.json"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "离线研究与模型估值；不表示真实可成交、市场数据认证或实盘接入。具体计息、报价、到期和模型适用边界见报告及数据规范。"
+}

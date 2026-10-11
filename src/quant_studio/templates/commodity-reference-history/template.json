@@ -1,0 +1,76 @@
+{
+  "id": "commodity-reference-history",
+  "title": "全球商品公开参考行情",
+  "summary": "原油、天然气、金属及农产品连续参考历史；保留真实合约缺口",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "upstream_ref": "0b63a58b271b84d975a3fb6e5e433bae4384c63e",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "全球商品公开参考行情数据目录",
+    "environment": "QUANT_COMMODITY_REFERENCE_HISTORY_INPUT",
+    "required_files": [
+      "study.json",
+      "reference_prices.csv",
+      "artifacts.json"
+    ]
+  },
+  "knobs": [],
+  "argv": [
+    "python",
+    "-m",
+    "qfs_global.workbench",
+    "run",
+    "--kind",
+    "reference",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "qfs_global.workbench",
+    "preflight",
+    "--kind",
+    "reference",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查完整数据与账户路径",
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "reference_prices.csv": "reference_prices.csv",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json",
+    "report.html": "report.html"
+  },
+  "report_name": "report.html",
+  "disclaimer": "仅研究；真实资料、合成案例及市场参考分别标记。借券和保证金使用显式假设。",
+  "runtime_key": "quant-futures-global",
+  "preflight_contract": {
+    "schema_version": "qdk.derivatives.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows"
+    ],
+    "instrument_ids_required": true
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "retrospective_reference"
+    ]
+  },
+  "integration_job": "research-extensions"
+}
