@@ -1,0 +1,33 @@
+name: Macro research integration
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  macro:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: quant-studio
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-futures-spread
+          ref: 320e31fd801d5c744fbc56e2e9c4a984f31bc61b
+          path: quant-futures-spread
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --no-deps -r quant-futures-spread/international/requirements.lock
+      - run: python -m pip install --no-deps --no-build-isolation -e quant-futures-spread/macro -e quant-futures-spread/international -e quant-studio
+      - run: python -m pip check
+      - name: Exercise actual dispatcher and independent interpreters
+        shell: bash
+        run: |
+          python quant-studio/scripts/integration_macro.py --workspace "$PWD" --python "$(python -c 'import sys; print(sys.executable)')" --output macro-acceptance --futures
