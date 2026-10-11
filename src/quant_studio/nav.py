@@ -36,6 +36,10 @@ TABLE_FILES = {
     "rate_futures.csv",
     "etfs.csv",
     "components.csv",
+    "settlements.csv",
+    "signals.csv",
+    "reference.csv",
+    "coverage.csv",
 }
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 

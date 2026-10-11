@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--python", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--public-root", type=Path)
+    parser.add_argument("--futures", action="store_true")
     args = parser.parse_args()
     workspace, python, output = (
         args.workspace.resolve(),
@@ -37,18 +39,55 @@ def main():
     profile = empty_profile()
     profile["environment"]["QUANT_WORKSPACE_ROOT"] = str(workspace)
     profile["python_by_repo"]["quant-macro"] = str(python)
+    profile["python_by_repo"]["quant-macro-futures"] = str(python)
     validate_shape(profile)
     receipts = []
+    cases = [
+        ("macro-fx-research", {"instrument": "spot"}, bundle, "quant_macro.cli"),
+        ("macro-fx-research", {"instrument": "forward"}, bundle, "quant_macro.cli"),
+        ("macro-rates-research", {}, bundle, "quant_macro.cli"),
+        ("macro-credit-research", {}, bundle, "quant_macro.cli"),
+        ("macro-fx-portfolio", {}, bundle, "quant_macro.cli"),
+        ("macro-bond-replay", {}, bundle, "quant_macro.cli"),
+        ("macro-etf-relative-value", {}, bundle, "quant_macro.cli"),
+    ]
+    if args.public_root:
+        for provider in ["ecb", "fed"]:
+            cases.append(
+                (
+                    "macro-reference-history",
+                    {},
+                    args.public_root.resolve() / f"{provider}-bundle",
+                    "quant_macro.cli",
+                )
+            )
+    if args.futures:
+        for product in ["6E", "ZN", "SR3", "TS", "TF", "T", "TL"]:
+            location = output / f"synthetic-{product}"
+            subprocess.run(
+                [
+                    str(python),
+                    "-I",
+                    "-c",
+                    "from quant_macro.futures_demo import create; import sys; "
+                    "create(sys.argv[1],sys.argv[2])",
+                    str(location),
+                    product,
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            template = (
+                "fx-futures-research" if product == "6E" else "rates-futures-research"
+            )
+            cases.append(
+                (template, {"product": product}, location, "quant_macro.futures_cli")
+            )
     with use_settings(profile):
-        for line, knobs in [
-            ("fx", {"instrument": "spot"}),
-            ("fx", {"instrument": "forward"}),
-            ("rates", {}),
-            ("credit", {}),
-        ]:
-            template = f"macro-{line}-research"
+        for template, knobs, snapshot, module in cases:
             check = preflight(
-                template, knobs, snapshot=bundle, runs_root=output / "preflights"
+                template, knobs, snapshot=snapshot, runs_root=output / "preflights"
             )
             if check.status != "checked":
                 raise RuntimeError(f"preflight failed: {check.as_json()}")
@@ -56,7 +95,7 @@ def main():
                 template,
                 knobs,
                 execute=True,
-                snapshot=bundle,
+                snapshot=snapshot,
                 runs_root=output / "runs",
             )
             if result.status != "succeeded":
@@ -66,7 +105,7 @@ def main():
                     str(python),
                     "-I",
                     "-m",
-                    "quant_macro.cli",
+                    module,
                     "verify",
                     "--output",
                     str(result.run_dir / "strategy-output"),
@@ -74,7 +113,7 @@ def main():
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
             receipts.append(
                 {
@@ -88,7 +127,14 @@ def main():
     (output / "receipts.json").write_text(
         json.dumps(receipts, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(json.dumps({"passed": len(receipts), "evidence_kind": "synthetic"}))
+    print(
+        json.dumps(
+            {
+                "passed": len(receipts),
+                "evidence_kinds": sorted({r["run"]["evidence_kind"] for r in receipts}),
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

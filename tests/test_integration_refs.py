@@ -19,6 +19,11 @@ def test_template_revisions_match_the_public_integration_matrix():
     tested["quant-timing"] = timing["ref"]
     derivatives = workflow["jobs"]["derivatives"]["steps"][1]["with"]
     tested["quant-futures-global"] = derivatives["ref"]
+    macro = yaml.safe_load(
+        (root / ".github/workflows/macro-integration.yml").read_text()
+    )["jobs"]["macro"]["steps"][1]["with"]["ref"]
+    tested["quant-macro"] = macro
+    tested["quant-macro-futures"] = macro
     for name in template_ids():
         template = load_template(name)
         if template.kind == "synthetic":

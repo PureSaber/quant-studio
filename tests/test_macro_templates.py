@@ -22,11 +22,29 @@ def test_macro_templates_have_explicit_native_contract_and_distinct_inputs(line)
 
 
 @pytest.mark.parametrize("name", ["fx-futures-research", "rates-futures-research"])
-def test_futures_presets_reuse_existing_engine_and_dependency_revision(name):
+def test_futures_presets_gate_real_product_units_before_existing_engine(name):
     template = load_template(name)
     existing = load_template("global-futures-research")
-    assert template.argv == existing.argv
-    assert template.preflight_argv == existing.preflight_argv
-    assert template.runtime_key == existing.runtime_key
-    assert template.upstream_ref == existing.upstream_ref
-    assert render_template(template).config == render_template(existing).config
+    assert "quant_macro.futures_cli" in template.argv
+    assert "quant_macro.futures_cli" in template.preflight_argv
+    assert template.runtime_key == "quant-macro-futures"
+    assert template.preflight_contract == existing.preflight_contract
+    assert render_template(template).config["product"] in {"6E", "ZN"}
+
+
+@pytest.mark.parametrize(
+    "name,line",
+    [
+        ("macro-fx-portfolio", "fx_portfolio"),
+        ("macro-bond-replay", "bond_replay"),
+        ("macro-etf-relative-value", "bond_replay"),
+        ("macro-reference-history", "reference_history"),
+    ],
+)
+def test_extended_macro_templates_render_and_have_output_tables(name, line):
+    t = load_template(name)
+    assert render_template(t).config["line"] == line
+    assert t.runtime_key == "quant-macro"
+    assert t.preflight_contract["status_field"] == "software_preflight"
+    assert "report.html" in t.result_files
+    assert t.upstream_ref == load_template("macro-fx-research").upstream_ref

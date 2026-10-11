@@ -5,7 +5,7 @@
   "kind": "external",
   "workspace_repo": "quant-futures-spread",
   "runtime_key": "quant-macro",
-  "upstream_ref": "3c705e1931ca0c423ea6d34f09117a9f883ccc15",
+  "upstream_ref": "4de5b924f9cf94cf831039ef1c71ecfb8a591809",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,

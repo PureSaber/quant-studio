@@ -4,7 +4,7 @@
   "summary": "须逐合约声明交易所规则、保证金与结算价。STIR 多头在隐含利率上升时价格下跌。",
   "kind": "external",
   "workspace_repo": "quant-futures-spread",
-  "upstream_ref": "302fc65c03ff00755672c21c6134f3e616e4608e",
+  "upstream_ref": "4de5b924f9cf94cf831039ef1c71ecfb8a591809",
   "base_config": "base.json",
   "config_format": "json",
   "requires_snapshot": true,
@@ -17,7 +17,7 @@
       "quotes.csv"
     ]
   },
-  "data_help": "须逐合约声明交易所规则、保证金与结算价。STIR 多头在隐含利率上升时价格下跌。使用既有 qdk.derivatives/v1 数据；DEMO 为合成通用期货。真实品种请填写包内 product。",
+  "data_help": "QDK 逐月原始合约包，产品 ZN / SR3 / TS / TF / T / TL。自动检查报价方向、乘数、最小跳动；真实历史保证金和生命周期仍须在数据包声明。通用 DEMO 包不适用。",
   "knobs": [
     {
       "name": "mode",
@@ -63,12 +63,18 @@
     },
     {
       "name": "product",
-      "label": "数据包内品种 ID",
-      "default": "DEMO",
       "path": "product",
-      "type": "text",
-      "max_length": 2000,
-      "pattern": "[^\\r\\n\\x00]{1,2000}"
+      "label": "交易产品",
+      "default": "ZN",
+      "type": "enum",
+      "choices": [
+        "ZN",
+        "SR3",
+        "TS",
+        "TF",
+        "T",
+        "TL"
+      ]
     },
     {
       "name": "strategy",
@@ -140,7 +146,7 @@
   "argv": [
     "python",
     "-m",
-    "qfs_global.cli",
+    "quant_macro.futures_cli",
     "run",
     "--bundle",
     "{snapshot}",
@@ -152,7 +158,7 @@
   "preflight_argv": [
     "python",
     "-m",
-    "qfs_global.cli",
+    "quant_macro.futures_cli",
     "preflight",
     "--bundle",
     "{snapshot}",
@@ -187,7 +193,7 @@
   },
   "report_name": "report.html",
   "disclaimer": "仅研究和历史回放；合成数据、理论值和市场观察分别标明。费用与保证金使用明确假设，不证明真实成交或策略盈利。",
-  "runtime_key": "quant-futures-global",
+  "runtime_key": "quant-macro-futures",
   "preflight_contract": {
     "schema_version": "qdk.derivatives.preflight/v1",
     "status_field": "software_preflight",

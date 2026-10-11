@@ -1,0 +1,150 @@
+{
+  "id": "macro-etf-relative-value",
+  "title": "债券 ETF 与成分券联动回放",
+  "summary": "历史输入预检、研究计算和可复算结果。",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "runtime_key": "quant-macro",
+  "upstream_ref": "4de5b924f9cf94cf831039ef1c71ecfb8a591809",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "债券 ETF 与成分券联动回放数据包",
+    "environment": "QUANT_MACRO_ETF_RELATIVE_VALUE_BUNDLE",
+    "required_files": [
+      "manifest.json",
+      "data.json"
+    ]
+  },
+  "data_help": "导入 quant.macro.bundle/v1 数据包；账户回放需要真实买卖报价、可知时间和结算日历。演示包仅验证软件。",
+  "knobs": [
+    {
+      "name": "initial_cash",
+      "path": "initial_cash",
+      "label": "初始资金",
+      "default": 100000,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 1000000000000.0
+    },
+    {
+      "name": "close_on",
+      "path": "close_on",
+      "label": "停止开仓并平仓日",
+      "default": "2026-01-12",
+      "type": "date"
+    },
+    {
+      "name": "fee_bps",
+      "path": "fee_bps",
+      "label": "单边手续费（基点）",
+      "default": 1,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "slippage_bps",
+      "path": "slippage_bps",
+      "label": "单边不利滑点（基点）",
+      "default": 0,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "max_leverage",
+      "path": "max_leverage",
+      "label": "最大敞口／净值",
+      "default": 2,
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 20
+    },
+    {
+      "name": "etf_id",
+      "path": "etf_id",
+      "label": "ETF ID",
+      "default": "DEMO:BOND-ETF",
+      "type": "text",
+      "max_length": 200,
+      "pattern": "[^\\r\\n\\x00]{1,200}"
+    },
+    {
+      "name": "etf_units",
+      "path": "etf_units",
+      "label": "ETF 股数",
+      "default": 50,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 100000000.0
+    },
+    {
+      "name": "entry_bps",
+      "path": "entry_bps",
+      "label": "联动交易阈值（基点）",
+      "default": 20,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10000
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "run",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "preflight",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查可知时刻、计价单位、现金流、曲线范围及完整研究窗口。",
+  "preflight_contract": {
+    "schema_version": "quant.macro.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "nav.csv": "nav.csv",
+    "fills.csv": "fills.csv",
+    "ledger.csv": "ledger.csv",
+    "positions.csv": "positions.csv",
+    "cashflows.csv": "cashflows.csv",
+    "signals.csv": "signals.csv",
+    "study.json": "study.json",
+    "report.html": "report.html",
+    "artifacts.json": "artifacts.json"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "离线研究与模型估值；不表示真实可成交、市场数据认证或实盘接入。具体计息、报价、到期和模型适用边界见报告及数据规范。",
+  "nav_initial_value_key": "initial_cash"
+}

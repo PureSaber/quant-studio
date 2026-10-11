@@ -1,34 +1,46 @@
 # 外汇、利率与信用研究入口
 
-新增五个模板：外汇现货与远期、国债与利率风险、公司债与债券 ETF、
-外汇期货与换月、国债及短端利率期货回放。
+| 模板 | 功能 | 运行环境键 |
+|---|---|---|
+| macro-fx-research | 单对现货／远期、利差、展期 | quant-macro |
+| macro-rates-research | 国债现金流、零息曲线、久期、期货风险 | quant-macro |
+| macro-credit-research | 公司债估值、利差、ETF 篮子 | quant-macro |
+| macro-fx-portfolio | 多对、多币种共享账本、T+n 结算 | quant-macro |
+| macro-bond-replay | 单券交易、票息、兑付及再投资 | quant-macro |
+| macro-etf-relative-value | ETF 与成分债券二级市场联动、借券和分红 | quant-macro |
+| macro-reference-history | ECB、Fed GSW、发行人持仓参考数据 | quant-macro |
+| fx-futures-research | 6E 单位规则检查、换月回放 | quant-macro-futures |
+| rates-futures-research | ZN、SR3、TS、TF、T、TL 规则检查和回放 | quant-macro-futures |
 
-前三项使用 `quant-futures-spread/macro` 中的独立 `quant-macro` 应用；
-后两项复用既有 `quant-futures-global` 运行环境。设置页通过模板自动发现新的环境键，
-不需要覆盖原认证期货环境。
+核心应用位于 quant-futures-spread/macro。期货运行环境还需
+international/requirements.lock 与 quant-futures-spread/international；
+期货账户事实由已有 QExec 研究回放引擎生成。所有模板冻结上游精确提交。
+这是研究环境，不修改根目录 fixture-certified 依赖及原实盘交易开关。
 
-1. 在对应源码目录安装应用，创建独立 Python 3.12 环境。
-2. Studio 设置中将 `quant-macro` 指向该解释器；源码工作区仍按兄弟仓布局设置。
-3. 使用 `python -m quant_macro.cli demo --output <新目录>` 生成合成演示包，
-   或按上游 `macro/DATA_CONTRACT.md` 准备带来源、哈希和发布时间的历史数据。
-4. 选择模板、数据包和参数，先预检，再执行。时间点、结算日期必须匹配真实输入。
-5. 报告展示数据性质、模型限制和价格质量，结果表保留净价／全价、久期、现金流和 ETF 成分依据。
+## 数据和设置
 
-外汇只处理一个货币对的两个现金币种；固定收益提供估值和风险研究。
-新入口不声明已有真实外汇／国债／信用市场数据认证、交易所适配或实盘接入。
-合成数据不代表真实行情，国内金融期货原交易开关不因此开启。
+设置页自动发现上述环境键和各模板的独立数据入口。先在隔离环境安装应用，
+再把环境键指向解释器；QUANT_WORKSPACE_ROOT 指向兄弟仓根目录。
+quant_macro.cli demo --output <新目录> 提供所有宏观合成数据。
+期货请使用 quant_macro.futures_demo.create(path, product) 生成对应合成单位样例。
+通用 DEMO 期货包无法通过产品规则检查。
 
-期货模板复用既有 `qdk.derivatives/v1` 合约包。必须明确报价方向、每手乘数、
-结算币种、保证金、结算价和交割日期；默认 `DEMO` 仅为合成通用期货样例。
+真实账户输入按上游 macro/DATA_CONTRACT.md 组织，用 seal 校验与封包。
+必须具备报价、可知时间、结算日历、历史条款／保证金；做空还需借券容量和成本。
+公开参考历史可以 download-public 或 import-public；参考数据禁止进入交易账户。
+ECB/Fed 下载历史只有当前版本，不能解释为原始历史 PIT。
+iShares 若网站拒绝下载，提供合法取得的 CSV 后即可使用已实现的导入入口。
 
-新增的 `valuations.csv,cashflows.csv,rate_futures.csv,etfs.csv,components.csv`
-已加入明确的结果收集白名单，页面使用中文表名。原有结果文件校验保持生效。
+账户平仓日期须在窗口内，并为最终 T+n 和分红付款留下足够数据；
+报告保留模型边界和所有结算尾项校验。ETF 联动为二级市场组合，无一级市场 AP 申赎。
 
-安装完两侧应用后可在新目录执行四条端到端流程：
+## 端到端验收
 
 ```powershell
-python scripts/integration_macro.py --workspace <兄弟仓根目录> --python <quant-macro解释器绝对路径> --output <新验收目录>
+python scripts/integration_macro.py --workspace <兄弟仓根目录> --python <解释器绝对路径> --output <新目录> --public-root <含ecb-bundle和fed-bundle的目录> --futures
 ```
 
-该脚本调用真实 Studio 预检、执行与结果收集，然后调用上游 verify 复算，
-结果写入 receipts.json。它不会修改已部署服务配置。
+16 条流程执行真实 Studio 预检、调度、表格／报告收集，再调用上游校验器。
+不提供 public-root 时跳过 2 条真实参考数据流程；不提供 futures 时跳过 7 条期货流程。
+回执写入 receipts.json。宏观校验包含确定性重新计算，QExec 校验包含哈希和分录平衡。
+脚本不会重启或改写已部署服务；上线应在组合发布中统一处理。

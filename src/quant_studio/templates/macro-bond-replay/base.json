@@ -1,0 +1,11 @@
+{
+  "line": "bond_replay",
+  "strategy": "allocation",
+  "weights": {
+    "DEMO:CORP": 0.5,
+    "DEMO:BOND-ETF": 0.1
+  },
+  "close_on": "2026-01-12",
+  "allocation_instrument": "DEMO:CORP",
+  "allocation_weight": 0.5
+}
