@@ -57,6 +57,12 @@ New-NetFirewallRule -DisplayName 'Quant Studio controlled LAN' -Direction Inboun
 
 监护只启动自己持有的服务进程，异常退出逐步延迟重启；操作系统锁防止多个监护并发持有状态。登录自启登记在当前用户 HKCU Run，使用 pythonw 隐藏窗口，不需要管理员。它在登录用户后生效，不是预登录系统服务。停止标记会让下次登录也保持停止；再次运行 Start-Supervised 才清除标记。卸载自启可对 Install-UserStartup 添加 `-Remove`。
 
+请从 Windows 开始菜单打开普通 PowerShell 运行自启安装／卸载，避免在带包身份的应用终端内操作。MSIX 应用可能把 HKCU 写入私有视图：安装进程读得到，Windows 登录却看不到。安装脚本在检测到包身份时拒绝修改，并在登记后通过系统 `Win32_StartupCommand` 核对当前用户的实际启动命令；原生进程继承的隔离视图也必须通过这项核对，不能只靠包身份判断。确认失败会撤回本次目标值改动，不报告成功。卸载同样核对系统视图。它不会重建已有 Run 键，也不会清除其他软件的启动项。机制说明见 [微软 MSIX 虚拟化文档](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization)。
+
+已有经过确认的本地启动包装脚本（例如加载私有供应商配置）时，可用 `./tools/Install-UserStartup.ps1 -StartupScript D:/workbench/Start-Workbench.ps1` 代替 Python/config 参数。登记使用绝对 PowerShell 路径和隐藏窗口，启动脚本需自行负责服务的重复启动检查。已有不同命令时安装器拒绝覆盖，须先检查原配置。
+
+真实重启验收须记录重启前的开机时间、方案版本和备份，再重启并登录 Windows。先检查新开机时间、自动出现的服务进程和 HTTPS 页面，确认之后再运行研究样例；不能先手动启动服务后声称自动启动通过。登记成功与脚本手动运行成功，都不能替代这一步。失败时保留旧状态文件和启动证据，修复后重新验收。
+
 健康检查每 30 秒访问所配置的 HTTPS 登录页，校验证书；到期前 14 天在服务状态页提示。心跳超过 90 秒显示过期。每 24 小时尝试空闲备份；任务活动或文件变化时延后，磁盘不足时显示失败并保留旧备份。
 
 ```powershell
