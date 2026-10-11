@@ -38,6 +38,10 @@ quant-studio 默认在本机回环地址运行，也支持在指定私网地址�
 
 外部模板只会在设置 `QUANT_WORKSPACE_ROOT` 且对应上游仓库目录存在时执行。合成样例使用仓库内固定收益率，仅用于验证操作流程；合成样例不是市场收益。所有内容均为研究用途，不构成投资建议。
 
+## 未来 UI 候选方案
+
+[四版工作台候选模板库](docs/design-proposals/2026-10-ui-workbench/README.md)保留 Impeccable、UI UX Pro Max、Taste minimalist-ui 和 Anthropic frontend-design 的独立 HTML、对比页、提示词与采用说明。四版均为未来可选参考，尚未选定正式实现；演示使用合成数据，现有工作台行为不受影响。
+
 ## 安装
 
 ```powershell
