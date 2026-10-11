@@ -114,6 +114,7 @@ class JobManager:
         delivery: dict | None = None,
         dispatch_key: str | None = None,
         batch: dict | None = None,
+        research_project: dict | None = None,
     ) -> dict:
         if action not in {
             "check",
@@ -138,6 +139,20 @@ class JobManager:
             raise QuantStudioError("环境交付须绑定已预览请求")
         if dispatch_key is not None and not re.fullmatch(r"[a-f0-9]{64}", dispatch_key):
             raise QuantStudioError("派发标识无效")
+        if research_project is not None:
+            from quant_studio.projects import ProjectStore
+
+            if set(research_project) != {"id", "revision"}:
+                raise QuantStudioError("研究项目须固定标识与版本")
+            linked_project = ProjectStore(self.runs_root).get(
+                research_project["id"], research_project["revision"]
+            )
+            if (
+                not recipe
+                or {"id": recipe["id"], "revision": recipe["revision"]}
+                not in linked_project["recipes"]
+            ):
+                raise QuantStudioError("研究任务方案未连接到项目版本")
         job_id = uuid.uuid4().hex
         now = _now()
         record = {
@@ -161,6 +176,7 @@ class JobManager:
             "delivery": deepcopy(delivery),
             "dispatch_key": dispatch_key,
             "batch": deepcopy(batch),
+            "research_project": deepcopy(research_project),
         }
         request = {
             **record,
@@ -187,9 +203,11 @@ class JobManager:
                         "intake",
                         "delivery",
                         "batch",
+                        "research_project",
                     )
                     # An unused new field must not change existing v1 identities.
-                    if key != "delivery" or delivery is not None
+                    if (key != "delivery" or delivery is not None)
+                    and (key != "research_project" or research_project is not None)
                 },
                 sort_keys=True,
                 ensure_ascii=False,

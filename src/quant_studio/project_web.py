@@ -133,6 +133,7 @@ value="{rid}@{rev}"
     body = f"""<header class="page-head"><h1>{escape(project["name"])}</h1>
 <p>{escape(project["question"])}</p>
 <p>已连接{len(project["datasets"])}个数据集、{len(project["recipes"])}个方案版本。</p>
+<a class="btn" href="/projects/{identifier}/evidence">研究证据与复核</a>
 </header>"""
     body += notebook_body(root, token, project)
     edit_open = "" if project["datasets"] or project["recipes"] else " open"
@@ -282,7 +283,17 @@ class ProjectHandler:
         from quant_studio.server import _layout
 
         query = parse_qs(urlparse(self.path).query)
-        if path.endswith("/iterations"):
+        if path.endswith("/evidence"):
+            from quant_studio.project_evidence_web import evidence_body
+
+            parts = path.removeprefix("/projects/").split("/")
+            if len(parts) != 2:
+                raise QuantStudioError("未知研究证据页面")
+            body, active = (
+                evidence_body(self.runs_root, self.csrf_token, parts[0]),
+                "projects",
+            )
+        elif path.endswith("/iterations"):
             from quant_studio.notebook_batch_web import iterations_body
 
             body, active = (
@@ -378,6 +389,11 @@ class ProjectHandler:
                 raise QuantStudioError("未知项目操作")
             identifier, action = parts
             revision = field(data, "revision")
+            if action == "evidence-review":
+                from quant_studio.project_evidence_web import evidence_post
+
+                evidence_post(self, identifier, revision, data)
+                return
             if action.startswith("iterations-"):
                 from quant_studio.notebook_batch_web import iterations_post
 
@@ -490,6 +506,7 @@ class ProjectHandler:
                     snapshot=recipe["snapshot"],
                     profile=self._request_profile,
                     recipe=recipe,
+                    research_project={"id": identifier, "revision": revision},
                 )
                 self._redirect(f"/jobs/{job['job_id']}")
                 return
