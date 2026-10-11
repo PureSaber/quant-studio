@@ -1,0 +1,67 @@
+{
+  "id": "options-strategy-margin",
+  "title": "股票期权策略保证金",
+  "summary": "使用明确的数据、时点和模型假设，生成可复查的研究报告。",
+  "kind": "external",
+  "workspace_repo": "quant-options",
+  "runtime_key": "quant-options-market",
+  "upstream_ref": "daa59c7df216c9a34a5bf9c7dfe3b9039f440bd6",
+  "integration_job": "option-swaps-local",
+  "base_config": "base.json",
+  "config_format": "json",
+  "knobs": [
+    {
+      "name": "house_multiplier",
+      "label": "额外保证金系数",
+      "path": "parameters.house_multiplier",
+      "default": 1.1,
+      "minimum": 1,
+      "maximum": 10,
+      "type": "number"
+    }
+  ],
+  "requires_snapshot": false,
+  "argv": [
+    "python",
+    "-m",
+    "quant_options.market_extensions.advanced",
+    "regt",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_options.market_extensions.advanced",
+    "regt",
+    "--config",
+    "{config}",
+    "--preflight"
+  ],
+  "preflight_summary": "只读验证输入、报价时点和模型计算；不会提交订单。",
+  "preflight_contract": {
+    "schema_version": "quant-options.advanced-preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": []
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "report.html": "report.html",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "默认输入为合成验收样例；真实研究需替换有来源的历史输入。保证金是研究规则，清算回执仅离线核对。"
+}

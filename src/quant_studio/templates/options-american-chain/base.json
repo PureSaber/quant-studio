@@ -1,0 +1,14 @@
+{
+  "evidence_kind": "synthetic",
+  "source": "generated acceptance inputs; no observed market prices",
+  "parameters": {
+    "as_of": "2025-01-02T21:00:01+00:00",
+    "underlying": "DEMO-SPOT",
+    "right": "call",
+    "rate": 0,
+    "dividend_yield": 0,
+    "dividends": [],
+    "grid": 100,
+    "max_quote_age_seconds": 300
+  }
+}
