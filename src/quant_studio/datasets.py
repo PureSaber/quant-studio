@@ -216,7 +216,11 @@ class DatasetStore:
             ):
                 problems.append(f"文件缺失或发生变化：{name}")
         try:
-            if item.get("kind") == "intake":
+            if item.get("kind") == "research-etf":
+                from quant_studio.notebook_data_reader import snapshot_hashes
+
+                current = {"hashes": snapshot_hashes(root)}
+            elif item.get("kind") == "intake":
                 from quant_studio.intake_tools import IntakeWorkspace, _safe_directory
 
                 link = item["intake"]
@@ -253,7 +257,7 @@ class DatasetStore:
                 current = describe_input(item["template_id"], item["path"])
             if set(current["hashes"]) != set(item["hashes"]):
                 problems.append("数据文件集合发生变化，请登记新版本")
-        except (OSError, ValueError, QuantStudioError) as exc:
+        except (OSError, ValueError, RuntimeError, QuantStudioError) as exc:
             problems.append(str(exc))
         return {
             "valid": not problems,
@@ -306,6 +310,10 @@ def collect_dataset(runs_root, job, control):
 
     root = Path(runs_root)
     request = job["collection"]
+    if request.get("collection_type") == "etf-maintenance":
+        from quant_studio.data_maintenance import DataMaintenance
+
+        return DataMaintenance(runs_root).execute(request, control)
     # Revalidate persisted job fields; no caller-controlled executable or output path.
     derivative = request.get("collection_type") == "derivatives"
     if not derivative:
