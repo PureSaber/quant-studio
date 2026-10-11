@@ -36,7 +36,9 @@ def test_convertible_account_installed_upstream(tmp_path):
         )
         assert result.status == "succeeded", result.as_json()
     assert verify_artifacts(result.run_dir / "strategy-output")["status"] == "passed"
-    study = json.loads((result.run_dir / "strategy-output/study.json").read_text())
+    study = json.loads(
+        (result.run_dir / "strategy-output/study.json").read_text(encoding="utf-8")
+    )
     assert all(float(v) == 0 for v in study["final_positions"].values())
     assert (result.run_dir / "cashflows.csv").exists()
 
