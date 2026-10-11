@@ -75,10 +75,13 @@ def _raw_request(server, method, path, *, headers, body=""):
     return response.status, dict(response.getheaders()), payload
 
 
-def test_home_has_twelve_research_cards_and_one_synthetic_card():
+def test_home_has_all_research_cards_and_one_synthetic_card():
+    from quant_studio.templates import load_template, template_ids
+
     page = render_home()
 
-    assert page.count('class="template-card research"') == 14
+    expected = sum(load_template(name).kind != "synthetic" for name in template_ids())
+    assert page.count('class="template-card research"') == expected
     assert "指数与风格择时研究" in page
     assert page.count('class="template-card synthetic"') == 1
     assert "A 股四类因子研究" in page
