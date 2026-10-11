@@ -21,6 +21,7 @@ _STATUS = {
     "running": "运行中",
     "cancelling": "正在取消",
     "cancelled": "已取消",
+    "cancel_failed": "未能取消，请查看实际结果",
     "succeeded": "已完成",
     "failed": "失败",
     "interrupted": "已中断",

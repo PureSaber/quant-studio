@@ -10,6 +10,30 @@ from tests.test_notebook_research import configure
 from tests.test_notebook_templates import saved_template
 
 
+def test_batch_page_handles_a_cancel_request_that_lost_the_completion_race(
+    tmp_path, monkeypatch
+):
+    from quant_studio.notebook_batch_web import iterations_body
+
+    configure(tmp_path, monkeypatch)
+    project, _, template = saved_template(tmp_path)
+    batches = NotebookBatchStore(tmp_path)
+    batch = batches.prepare(
+        project["id"],
+        project["revision"],
+        template["id"],
+        {"window": [5]},
+        max_candidates=1,
+    )
+    execution = batch["candidates"][0]["attempts"][0]
+    run = batches.notebooks.get(project["id"], execution)
+    run.update(status="cancel_failed", message="完成时取消已来不及")
+    batches.notebooks._save(batches.notebooks.directory(project["id"], execution), run)
+    body = iterations_body(tmp_path, "csrf", project["id"], {})
+    assert "未能取消" in body
+    assert execution in body
+
+
 def test_batch_freezes_one_source_and_retries_original_inputs(tmp_path, monkeypatch):
     configure(tmp_path, monkeypatch)
     project, draft, template = saved_template(tmp_path)

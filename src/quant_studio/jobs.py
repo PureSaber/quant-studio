@@ -188,6 +188,8 @@ class JobManager:
                         "delivery",
                         "batch",
                     )
+                    # An unused new field must not change existing v1 identities.
+                    if key != "delivery" or delivery is not None
                 },
                 sort_keys=True,
                 ensure_ascii=False,

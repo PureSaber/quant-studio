@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-workspace
-          ref: 65213f5ceacd1e4bec6ee924b14e459f576486a8
+          ref: 728c461ab66ac311da416abf6dffd99306272fdb
           path: quant-workspace
           persist-credentials: false
       - name: Install Studio and four independent locked runtimes
