@@ -494,7 +494,21 @@ def test_real_intake_register_default_scope_and_notebook_run(tmp_path, monkeypat
         "真实固定日线", "收益是否受缺失和日期间隔驱动", datasets=[dataset["id"]]
     )
     store = NotebookStore(tmp_path)
-    store.initialize(project["id"], template="price-return-missingness")
+    draft = store.initialize(project["id"], template="price-return-missingness")
+    notebook = json.loads(draft.read_text("utf-8"))
+    notebook["cells"].append(
+        {
+            "cell_type": "code",
+            "id": "unified-reader",
+            "metadata": {},
+            "outputs": [],
+            "execution_count": None,
+            "source": "loaded = research.load(0)\n"
+            "assert list(loaded['symbol']) == ['000001', '000001']\n"
+            "assert list(loaded['close']) == [10, 11]",
+        }
+    )
+    draft.write_text(json.dumps(notebook), encoding="utf-8")
     prepared = store.prepare(project["id"], project["revision"])
     outcome = store.execute({"project_id": project["id"], "id": prepared["id"]}, None)
     assert outcome["status"] == "succeeded"

@@ -64,7 +64,10 @@ def execute(directory, timeout):
         nbformat.v4.new_code_cell(
             "import json\nfrom pathlib import Path\n"
             "context = json.loads(Path('inputs.json').read_text(encoding='utf-8'))\n"
-            "parameters = context.get('parameters', {})",
+            "parameters = context.get('parameters', {})\n"
+            "from research import Research\n"
+            "research = Research()\n"
+            "research_metrics = research.metrics",
             id="studio-runtime-context",
         ),
     )

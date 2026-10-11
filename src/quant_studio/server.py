@@ -43,6 +43,7 @@ from quant_studio.fund_reconciliation import (
 )
 from quant_studio.intake_web import IntakeHandler
 from quant_studio.jobs import JobManager
+from quant_studio.maintenance_web import MaintenanceHandler
 from quant_studio.nav import (
     chart_fragment,
     comparison_fragment,
@@ -1109,6 +1110,10 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
 
 def _job_executor(runs_root: Path):
     def execute(job, control):
+        if job["action"] == "delivery":
+            from quant_studio.environment_delivery import DeliveryStore
+
+            return DeliveryStore(runs_root).execute(job["delivery"]["id"], control)
         if job["action"] == "intake":
             from quant_studio.intake_tools import IntakeWorkspace
 
@@ -1283,6 +1288,7 @@ class _Handler(
     ProjectHandler,
     IntakeHandler,
     BatchHandler,
+    MaintenanceHandler,
     BaseHTTPRequestHandler,
 ):
     runs_root = Path("runs")
@@ -1310,7 +1316,9 @@ class _Handler(
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path == "/onboarding":
+            if path in {"/data-center", "/history", "/delivery"}:
+                self._maintenance_get(path)
+            elif path == "/onboarding":
                 from quant_studio.onboarding import onboarding_body
 
                 self._send_html(
@@ -1450,7 +1458,8 @@ class _Handler(
         path = unquote(urlparse(self.path).path)
         code_view = False
         accepted = (
-            path.startswith("/templates/")
+            path.startswith(("/data-center/", "/delivery/"))
+            or path.startswith("/templates/")
             or path.startswith("/research/")
             or path.startswith("/datasets/")
             or path.startswith("/intake/")
@@ -1503,6 +1512,9 @@ class _Handler(
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path.startswith(("/data-center/", "/delivery/")):
+                self._maintenance_post(path, data)
                 return
             if path.startswith("/intake/"):
                 self._intake_post(path, data)
@@ -2308,8 +2320,10 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("data", "数据", "/data"),
         ("datasets", "数据集", "/datasets"),
         ("catalog", "数据目录", "/catalog"),
+        ("data-center", "数据更新与质量", "/data-center"),
         ("intake", "导入与质量", "/intake"),
         ("projects", "研究项目", "/projects"),
+        ("history", "研究历史", "/history"),
         ("research", "研究方案", "/research"),
         ("batches", "批量实验", "/batches"),
         ("experiments", "实验笔记", "/experiments"),
@@ -2320,6 +2334,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("fund-reconcile", "基金对账", "/fund-reconcile"),
         ("accounts", "账户", "/accounts"),
         ("operations", "服务状态", "/operations"),
+        ("delivery", "环境与交付", "/delivery"),
         ("logout", "退出登录", "/logout"),
     )
     links = []
