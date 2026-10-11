@@ -233,3 +233,58 @@ def test_http_review_csrf_stale_form_and_failure_semantics(tmp_path, monkeypatch
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+@pytest.mark.parametrize("change", ["missing", "corrupt"])
+def test_unreadable_current_recipe_keeps_history_and_blocks_observe(
+    tmp_path, monkeypatch, change
+):
+    configuration(tmp_path, monkeypatch)
+    recipes = RecipeStore(tmp_path)
+    recipe = recipes.save("原生样例", "synthetic-demo", {})
+    project = ProjectStore(tmp_path).save(
+        "有历史的研究",
+        "合成问题",
+        recipes=[{"id": recipe["id"], "revision": recipe["revision"]}],
+    )
+    result = run(recipe_template(recipe), runs_root=tmp_path, execute=True)
+    assert result.status == "succeeded"
+    view = project_evidence(tmp_path, project["id"])
+    review = {
+        "expected_snapshot": view["snapshot_sha256"],
+        "expected_head": None,
+        "to_state": "candidate",
+        "verdict": "supports",
+        "attempt_ids": [view["attempts"][0]["id"]],
+        "actor": "local reviewer",
+        "reason": "synthetic mechanics only",
+        "recorded_at": "2026-01-01T00:00:00Z",
+    }
+    original = project_evidence(tmp_path, project["id"], review=review)
+    head = tmp_path / ".recipes" / recipe["id"] / "HEAD"
+    if change == "missing":
+        head.unlink()
+    else:
+        head.write_text("invalid revision", encoding="utf-8")
+    current = project_evidence(tmp_path, project["id"])
+    assert (
+        current["missing"] and current["context"]["recipe_heads"][recipe["id"]] is None
+    )
+    assert len(current["attempts"]) == 1 and current["attempts"][0]["verified"]
+    assert current["lifecycle"]["head_sha256"] == original["lifecycle"]["head_sha256"]
+    assert current["lifecycle"]["reviews"][0]["needs_review"]
+    assert (
+        recipes.get(recipe["id"], recipe["revision"])["revision"] == recipe["revision"]
+    )
+    assert "synthetic mechanics only" in evidence_body(tmp_path, "csrf", project["id"])
+    with pytest.raises(QuantStudioError, match="complete, currently verified"):
+        project_evidence(
+            tmp_path,
+            project["id"],
+            review={
+                **review,
+                "expected_snapshot": current["snapshot_sha256"],
+                "expected_head": current["lifecycle"]["head_sha256"],
+                "to_state": "observe",
+            },
+        )

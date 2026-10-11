@@ -61,8 +61,9 @@ jobs:
           python -m pip install --no-deps --no-build-isolation -e quant-data-kit -e quant-factors -e quant-lab -e quant-pipeline -e quant-workspace -e quant-studio
           python -m pip check
       - name: Require installed batch API and exercise real CLI and worker
+        working-directory: quant-studio
         env:
           PYTHONUTF8: '1'
         run: |
           python -I -c "import quant_pipeline.durable_batches, quant_data_kit.shared_snapshots, quant_lab.rolling_research"
-          python -m pytest quant-studio/tests/test_durable_batch_integration.py quant-studio/tests/test_durable_batches.py -q
+          python -m pytest tests/test_durable_batch_integration.py tests/test_durable_batches.py -q

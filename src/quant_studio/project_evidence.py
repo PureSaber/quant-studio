@@ -62,7 +62,11 @@ def collect_project(root, identifier):
     }
     missing, attempts = [], []
     for rid in sorted({ref[0] for ref in refs}):
-        current["recipe_heads"][rid] = RecipeStore(root).get(rid)["revision"]
+        try:
+            current["recipe_heads"][rid] = RecipeStore(root).get(rid)["revision"]
+        except (OSError, ValueError, KeyError, QuantStudioError) as exc:
+            current["recipe_heads"][rid] = None
+            missing.append(f"方案 {rid} 当前版本无法核验：{exc}")
     for did in project["datasets"]:
         try:
             dataset = DatasetStore(root).get(did)

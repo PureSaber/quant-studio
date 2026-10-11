@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-agent
-          ref: 636229bd9c17410b734c5b5827241ecb5dd87a9a
+          ref: 6b43f4f93dceb9db4f754524afa010ee2aa7878e
           path: quant-agent
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
