@@ -2107,6 +2107,9 @@ def _artifact_tables(
         "rolls.csv": "换月决策",
         "ledger.csv": "账户分录",
         "lifecycle.csv": "结算与到期事件",
+        "cashflows.csv": "利息、借券与费用现金流",
+        "basis.csv": "股指期货基差与持有成本",
+        "reference_prices.csv": "公开参考价格（非逐合约）",
     }
     labels = {
         "event_time": "事件时间（UTC）" if native else "事件时间（原时区）",

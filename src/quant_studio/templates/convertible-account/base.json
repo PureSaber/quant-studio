@@ -1,0 +1,7 @@
+{
+  "initial_cash": 10000,
+  "fee_bps": 1,
+  "slippage_bps": 1,
+  "short_collateral_rate": 1.5,
+  "max_interval_days": 7
+}

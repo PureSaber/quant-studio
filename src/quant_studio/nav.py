@@ -31,6 +31,9 @@ TABLE_FILES = {
     "rolls.csv",
     "ledger.csv",
     "lifecycle.csv",
+    "cashflows.csv",
+    "basis.csv",
+    "reference_prices.csv",
 }
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 

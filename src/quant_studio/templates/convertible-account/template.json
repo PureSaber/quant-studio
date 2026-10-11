@@ -1,0 +1,115 @@
+{
+  "id": "convertible-account",
+  "title": "可转债与股票对冲账户",
+  "summary": "估值、转股溢价、条款和逐笔账户；显式借券、费用与公司行为",
+  "kind": "external",
+  "workspace_repo": "quant-options",
+  "upstream_ref": "2f1643a515c1c1aa810dd804f271255a90c8a504",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "可转债与股票对冲账户数据目录",
+    "environment": "QUANT_CONVERTIBLE_ACCOUNT_INPUT",
+    "required_files": [
+      "input.json"
+    ]
+  },
+  "knobs": [
+    {
+      "name": "initial_cash",
+      "label": "初始资金",
+      "type": "number",
+      "minimum": 1,
+      "maximum": 1000000000000.0,
+      "default": 10000,
+      "path": "initial_cash"
+    },
+    {
+      "name": "fee_bps",
+      "label": "手续费（基点）",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 1,
+      "path": "fee_bps"
+    },
+    {
+      "name": "slippage_bps",
+      "label": "滑点（基点）",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 1,
+      "path": "slippage_bps"
+    },
+    {
+      "name": "short_collateral_rate",
+      "label": "股票空头抵押率",
+      "type": "number",
+      "minimum": 1,
+      "maximum": 5,
+      "default": 1.5,
+      "path": "short_collateral_rate"
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "quant_options.convertibles",
+    "replay",
+    "--input",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_options.convertibles",
+    "preflight",
+    "--input",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查完整数据与账户路径",
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "nav.csv": "nav.csv",
+    "fills.csv": "fills.csv",
+    "positions.csv": "positions.csv",
+    "ledger.csv": "ledger.csv",
+    "cashflows.csv": "cashflows.csv",
+    "lifecycle.csv": "lifecycle.csv",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json",
+    "report.html": "report.html"
+  },
+  "report_name": "report.html",
+  "disclaimer": "仅研究；真实资料、合成案例及市场参考分别标记。借券和保证金使用显式假设。",
+  "runtime_key": "quant-options",
+  "preflight_contract": {
+    "schema_version": "qdk.derivatives.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "nav_initial_value_key": "initial_cash",
+  "integration_job": "research-extensions"
+}
