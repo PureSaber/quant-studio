@@ -1,0 +1,88 @@
+{
+  "schema": "quant-swaps.exposure-study/v1",
+  "curves": {
+    "as_of": "2026-01-02T18:00:00Z",
+    "currency": "USD",
+    "discount_quotes": [
+      {
+        "tenor": "1M",
+        "rate": 0.03,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "3M",
+        "rate": 0.031,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "6M",
+        "rate": 0.032,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "1Y",
+        "rate": 0.033,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "2Y",
+        "rate": 0.035,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "5Y",
+        "rate": 0.036,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "10Y",
+        "rate": 0.038,
+        "available_at": "2026-01-02T18:00:00Z"
+      }
+    ]
+  },
+  "trades": [
+    {
+      "trade_id": "USD-SOFR",
+      "effective": "2026-01-06",
+      "maturity": "2028-01-06",
+      "notional": 1000000,
+      "fixed_rate": 0.025,
+      "floating_type": "overnight",
+      "lookback_days": 0,
+      "lockout_days": 0,
+      "observation_shift": false,
+      "payment_lag": 2,
+      "netting_set": "CP-A"
+    }
+  ],
+  "exposure_dates": [
+    "2026-04-06",
+    "2026-07-06",
+    "2027-01-06",
+    "2028-01-10"
+  ],
+  "paths": 500,
+  "seed": 42,
+  "mean_reversion": 0.03,
+  "volatility": 0.01,
+  "recovery": 0.4,
+  "survival": [
+    0.998,
+    0.996,
+    0.992,
+    0.98
+  ],
+  "netting_sets": {
+    "CP-A": {
+      "counterparty": "synthetic CP A",
+      "agreement_confirmed": true,
+      "threshold": 1000,
+      "minimum_transfer": 100,
+      "haircut": 0.02,
+      "margin_lag_days": 5
+    }
+  },
+  "source": "synthetic counterparties, rate dynamics and survival assumptions",
+  "evidence_kind": "synthetic"
+}
