@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from quant_studio import QuantStudioError
 from quant_studio.data_catalog import catalog, preview_file
 from quant_studio.datasets import DatasetStore
-from quant_studio.notebooks import NotebookStore
+from quant_studio.notebooks import NotebookStore, notebook_config
 from quant_studio.project_assistant import AssistantStore
 from quant_studio.projects import ProjectStore
 from quant_studio.recipes import RecipeStore
@@ -225,6 +225,13 @@ def notebook_body(root, token, project):
 <button class="btn">创建草稿或刷新数据上下文</button></form>'''
     try:
         link = store.lab_link(identifier)
+        mode = (
+            "Linux Docker 隔离执行；若宿主不支持会拒绝提交。"
+            if notebook_config().get("isolation")
+            else "可信本地执行；独立Python环境不提供安全隔离。"
+        )
+        body += "<p>后台实验模式：" + mode + "</p>"
+        body += "<p>JupyterLab交互编辑仍使用已配置的可信本地环境。</p>"
         body += f'''<p><a href="{escape(link, quote=True)}" target="_blank"
 rel="noopener noreferrer">打开JupyterLab</a></p>'''
         body += f'''<form method="post" action="/projects/{identifier}/notebook-run">
@@ -245,10 +252,16 @@ def notebook_result_body(root, identifier, execution):
 
     store = NotebookStore(root)
     record = store.get(identifier, execution)
+    mode = (
+        "Linux Docker 隔离执行"
+        if record["runtime"].get("isolation")
+        else "可信本地执行（无安全隔离）"
+    )
     body = f"""<header class="page-head"><h1>Notebook实验</h1>
 <a href="/projects/{identifier}">返回研究项目</a></header><section class="panel">
 <p>状态：{escape(record["status"])}</p><p>{escape(record.get("message", ""))}</p>
 <p>项目版本：{record["project_revision"]}</p>"""
+    body += f"<p>执行模式：{mode}</p>"
     for name in record.get("artifacts", {}):
         path = store.artifact(identifier, execution, name)
         if name in {"report.html", "execution.log"}:

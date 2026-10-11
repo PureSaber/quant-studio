@@ -13,6 +13,7 @@ dependencies = ["PyYAML"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+isolation = ["quant-pipeline @ git+https://github.com/PureSaber/quant-pipeline.git@d8f72a2ae401fb99a18e8294485464addd92e769"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

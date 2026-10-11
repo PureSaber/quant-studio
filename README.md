@@ -1,5 +1,9 @@
 # quant-studio
 
+后台 Notebook 现可选择真实 Linux Docker 隔离后端，见
+[Notebook 隔离执行](docs/notebook-isolation.md)。Windows 明确拒绝隔离模式；
+现有独立 Python/Jupyter 环境属于可信本地执行。
+
 量化研究工作台：选择数据、编辑并保存研究方案、调用独立环境里的原生模块、查看结果和实验笔记。
 日常操作见 [DAILY_WORKFLOW.md](DAILY_WORKFLOW.md)，部署与备份见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 期权与海外期货的配置、独立环境和真实数据要求见 [衍生品研究指南](DERIVATIVES.md)。
