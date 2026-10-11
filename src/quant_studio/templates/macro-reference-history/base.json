@@ -1,6 +1,7 @@
 {
   "line": "reference_history",
-  "start": "2025-01-01",
   "series": "",
-  "shock_bp": 100
+  "start": "2025-01-01",
+  "end": "",
+  "shock_bp": 100.0
 }

@@ -1,5 +1,22 @@
 {
   "line": "bond_replay",
+  "initial_cash": 100000.0,
   "strategy": "etf_relative_value",
+  "weights": {
+    "DEMO:CORP": 0.5
+  },
+  "allocation_instrument": "",
+  "allocation_weight": 0.5,
+  "reinvest": true,
+  "etf_id": "DEMO:BOND-ETF",
+  "etf_units": 50.0,
+  "entry_bps": 20.0,
+  "fee_bps": 1.0,
+  "slippage_bps": 0.0,
+  "borrowing_spread": 0.01,
+  "max_leverage": 2.0,
+  "max_mark_age_days": 7,
+  "max_gap_days": 7.0,
+  "max_quote_age_hours": 24.0,
   "close_on": "2026-01-12"
 }

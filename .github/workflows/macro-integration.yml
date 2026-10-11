@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-futures-spread
-          ref: 4de5b924f9cf94cf831039ef1c71ecfb8a591809
+          ref: 320e31fd801d5c744fbc56e2e9c4a984f31bc61b
           path: quant-futures-spread
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
