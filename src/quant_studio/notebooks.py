@@ -531,7 +531,12 @@ class NotebookStore:
                 "COMSPEC",
             }
         }
-        env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+        env.update(
+            PYTHONUTF8="1",
+            PYTHONIOENCODING="utf-8",
+            IPYTHONDIR=str(directory / ".ipython"),
+            JUPYTER_RUNTIME_DIR=str(directory / ".jupyter"),
+        )
         try:
             self.verify_inputs(record)
             result = _execute_subprocess(

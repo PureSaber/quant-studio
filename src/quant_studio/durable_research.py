@@ -132,6 +132,117 @@ class DurableResearchClient:
         value = json.dumps(self.snapshots[snapshot], sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
+    def supports_batches(self) -> bool:
+        """Old installed clients keep their single-study page until profile upgrade."""
+        try:
+            result = self._call("capabilities")
+        except QuantStudioError:
+            return False
+        return (
+            isinstance(result, dict)
+            and result.get("batch_request") == "quant.job-batch/v1"
+        )
+
+    def submit_batch(
+        self, snapshot: str, windows: str, key: str, revision: str
+    ) -> dict:
+        if snapshot not in self.snapshots or not re.fullmatch(r"[a-f0-9]{32}", key):
+            raise QuantStudioError("研究快照或提交标识无效")
+        if revision != self.revision(snapshot):
+            raise QuantStudioError("研究输入配置已经改变，请刷新页面")
+        values = [item.strip() for item in windows.split(",")]
+        if (
+            not 1 <= len(values) <= 64
+            or any(not re.fullmatch(r"[1-9][0-9]{0,3}", item) for item in values)
+            or any(int(item) > 4096 for item in values)
+            or len(values) != len(set(values))
+        ):
+            raise QuantStudioError(
+                "批次需要1至64个不同窗口，每个窗口为1至4096，逗号分隔"
+            )
+        original = self.snapshots[snapshot]["request"]
+        required = {"project_id", "inputs", "timeout_seconds", "max_attempts"}
+        if not required <= set(original):
+            raise QuantStudioError("批次需要管理员配置完整的研究请求")
+        candidates = []
+        for window in values:
+            payload = deepcopy(original["payload"])
+            payload["factors"][0]["window_periods"] = int(window)
+            candidates.append(
+                {
+                    "candidate_id": "window-" + window,
+                    "kind": "rolling_research",
+                    "payload": payload,
+                    "inputs": [],
+                    "timeout_seconds": original["timeout_seconds"],
+                    "max_attempts": original["max_attempts"],
+                }
+            )
+        request = {
+            "schema_version": "quant.job-batch/v1",
+            "project_id": original["project_id"],
+            "run_id": "studio-batch-" + key,
+            "shared_inputs": deepcopy(original["inputs"]),
+            "candidates": candidates,
+        }
+        encoded = json.dumps(
+            request, sort_keys=True, ensure_ascii=False, allow_nan=False
+        )
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        root = Path(self.config["requests_root"])
+        root.mkdir(parents=True, exist_ok=True)
+        destination = root / f"{digest}.json"
+        if destination.exists() and destination.read_text(encoding="utf-8") != encoded:
+            raise QuantStudioError("已保存请求的内容身份不一致")
+        _atomic(destination, encoded)
+        return self._call(
+            "batch-submit",
+            "--request",
+            str(destination),
+            "--key",
+            "studio-batch/" + key,
+            "--research",
+        )
+
+    def batches(self) -> list[dict]:
+        return [
+            batch
+            for batch in self._call("batch-list", "--limit", "30")
+            if all(
+                member["job"]["request"]["kind"] == "rolling_research"
+                for member in batch["members"]
+            )
+        ]
+
+    def batch(self, action: str, batch_id: str, key: str | None = None) -> dict:
+        if action not in {"get", "cancel", "retry"} or not re.fullmatch(
+            r"[a-f0-9]{32}", batch_id
+        ):
+            raise QuantStudioError("后台研究批次操作无效")
+        batch = self._call("batch-get", batch_id)
+        if not batch["members"] or any(
+            member["job"]["request"]["kind"] != "rolling_research"
+            for member in batch["members"]
+        ):
+            raise QuantStudioError("此批次不属于后台因子研究")
+        if action == "get":
+            return batch
+        if action == "cancel":
+            return self._call("batch-cancel", batch_id)
+        if key is None or not re.fullmatch(r"[a-f0-9]{32}", key):
+            raise QuantStudioError("批次重试标识无效")
+        selected = [
+            member["candidate_id"]
+            for member in batch["members"]
+            if member["job"]["status"] in {"failed", "cancelled"}
+        ]
+        if not selected:
+            raise QuantStudioError("没有可重试的失败或取消候选")
+        args = ["batch-retry", batch_id, "--key", "studio-retry/" + key, "--research"]
+        for candidate_id in selected:
+            args.extend(["--candidate", candidate_id])
+        return self._call(*args)
+
     def list(self) -> list[dict]:
         return [
             job

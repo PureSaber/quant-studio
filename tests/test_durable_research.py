@@ -142,7 +142,7 @@ def test_http_submission_uses_csrf_and_rejects_extra_fields(
 
     def execute(self, *args):
         calls.append(args)
-        if args[0] == "list":
+        if args[0] in {"list", "batch-list"}:
             return []
         return {"job_id": "a" * 32}
 
