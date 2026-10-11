@@ -111,6 +111,7 @@ class JobManager:
         notebook: dict | None = None,
         assistant: dict | None = None,
         intake: dict | None = None,
+        delivery: dict | None = None,
         dispatch_key: str | None = None,
         batch: dict | None = None,
     ) -> dict:
@@ -122,6 +123,7 @@ class JobManager:
             "notebook",
             "assistant",
             "intake",
+            "delivery",
         }:
             raise QuantStudioError("只有预检和显式执行可以进入任务队列")
         if (action == "collect") != (collection is not None):
@@ -132,6 +134,8 @@ class JobManager:
             raise QuantStudioError("助手任务必须绑定已审阅证据")
         if (action == "intake") != (intake is not None):
             raise QuantStudioError("数据导入必须绑定原件与映射契约")
+        if (action == "delivery") != (delivery is not None):
+            raise QuantStudioError("环境交付须绑定已预览请求")
         if dispatch_key is not None and not re.fullmatch(r"[a-f0-9]{64}", dispatch_key):
             raise QuantStudioError("派发标识无效")
         job_id = uuid.uuid4().hex
@@ -154,6 +158,7 @@ class JobManager:
             "notebook": deepcopy(notebook),
             "assistant": deepcopy(assistant),
             "intake": deepcopy(intake),
+            "delivery": deepcopy(delivery),
             "dispatch_key": dispatch_key,
             "batch": deepcopy(batch),
         }
@@ -180,6 +185,7 @@ class JobManager:
                         "notebook",
                         "assistant",
                         "intake",
+                        "delivery",
                         "batch",
                     )
                 },
@@ -423,6 +429,12 @@ class JobManager:
             self._write(value)
 
     def _linked_record(self, job):
+        if job.get("delivery"):
+            from quant_studio.environment_delivery import DeliveryStore
+
+            store = DeliveryStore(self.runs_root)
+            identifier = job["delivery"]["id"]
+            return store.directory(identifier) / "request.json", store.get(identifier)
         if job.get("intake"):
             from quant_studio.intake_tools import IntakeWorkspace
 

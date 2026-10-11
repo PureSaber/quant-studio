@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-agent
-          ref: 887bec50d530a06171756204281c7322a4855d3c
+          ref: 98dd0c999c3db34502bf4fbd927f8426808a3840
           path: quant-agent
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -30,10 +30,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-data-kit
-          ref: 902eb095f922429f327d7c713adde79a6787839c
+          ref: a871ea00e17f8e1de37c3233dc973f0ae9a752ff
           path: quant-data-kit
           persist-credentials: false
-      - name: Install Studio and three independent locked runtimes
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-workspace
+          ref: 65213f5ceacd1e4bec6ee924b14e459f576486a8
+          path: quant-workspace
+          persist-credentials: false
+      - name: Install Studio and four independent locked runtimes
         shell: pwsh
         run: |
           python -m pip install --no-deps -r quant-studio/requirements.lock
@@ -62,6 +68,14 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./qdk-env/Scripts/python -m pip check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m venv workspace-env
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./workspace-env/Scripts/python -m pip install --no-deps -r quant-workspace/requirements.lock
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./workspace-env/Scripts/python -m pip install --no-deps --no-build-isolation -e quant-workspace
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./workspace-env/Scripts/python -m pip check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Exercise real Lab, data admission, frozen reads and agent subprocess
         working-directory: quant-studio
         env:
@@ -72,4 +86,6 @@ jobs:
           QUANT_TEST_INTAKE_SOURCE: ${{ github.workspace }}/quant-data-kit
           QUANT_TEST_INTAKE_IMPORT_PYTHON: ${{ github.workspace }}/qdk-env/Scripts/python.exe
           QUANT_TEST_INTAKE_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
-        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py tests/test_notebook_templates.py tests/test_notebook_metrics.py tests/test_notebook_template_workflow.py -q
+          QUANT_TEST_WORKSPACE_SOURCE: ${{ github.workspace }}/quant-workspace
+          QUANT_TEST_WORKSPACE_PYTHON: ${{ github.workspace }}/workspace-env/Scripts/python.exe
+        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py tests/test_notebook_templates.py tests/test_notebook_metrics.py tests/test_notebook_template_workflow.py tests/test_notebook_batches.py tests/test_data_maintenance.py tests/test_research_sdk.py tests/test_workbench_next.py tests/test_next_native_integration.py -q
