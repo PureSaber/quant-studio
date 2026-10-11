@@ -1,0 +1,211 @@
+{
+  "schema": "quant-swaps.clearing-study/v1",
+  "evidence_kind": "synthetic",
+  "source": "synthetic institutional receipts; no network transmission",
+  "trade_id": "DEMO-IRS",
+  "currency": "USD",
+  "netting_set": "CP-A",
+  "counterparty": "DEMO-BANK",
+  "events": [
+    {
+      "id": "0",
+      "type": "rfq",
+      "at": "2026-01-02T12:00:00Z",
+      "available_at": "2026-01-02T12:00:00Z",
+      "payload": {
+        "quote_id": "Q1",
+        "fixed_rate": 0.035,
+        "expires_at": "2026-01-02T12:01:00Z",
+        "venue": "DEMO-SEF"
+      },
+      "trade_id": "DEMO-IRS",
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "1",
+      "type": "accept",
+      "at": "2026-01-02T12:00:01Z",
+      "available_at": "2026-01-02T12:00:01Z",
+      "payload": {
+        "quote_id": "Q1",
+        "execution_id": "E1"
+      },
+      "trade_id": "DEMO-IRS",
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "2",
+      "type": "submit_clearing",
+      "at": "2026-01-02T12:00:02Z",
+      "available_at": "2026-01-02T12:00:02Z",
+      "payload": {
+        "execution_id": "E1",
+        "submission_id": "S1",
+        "ccp": "DEMO-CCP"
+      },
+      "trade_id": "DEMO-IRS",
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "3",
+      "type": "cleared",
+      "at": "2026-01-02T12:00:03Z",
+      "available_at": "2026-01-02T12:00:03Z",
+      "payload": {
+        "submission_id": "S1",
+        "clearing_id": "C1"
+      },
+      "trade_id": "DEMO-IRS",
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "4",
+      "type": "terminate",
+      "at": "2026-01-02T12:00:04Z",
+      "available_at": "2026-01-02T12:00:04Z",
+      "payload": {
+        "clearing_id": "C1",
+        "termination_id": "T1",
+        "reason": "demo termination"
+      },
+      "trade_id": "DEMO-IRS",
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    }
+  ],
+  "collateral_events": [
+    {
+      "id": "COL0",
+      "type": "capital",
+      "at": "2026-01-02T12:01:00Z",
+      "available_at": "2026-01-02T12:01:00Z",
+      "payload": {
+        "amount": "100000"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL1",
+      "type": "call",
+      "at": "2026-01-02T12:01:01Z",
+      "available_at": "2026-01-02T12:01:01Z",
+      "payload": {
+        "kind": "initial",
+        "side": "posted",
+        "target_amount": "10000",
+        "model": "synthetic CCP IM receipt"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL2",
+      "type": "settle",
+      "at": "2026-01-02T12:01:02Z",
+      "available_at": "2026-01-02T12:01:02Z",
+      "payload": {
+        "call_id": "COL1",
+        "payment_id": "BANK1"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL3",
+      "type": "call",
+      "at": "2026-01-02T12:01:03Z",
+      "available_at": "2026-01-02T12:01:03Z",
+      "payload": {
+        "kind": "variation",
+        "side": "received",
+        "target_amount": "1000",
+        "model": "synthetic CSA VM receipt"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL4",
+      "type": "settle",
+      "at": "2026-01-02T12:01:04Z",
+      "available_at": "2026-01-02T12:01:04Z",
+      "payload": {
+        "call_id": "COL3",
+        "payment_id": "BANK2"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL5",
+      "type": "cashflow",
+      "at": "2026-01-02T12:01:05Z",
+      "available_at": "2026-01-02T12:01:05Z",
+      "payload": {
+        "amount": "500",
+        "category": "coupon",
+        "payment_id": "BANK3"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL6",
+      "type": "cashflow",
+      "at": "2026-01-02T12:01:06Z",
+      "available_at": "2026-01-02T12:01:06Z",
+      "payload": {
+        "amount": "-5",
+        "category": "fee",
+        "payment_id": "BANK4"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL7",
+      "type": "call",
+      "at": "2026-01-02T12:01:07Z",
+      "available_at": "2026-01-02T12:01:07Z",
+      "payload": {
+        "kind": "initial",
+        "side": "posted",
+        "target_amount": "0",
+        "model": "synthetic return of IM"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    },
+    {
+      "id": "COL8",
+      "type": "settle",
+      "at": "2026-01-02T12:01:08Z",
+      "available_at": "2026-01-02T12:01:08Z",
+      "payload": {
+        "call_id": "COL7",
+        "payment_id": "BANK5"
+      },
+      "currency": "USD",
+      "netting_set": "CP-A",
+      "counterparty": "DEMO-BANK"
+    }
+  ]
+}

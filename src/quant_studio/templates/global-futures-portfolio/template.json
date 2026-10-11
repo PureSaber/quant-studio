@@ -1,0 +1,83 @@
+{
+  "id": "global-futures-portfolio",
+  "title": "全球期货跨品种组合",
+  "summary": "逐合约价格、同步组合、保证金与换月；数据不足会拒绝",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "upstream_ref": "0b63a58b271b84d975a3fb6e5e433bae4384c63e",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "全球期货跨品种组合数据目录",
+    "environment": "QUANT_GLOBAL_FUTURES_PORTFOLIO_INPUT",
+    "required_files": [
+      "manifest.json",
+      "contracts.json",
+      "quotes.csv"
+    ]
+  },
+  "knobs": [],
+  "argv": [
+    "python",
+    "-m",
+    "qfs_global.workbench",
+    "run",
+    "--kind",
+    "portfolio",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "qfs_global.workbench",
+    "preflight",
+    "--kind",
+    "portfolio",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查完整数据与账户路径",
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "nav.csv": "nav.csv",
+    "fills.csv": "fills.csv",
+    "positions.csv": "positions.csv",
+    "ledger.csv": "ledger.csv",
+    "lifecycle.csv": "lifecycle.csv",
+    "rolls.csv": "rolls.csv",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json",
+    "report.html": "report.html"
+  },
+  "report_name": "report.html",
+  "disclaimer": "仅研究；真实资料、合成案例及市场参考分别标记。借券和保证金使用显式假设。",
+  "runtime_key": "quant-futures-global",
+  "preflight_contract": {
+    "schema_version": "qdk.derivatives.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "integration_job": "research-extensions"
+}

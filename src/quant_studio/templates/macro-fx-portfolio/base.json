@@ -1,0 +1,14 @@
+{
+  "line": "fx_portfolio",
+  "reporting_currency": "USD",
+  "initial_cash": 100000.0,
+  "strategy": "carry",
+  "lookback": 3,
+  "fee_bps": 1.0,
+  "slippage_bps": 0.0,
+  "borrowing_spread": 0.005,
+  "max_leverage": 2.0,
+  "max_gap_days": 7.0,
+  "max_quote_age_hours": 24.0,
+  "close_on": "2026-01-12"
+}

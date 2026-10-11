@@ -1,0 +1,77 @@
+{
+  "id": "swaps-market-curves",
+  "title": "美元互换与市场曲线",
+  "summary": "使用明确的数据、时点和模型假设，生成可复查的研究报告。",
+  "kind": "external",
+  "workspace_repo": "quant-swaps",
+  "runtime_key": "quant-swaps-market",
+  "upstream_ref": "3dad5907d4a3771689b60e94d2715706cbba2edd",
+  "integration_job": "option-swaps-local",
+  "base_config": "base.json",
+  "config_format": "json",
+  "knobs": [
+    {
+      "name": "notional",
+      "label": "名义本金（USD）",
+      "path": "swap.notional",
+      "default": 1000000,
+      "minimum": 1,
+      "maximum": 10000000000,
+      "type": "number"
+    },
+    {
+      "name": "fixed_rate",
+      "label": "固定利率",
+      "path": "swap.fixed_rate",
+      "default": 0.035,
+      "minimum": -1,
+      "maximum": 1,
+      "type": "number"
+    }
+  ],
+  "requires_snapshot": false,
+  "argv": [
+    "python",
+    "-m",
+    "quant_swaps.workbench",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_swaps.workbench",
+    "--config",
+    "{config}",
+    "--preflight"
+  ],
+  "preflight_summary": "只读验证输入、报价时点和模型计算；不会提交订单。",
+  "preflight_contract": {
+    "schema_version": "quant-swaps.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": []
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "report.html": "report.html",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json",
+    "fixed_cashflows.csv": "fixed_cashflows.csv",
+    "floating_cashflows.csv": "floating_cashflows.csv",
+    "quote_repricing.csv": "quote_repricing.csv"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "默认输入为合成验收样例；真实研究需替换有来源的历史输入。保证金是研究规则，清算回执仅离线核对。"
+}

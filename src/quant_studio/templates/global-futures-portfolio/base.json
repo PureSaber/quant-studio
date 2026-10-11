@@ -1,0 +1,18 @@
+{
+  "account": {
+    "initial_cash": 100000,
+    "fee_per_contract": 1,
+    "slippage_ticks": 1
+  },
+  "legs": [
+    {
+      "product": "DEMO",
+      "direction": 1,
+      "contracts": 1,
+      "strategy": "nearby",
+      "roll_rule": "expiry",
+      "roll_days": 3
+    }
+  ],
+  "delivery_deadlines": {}
+}

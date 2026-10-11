@@ -1,0 +1,87 @@
+{
+  "id": "inventory-market-making",
+  "title": "股票 ETF 库存做市",
+  "summary": "读取已登记的研究输入，验证约束并生成可核验报告。",
+  "kind": "external",
+  "workspace_repo": "quant-execution",
+  "upstream_ref": "9673f3426cbd71906a1baa401e400df5e3b3b338",
+  "runtime_key": "quant-institutional",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "机构研究输入目录",
+    "environment": "QUANT_INSTITUTIONAL_INPUT",
+    "required_files": [
+      "market-making.json"
+    ]
+  },
+  "data_help": "选择机构研究输入包。参数保存在包内 JSON 中；演示输入可由工作区 institutional-research 的 examples 命令生成。",
+  "knobs": [],
+  "argv": [
+    "python",
+    "-m",
+    "quant_studio.institutional",
+    "--workflow",
+    "inventory-market-making",
+    "--snapshot",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_studio.institutional",
+    "--workflow",
+    "inventory-market-making",
+    "--snapshot",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--preflight"
+  ],
+  "preflight_summary": "只读解析数据并在内存中验证账户约束，不写入输入文件。",
+  "preflight_contract": {
+    "schema_version": "quant.institutional.preflight/1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows"
+    ],
+    "instrument_ids_required": true
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "report.html": "report.html",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json",
+    "fills.csv": "fills.csv",
+    "ledger.csv": "ledger.csv"
+  },
+  "verification_argv": [
+    "python",
+    "-m",
+    "quant_options.cli",
+    "verify",
+    "--output",
+    "{output}"
+  ],
+  "verification_contract": {
+    "status": "passed"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "离线研究。合成输入不代表市场历史表现；真实数据、借券和交割依据须由使用者提供。",
+  "integration_job": "institutional-local"
+}
