@@ -1,3 +1,3 @@
 # Optional stdlib isolation implementation; install with --no-deps.
 # Normal Studio requirements.lock remains separate from Notebook/image packages.
-quant-pipeline @ git+https://github.com/PureSaber/quant-pipeline.git@d8f72a2ae401fb99a18e8294485464addd92e769
+quant-pipeline @ git+https://github.com/PureSaber/quant-pipeline.git@d32b35ab63e74d94d410003bbd544e400d0b0ad1
