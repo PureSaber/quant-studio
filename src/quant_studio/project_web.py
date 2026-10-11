@@ -180,6 +180,8 @@ value="{record["run_id"]}">
 <form method="post" action="/projects/{identifier}/assistant-prepare">{csrf(token)}
 <input type="hidden" name="revision" value="{project["revision"]}">
 <label>想了解什么<textarea name="question" maxlength="4000" required></textarea></label>
+<label class="check"><input type="checkbox" name="include_notebook" value="yes">
+同时准备当前Notebook源码，生成可审阅的单元格修改建议</label>
 <button class="btn">准备证据与建议</button></form></section>'''
     for advice in AssistantStore(root).list(identifier):
         body += f"""<p><a href="/projects/{identifier}/advice/{advice["id"]}">
@@ -205,6 +207,10 @@ def notebook_body(root, token, project):
     body += (
         '<p><a href="/projects/templates">从模板开始新研究</a> · '
         '<a href="/projects/notebook-compare">并排比较Notebook实验</a></p>'
+    )
+    body += (
+        f'<p><a class="btn" href="/projects/{identifier}/iterations">'
+        "在本项目调参或批量运行</a></p>"
     )
     body += f'''<form method="post" action="/projects/{identifier}/notebook-init">
 {csrf(token)}<input type="hidden" name="revision" value="{project["revision"]}">
@@ -276,7 +282,16 @@ class ProjectHandler:
         from quant_studio.server import _layout
 
         query = parse_qs(urlparse(self.path).query)
-        if path == "/projects/templates":
+        if path.endswith("/iterations"):
+            from quant_studio.notebook_batch_web import iterations_body
+
+            body, active = (
+                iterations_body(
+                    self.runs_root, self.csrf_token, path.split("/")[2], query
+                ),
+                "projects",
+            )
+        elif path == "/projects/templates":
             body, active = (
                 template_library_body(self.runs_root, self.csrf_token, query),
                 "projects",
@@ -363,6 +378,11 @@ class ProjectHandler:
                 raise QuantStudioError("未知项目操作")
             identifier, action = parts
             revision = field(data, "revision")
+            if action.startswith("iterations-"):
+                from quant_studio.notebook_batch_web import iterations_post
+
+                iterations_post(self, identifier, revision, action, data)
+                return
             if action == "template-save":
                 from quant_studio.notebook_template_web import save_template
 
@@ -371,10 +391,11 @@ class ProjectHandler:
                 return
             if action == "assistant-prepare":
                 question = field(data, "question")
+                include_notebook = field(data, "include_notebook", "") == "yes"
                 if data:
                     raise QuantStudioError("未知助手字段")
                 record = AssistantStore(self.runs_root).prepare(
-                    identifier, revision, question
+                    identifier, revision, question, include_notebook=include_notebook
                 )
                 self._redirect(f"/projects/{identifier}/advice/{record['id']}")
                 return
@@ -491,6 +512,14 @@ def assistant_body(root, token, project_id, identifier):
     for evidence in context["evidence"]:
         body += f'''<h3><a href="{escape(record["links"][evidence["id"]], quote=True)}">
 {evidence["id"]} · 查看来源</a></h3><pre>{escape(evidence["text"])}</pre>'''
+    if record.get("notebook_sha256"):
+        if file_hash(directory / "source.ipynb") != record["notebook_sha256"]:
+            raise QuantStudioError("Notebook源码身份发生变化")
+        body += (
+            "<h2>将发送的Notebook源码</h2><pre>"
+            + escape((directory / "source.ipynb").read_text("utf-8"))
+            + "</pre>"
+        )
     if record["status"] == "prepared":
         body += f'''<form method="post" action="/projects/{project_id}/assistant-run">
 {csrf(token)}<input type="hidden" name="revision" value="{record["context_sha256"]}">
@@ -507,6 +536,15 @@ def assistant_body(root, token, project_id, identifier):
         if file_hash(directory / "answer.json") != record["answer_sha256"]:
             raise QuantStudioError("助手结果完整性核验失败")
         answer = json.loads((directory / "answer.json").read_text(encoding="utf-8"))
+        if answer.get("patches"):
+            from quant_studio.notebook_proposals import proposal_diff
+
+            changes = proposal_diff(directory, answer["patches"])
+            body += (
+                "<h2>待审阅修改建议</h2><p>草稿尚未改变。"
+                "可在JupyterLab逐项采纳后另建实验验证。</p>"
+            )
+            body += "<pre>" + escape(changes) + "</pre>"
         body += f"<h2>建议与证据</h2><p>{escape(answer['scope'])}</p>"
         for finding in answer["findings"]:
             body += "<p>" + escape(finding["text"]) + "</p><p>"

@@ -40,10 +40,26 @@ class AssistantStore:
             raise QuantStudioError("助手目录不可为链接")
         return directory
 
-    def prepare(self, project_id, revision, question):
+    def prepare(self, project_id, revision, question, *, include_notebook=False):
         if not isinstance(question, str) or not 1 <= len(question.strip()) <= 4000:
             raise QuantStudioError("问题须为1至4000字")
         project = ProjectStore(self.root).get(project_id, revision)
+        serialized = None
+        if include_notebook:
+            from quant_studio.notebooks import _notebook
+
+            draft = NotebookStore(self.root).workspace(project_id) / "research.ipynb"
+            if (
+                not draft.is_file()
+                or draft.is_symlink()
+                or draft.stat().st_size > 2_000_000
+            ):
+                raise QuantStudioError("Notebook草稿不存在、无效或过大")
+            serialized = json.dumps(
+                _notebook(draft.read_text("utf-8")), ensure_ascii=False
+            )
+            if len(serialized.encode("utf-8")) > 60_000:
+                raise QuantStudioError("代码建议只接受60KB以内的清理后源码")
         texts = [
             (
                 "研究问题：" + project["question"],
@@ -95,6 +111,11 @@ class AssistantStore:
                     f"/projects/{project_id}/notebook/{run['id']}",
                 )
             )
+        from quant_studio.research_history import search_history
+
+        texts = texts[:24]
+        for match in search_history(self.root, question, limit=5):
+            texts.append(("历史研究：" + match["text"], match["link"]))
         evidence, links = [], {}
         for i, (text, link) in enumerate(texts, 1):
             text = _redact(text).encode("utf-8")[:1200].decode("utf-8", errors="ignore")
@@ -123,9 +144,15 @@ class AssistantStore:
             "status": "prepared",
             "context_sha256": file_hash(directory / "context.json"),
             "links": links,
-            "scope": "只包含页面列出的研究问题与元数据；"
-            "不包含价格表、账户账本或Notebook代码。",
+            "scope": "包含页面列出的研究问题、元数据及历史实验日志节选；"
+            "日志可能含Notebook输出，请审阅待发送内容。未主动读取账户或数据表。",
         }
+        if include_notebook:
+            _atomic(directory / "source.ipynb", serialized)
+            record["notebook_sha256"] = file_hash(directory / "source.ipynb")
+            record["scope"] = (
+                "包含下方历史证据及完整Notebook源码；提交模型前请审阅。只生成修改建议，不修改草稿。"
+            )
         _atomic(directory / "request.json", json.dumps(record, ensure_ascii=False))
         return record
 
@@ -179,6 +206,10 @@ class AssistantStore:
         ]
         if model:
             argv.extend(["--model", model])
+        if record.get("notebook_sha256"):
+            if file_hash(directory / "source.ipynb") != record["notebook_sha256"]:
+                raise QuantStudioError("待建议Notebook已变化")
+            argv.extend(["--notebook", str(directory / "source.ipynb")])
         record.update(status="running", mode="model" if model else "evidence_only")
         _atomic(directory / "request.json", json.dumps(record, ensure_ascii=False))
         try:

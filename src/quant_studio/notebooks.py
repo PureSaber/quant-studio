@@ -129,6 +129,10 @@ class NotebookStore:
         project = ProjectStore(self.root).get(identifier, revision)
         directory = self.workspace(identifier)
         directory.mkdir(parents=True, exist_ok=True)
+        helper = directory / "research.py"
+        if helper.is_symlink():
+            raise QuantStudioError("研究接口不可为链接")
+        shutil.copyfile(Path(__file__).with_name("research_sdk.py"), helper)
         draft = directory / "research.ipynb"
         # Refresh the input map explicitly without overwriting the user's code.
         context = self._context(project)
@@ -160,6 +164,10 @@ class NotebookStore:
                     "source": "import json\nfrom pathlib import Path\n"
                     "context = json.loads(\n"
                     '    Path("inputs.json").read_text(encoding="utf-8"))\n'
+                    "from research import Research\n"
+                    "research = Research()\n"
+                    "parameters = research.parameters\n"
+                    "research_metrics = research.metrics\n"
                     "context",
                 },
                 {
@@ -274,9 +282,29 @@ class NotebookStore:
         self.workspace(identifier)
         return notebook_config()["lab_url"] + f"/lab/tree/{identifier}/research.ipynb"
 
-    def prepare(self, identifier, revision):
+    def prepare(
+        self, identifier, revision, *, parameters=None, parameter_template=None
+    ):
+        from quant_studio.notebook_templates import (
+            NotebookTemplateStore,
+            parameter_values,
+        )
+
         config = notebook_config()
         project = ProjectStore(self.root).get(identifier, revision)
+        context = self._context(project)
+        if parameter_template:
+            template = NotebookTemplateStore(self.root).get(parameter_template)
+            context["template"] = {k: template[k] for k in ("id", "revision", "name")}
+        if parameters is not None:
+            schema = (
+                NotebookTemplateStore(self.root).get(context["template"]["id"])[
+                    "parameters"
+                ]
+                if context.get("template")
+                else {}
+            )
+            context["parameters"] = parameter_values(schema, parameters)
         draft = self.workspace(identifier) / "research.ipynb"
         if (
             not draft.is_file()
@@ -303,6 +331,9 @@ class NotebookStore:
             _atomic(directory / "source.ipynb", json.dumps(source, ensure_ascii=False))
             worker = Path(__file__).with_name("notebook_worker.py")
             shutil.copyfile(worker, directory / "executor.py")
+            shutil.copyfile(
+                Path(__file__).with_name("research_sdk.py"), directory / "research.py"
+            )
             try:
                 inspected = subprocess.run(
                     [
@@ -323,7 +354,6 @@ class NotebookStore:
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 raise QuantStudioError("无法记录Notebook环境身份") from exc
             _atomic(directory / "requested-environment.json", json.dumps(environment))
-            context = self._context(project)
             total = 0
             for item in context["datasets"]:
                 registered = DatasetStore(self.root).get(item["id"])
@@ -356,8 +386,61 @@ class NotebookStore:
                 "inputs.json",
                 "executor.py",
                 "requested-environment.json",
+                "research.py",
             ):
                 record["hashes"][name] = file_hash(directory / name)
+            record["status"] = "ready"
+        except Exception as exc:
+            record.update(status="blocked", message=str(exc))
+            self._save(directory, record)
+            raise
+        self._save(directory, record)
+        return record
+
+    def fork(self, identifier, execution, *, parameters=None):
+        """Create another attempt from verified frozen files, never today's draft."""
+        from quant_studio.notebook_templates import (
+            NotebookTemplateStore,
+            parameter_values,
+        )
+
+        original = self.get(identifier, execution)
+        self.verify_inputs(original)
+        context = json.loads(
+            self.artifact(identifier, execution, "inputs.json").read_text("utf-8")
+        )
+        if parameters is not None:
+            schema = NotebookTemplateStore(self.root).get(context["template"]["id"])[
+                "parameters"
+            ]
+            context["parameters"] = parameter_values(schema, parameters)
+        record = {
+            k: original[k]
+            for k in ("schema", "project_id", "project_revision", "runtime")
+        }
+        record.update(
+            id=uuid.uuid4().hex,
+            created_at=datetime.now(UTC).isoformat(),
+            status="preparing",
+            hashes={},
+            retry_of=execution,
+        )
+        directory = self.directory(identifier, record["id"])
+        directory.mkdir(parents=True)
+        self._save(directory, record)
+        try:
+            for name, expected in original["hashes"].items():
+                target = directory / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(self.directory(identifier, execution) / name, target)
+                if file_hash(target) != expected:
+                    raise QuantStudioError("复制期间冻结输入发生变化")
+                record["hashes"][name] = expected
+            if parameters is not None:
+                _atomic(
+                    directory / "inputs.json", json.dumps(context, ensure_ascii=False)
+                )
+                record["hashes"]["inputs.json"] = file_hash(directory / "inputs.json")
             record["status"] = "ready"
         except Exception as exc:
             record.update(status="blocked", message=str(exc))
@@ -426,6 +509,8 @@ class NotebookStore:
         record["status"] = "running"
         self._save(directory, record)
         runtime = record["runtime"]
+        if control is not None and hasattr(control, "attach_output"):
+            control.attach_output(directory)
         # The executor receives no model/API credentials from the Studio process.
         env = {
             k: v

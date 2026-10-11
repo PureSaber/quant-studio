@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -9,6 +10,59 @@ import pytest
 from quant_studio import QuantStudioError
 from quant_studio.jobs import JobManager
 from quant_studio.runner import ExecutionCancelled, _execute_subprocess
+
+
+def test_pre_delivery_dispatch_identity_survives_service_upgrade(tmp_path):
+    # Persist an actual v1 identity with the fields used before delivery existed.
+    legacy_request = {
+        "action": "check",
+        "template_id": "synthetic-demo",
+        "knobs": {},
+        "factors": None,
+        "snapshot": None,
+        "profile": None,
+        "recipe": None,
+        "collection": None,
+        "notebook": None,
+        "assistant": None,
+        "intake": None,
+        "batch": None,
+    }
+    identity = hashlib.sha256(
+        json.dumps(
+            legacy_request,
+            sort_keys=True,
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    manager = JobManager(tmp_path, start_worker=False)
+    try:
+        first = manager.submit(
+            "check", "synthetic-demo", {}, profile=None, dispatch_key="a" * 64
+        )
+        legacy = {k: v for k, v in first.items() if k != "delivery"}
+        legacy.update(request_identity=identity, status="succeeded")
+        manager._write(legacy)
+    finally:
+        manager.close()
+    restarted = JobManager(tmp_path, start_worker=False)
+    try:
+        same = restarted.submit(
+            "check", "synthetic-demo", {}, profile=None, dispatch_key="a" * 64
+        )
+        assert same["job_id"] == first["job_id"]
+        assert len(restarted.list()) == 1
+        with pytest.raises(QuantStudioError, match="身份不一致"):
+            restarted.submit(
+                "check",
+                "synthetic-demo",
+                {"changed": 1},
+                profile=None,
+                dispatch_key="a" * 64,
+            )
+    finally:
+        restarted.close()
 
 
 def _wait(manager, job_id, states, timeout=5):
