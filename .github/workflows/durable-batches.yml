@@ -1,0 +1,68 @@
+name: Durable batch integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durable-batches:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: quant-studio
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-pipeline
+          ref: 612817cef1a96724f2e13ef4c88bc46988c201dc
+          path: quant-pipeline
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-data-kit
+          ref: 912d81c6a13663012eee948f0001724153c1ae1b
+          path: quant-data-kit
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-factors
+          ref: 65f8e12d643e8ae6dc186966d99614938295bdc7
+          path: quant-factors
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-lab
+          ref: 5d8c2336c1222696bdda6ab73cdd9c4e341f4ff7
+          path: quant-lab
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: PureSaber/quant-workspace
+          ref: 0695cce48f1aa74aea3180cd6d3c005cb6a468c1
+          path: quant-workspace
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install locked research dependencies and exact local sources
+        run: |
+          python -m pip install --no-deps -r quant-workspace/profiles/durable-research/requirements.lock
+          python -m pip install --no-deps --no-build-isolation -e quant-data-kit -e quant-factors -e quant-lab -e quant-pipeline -e quant-workspace -e quant-studio
+          python -m pip check
+      - name: Require installed batch API and exercise real CLI and worker
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          python -I -c "import quant_pipeline.durable_batches, quant_data_kit.shared_snapshots, quant_lab.rolling_research"
+          python -m pytest quant-studio/tests/test_durable_batch_integration.py quant-studio/tests/test_durable_batches.py -q

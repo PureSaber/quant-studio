@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -34,7 +35,12 @@ def configuration(tmp_path, monkeypatch):
     monkeypatch.setenv("QUANT_STUDIO_RUNTIMES", str(config))
     notebook = tmp_path / "notebook.json"
     notebook.write_text(
-        json.dumps({"python": python, "lab_url": "http://127.0.0.1:8890/"})
+        json.dumps(
+            {
+                "python": os.environ.get("QUANT_TEST_NOTEBOOK_PYTHON", python),
+                "lab_url": "http://127.0.0.1:8890/",
+            }
+        )
     )
     monkeypatch.setenv("QUANT_STUDIO_NOTEBOOK_CONFIG", str(notebook))
     monkeypatch.setenv("IPYTHONDIR", str(tmp_path / "ipython"))
@@ -94,7 +100,7 @@ def test_exact_project_binding_excludes_other_project_jobs(tmp_path):
 
 
 def test_real_notebook_native_paths_review_and_source_drift(tmp_path, monkeypatch):
-    python = configuration(tmp_path, monkeypatch)
+    configuration(tmp_path, monkeypatch)
     root = tmp_path / "runs"
     data = tmp_path / "data"
     data.mkdir()
@@ -147,7 +153,7 @@ def test_real_notebook_native_paths_review_and_source_drift(tmp_path, monkeypatc
     assert not reviewed["lifecycle"]["reviews"][0]["needs_review"]
     result = subprocess.run(
         [
-            python,
+            sys.executable,
             "-I",
             "-X",
             "utf8",

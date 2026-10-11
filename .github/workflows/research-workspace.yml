@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-agent
-          ref: 98dd0c999c3db34502bf4fbd927f8426808a3840
+          ref: 636229bd9c17410b734c5b5827241ecb5dd87a9a
           path: quant-agent
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -30,13 +30,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-data-kit
-          ref: a871ea00e17f8e1de37c3233dc973f0ae9a752ff
+          ref: 912d81c6a13663012eee948f0001724153c1ae1b
           path: quant-data-kit
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-workspace
-          ref: 728c461ab66ac311da416abf6dffd99306272fdb
+          ref: 0695cce48f1aa74aea3180cd6d3c005cb6a468c1
           path: quant-workspace
           persist-credentials: false
       - name: Install Studio and four independent locked runtimes
@@ -83,9 +83,11 @@ jobs:
           QUANT_TEST_NOTEBOOK_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
           QUANT_TEST_AGENT_SOURCE: ${{ github.workspace }}/quant-agent
           QUANT_TEST_AGENT_PYTHON: ${{ github.workspace }}/agent-env/Scripts/python.exe
+          QUANT_TEST_RESEARCH_AGENT_PYTHON: ${{ github.workspace }}/agent-env/Scripts/python.exe
           QUANT_TEST_INTAKE_SOURCE: ${{ github.workspace }}/quant-data-kit
           QUANT_TEST_INTAKE_IMPORT_PYTHON: ${{ github.workspace }}/qdk-env/Scripts/python.exe
           QUANT_TEST_INTAKE_PYTHON: ${{ github.workspace }}/notebook-env/Scripts/python.exe
           QUANT_TEST_WORKSPACE_SOURCE: ${{ github.workspace }}/quant-workspace
           QUANT_TEST_WORKSPACE_PYTHON: ${{ github.workspace }}/workspace-env/Scripts/python.exe
-        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py tests/test_notebook_templates.py tests/test_notebook_metrics.py tests/test_notebook_template_workflow.py tests/test_notebook_batches.py tests/test_data_maintenance.py tests/test_research_sdk.py tests/test_workbench_next.py tests/test_next_native_integration.py -q
+          QUANT_TEST_PLATFORM_WORKSPACE_PYTHON: ${{ github.workspace }}/workspace-env/Scripts/python.exe
+        run: python -m pytest tests/test_research_workspace_integration.py tests/test_notebook_research.py tests/test_project_lifecycle.py tests/test_project_evidence.py tests/test_platform_status_web.py tests/test_notebook_intake.py tests/test_notebook_template_http.py tests/test_intake_http.py tests/test_operations_jobs.py tests/test_notebook_templates.py tests/test_notebook_metrics.py tests/test_notebook_template_workflow.py tests/test_notebook_batches.py tests/test_data_maintenance.py tests/test_research_sdk.py tests/test_workbench_next.py tests/test_next_native_integration.py -q

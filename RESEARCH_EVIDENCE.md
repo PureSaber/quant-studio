@@ -62,8 +62,11 @@ python -m quant_studio.project_evidence --runs-root /path/to/runs --project PROJ
 python -m quant_studio.project_evidence --runs-root /path/to/runs --project PROJECT_ID --review review.json
 ```
 
-Set `QUANT_TEST_RESEARCH_AGENT_PYTHON` to an installed Agent/Notebook test environment
-and run `pytest tests/test_project_evidence.py`. Integration exercises real Notebook
+Set `QUANT_TEST_RESEARCH_AGENT_PYTHON` to an installed Agent test environment and
+`QUANT_TEST_NOTEBOOK_PYTHON` to the separate Notebook environment (or omit the latter
+when intentionally testing a combined environment). Run `pytest tests/test_project_evidence.py`.
+The research-workspace CI pins the Agent commit and runs these paths with separate
+locked interpreters. Integration exercises real Notebook
 kernels (success and failure), the shipped native synthetic recipe, actual Agent and
 Studio CLI processes, HTTP/CSRF, stale reviews and registered input mutation. Synthetic
 fixtures demonstrate software behavior only, not financial effectiveness. Keep local

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from quant_studio import QuantStudioError
 from quant_studio.access import AccessPolicy, password_record
 from quant_studio.environment_delivery import DeliveryStore
+from quant_studio.jobs import JobManager
 from quant_studio.platform_status_web import (
     capture_process_identity,
     latest_platform_observation,
@@ -15,6 +17,7 @@ from quant_studio.platform_status_web import (
     process_observation,
     source_identity,
 )
+from quant_studio.server import _job_executor
 from tests.test_server import _request, _start_http_server
 from tests.test_workbench_next import delivery_setup
 
@@ -158,3 +161,68 @@ def test_actual_http_page_uses_current_handler_identity_and_access_gate(tmp_path
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_real_workspace_cli_job_retains_attention_diagnostics(tmp_path, monkeypatch):
+    python = os.environ.get("QUANT_TEST_PLATFORM_WORKSPACE_PYTHON")
+    if not python:
+        pytest.skip("requires installed Workspace platform-status CLI")
+    # Deliberately unavailable checkout/runtime, not a fabricated passing profile.
+    profile = delivery_setup(tmp_path, monkeypatch)
+    profile.write_text(
+        json.dumps(
+            {
+                "schema_version": "quant.runtime-profile/v1",
+                "projects": [
+                    {
+                        "id": "quant-studio",
+                        "repo": "quant-studio",
+                        "revision": "0" * 40,
+                        "lock": "requirements.lock",
+                        "lock_sha256": "0" * 64,
+                        "distribution": "quant-studio",
+                        "python": ">=3.12,<3.13",
+                        "environment": ".venv",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "delivery.json"
+    config = json.loads(config_path.read_text())
+    config["python"] = python
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    root = tmp_path / "runs"
+    store = DeliveryStore(root)
+    record = store.prepare("platform-status")
+    manager = JobManager(root, execute=_job_executor(root))
+    try:
+        job = manager.submit(
+            "delivery",
+            "workspace-delivery",
+            {},
+            profile=None,
+            delivery={"id": record["id"]},
+        )
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            job = manager.get(job["job_id"])
+            if job["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.05)
+        assert job["status"] == "failed", job
+        assert store.get(record["id"])["status"] == "failed"
+        snapshot = latest_platform_observation(root)
+        assert snapshot["status"] == "recorded_snapshot"
+        report = snapshot["observation"]
+        assert report["schema_version"] == "quant.platform-status/v1"
+        assert report["status"] == "attention_required"
+        assert report["acceptance"]["status"] == "not_run"
+        assert all(
+            row["running"]["status"] == "not_observed" for row in report["projects"]
+        )
+        page = platform_status_body(root, None)
+        assert "attention_required" in page and "not_observed" in page
+    finally:
+        manager.close()
