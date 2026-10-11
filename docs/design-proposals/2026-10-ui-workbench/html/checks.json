@@ -1,0 +1,194 @@
+[
+  {
+    "file": "01-impeccable.html",
+    "desktop": {
+      "overflow": false,
+      "chart": {
+        "x": 261,
+        "y": 378.34375,
+        "width": 814,
+        "height": 239,
+        "top": 378.34375,
+        "right": 1075,
+        "bottom": 617.34375,
+        "left": 261
+      },
+      "h": 1119
+    },
+    "mobile": {
+      "overflow": false,
+      "chart": {
+        "x": 27,
+        "y": 546.40625,
+        "width": 336,
+        "height": 225,
+        "top": 546.40625,
+        "right": 363,
+        "bottom": 771.40625,
+        "left": 27
+      },
+      "h": 2237
+    },
+    "responsive": [
+      {
+        "width": 375,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "overflow": false
+      },
+      {
+        "width": 1024,
+        "overflow": false
+      }
+    ],
+    "errors": [],
+    "externalRequests": [],
+    "checks": "period / filter empty / immutable save / history / run / report / preflight / dates / mobile run passed"
+  },
+  {
+    "file": "02-ui-ux-pro-max.html",
+    "desktop": {
+      "overflow": false,
+      "chart": {
+        "x": 57,
+        "y": 398.75,
+        "width": 996,
+        "height": 252,
+        "top": 398.75,
+        "right": 1053,
+        "bottom": 650.75,
+        "left": 57
+      },
+      "h": 1314
+    },
+    "mobile": {
+      "overflow": false,
+      "chart": {
+        "x": 27,
+        "y": 625.625,
+        "width": 336,
+        "height": 225,
+        "top": 625.625,
+        "right": 363,
+        "bottom": 850.625,
+        "left": 27
+      },
+      "h": 2267
+    },
+    "responsive": [
+      {
+        "width": 375,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "overflow": false
+      },
+      {
+        "width": 1024,
+        "overflow": false
+      }
+    ],
+    "errors": [],
+    "externalRequests": [],
+    "checks": "period / filter empty / immutable save / history / run / report / preflight / dates / mobile run passed"
+  },
+  {
+    "file": "03-taste-minimalist.html",
+    "desktop": {
+      "overflow": false,
+      "chart": {
+        "x": 728.34375,
+        "y": 357.375,
+        "width": 669.65625,
+        "height": 247,
+        "top": 357.375,
+        "right": 1398,
+        "bottom": 604.375,
+        "left": 728.34375
+      },
+      "h": 1593
+    },
+    "mobile": {
+      "overflow": false,
+      "chart": {
+        "x": 16,
+        "y": 961.90625,
+        "width": 358,
+        "height": 225,
+        "top": 961.90625,
+        "right": 374,
+        "bottom": 1186.90625,
+        "left": 16
+      },
+      "h": 2358
+    },
+    "responsive": [
+      {
+        "width": 375,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "overflow": false
+      },
+      {
+        "width": 1024,
+        "overflow": false
+      }
+    ],
+    "errors": [],
+    "externalRequests": [],
+    "checks": "period / filter empty / immutable save / history / run / report / preflight / dates / mobile run passed"
+  },
+  {
+    "file": "04-anthropic-frontend-design.html",
+    "desktop": {
+      "overflow": false,
+      "chart": {
+        "x": 36,
+        "y": 468,
+        "width": 1020,
+        "height": 330,
+        "top": 468,
+        "right": 1056,
+        "bottom": 798,
+        "left": 36
+      },
+      "h": 1303
+    },
+    "mobile": {
+      "overflow": false,
+      "chart": {
+        "x": 16,
+        "y": 650.40625,
+        "width": 358,
+        "height": 225,
+        "top": 650.40625,
+        "right": 374,
+        "bottom": 875.40625,
+        "left": 16
+      },
+      "h": 2340
+    },
+    "responsive": [
+      {
+        "width": 375,
+        "overflow": false
+      },
+      {
+        "width": 768,
+        "overflow": false
+      },
+      {
+        "width": 1024,
+        "overflow": false
+      }
+    ],
+    "errors": [],
+    "externalRequests": [],
+    "checks": "period / filter empty / immutable save / history / run / report / preflight / dates / mobile run passed"
+  }
+]

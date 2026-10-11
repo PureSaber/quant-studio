@@ -1,0 +1,3 @@
+# Keep archived proposal bytes stable across Windows and Linux checkouts.
+docs/design-proposals/2026-10-ui-workbench/** -text
+docs/design-proposals/2026-10-ui-workbench/html/** linguist-generated

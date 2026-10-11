@@ -1,0 +1,30 @@
+共同约束：用户要四份可对比 HTML，所有内容为本地演示。设计选择由本次 Demo 委托覆盖，不额外要求用户逐项批准概念。没有读取或变更生产仓库。
+
+A / Impeccable 4.5.2
+执行 context 成功；concept-seed key 0ede0d7d，assigned index 6。将新界面视为 Operate，不使用营销或物理工具造型。适合研究者的候选参考是学术期刊排版、统计年鉴、开放科学索引、实验记录册、数据地图图例、科研机构视觉识别、档案分类标签；采用第六项：深松绿身份侧栏、纸白工作区、浅薄荷选中态，签名细节是把训练/验证时间分隔做成真正可调整的实验分段条。保持常见侧栏与双列工作区。
+命题：先知道运行哪个版本，再理解结果。
+首屏：左侧项目导航；主列标题、净值曲线、最近任务；右侧固定宽度的方案参数与预检。
+颜色：#173F35 / #F5F8F5 / #FFFFFF / #276750 / #596C62。
+文字：Segoe UI / Microsoft YaHei，测量值 tabular-nums。Operate 模式允许工作型系统字体；离线 HTML 优先。
+原技能的交互式选型轮次由用户此次直接委托制作比较 Demo 替代。保留 context / seed / craft-floor / detect / 截图和独立结束审查；不宣称完整执行每个交互式工作流步骤。
+
+B / UI UX Pro Max
+实际 design-system 检索两次：financial analytics dashboard；research analytics dashboard。两次输出都夹杂 Enterprise Gateway 营销结构，不适用，明确舍弃。第二次 Data-Dense Dashboard、蓝色数据/琥珀提示与产品匹配，采用。
+命题：高密度信息依然可扫读。顶栏导航、指标带、图表+侧边预检，下方并列配置与任务。
+颜色：主色 #1E40AF；背景 #F8FAFC；表面 #FFFFFF；正文 #1E3A8A；提示 #D97706。字体角色来自 Fira Sans / Fira Code；字体不联网，回退 Segoe UI / Consolas。
+图表搜索 time series comparison 返回雷达和折线，核对后只采用适合时间序列的折线；实线/虚线、图例、数据表作为可访问性补充。
+
+C / Taste Skill
+实际技能：skills/minimalist-skill/SKILL.md，frontmatter name minimalist-ui。
+默认 taste-skill v2 明确不针对 dashboards，故未把其当作已运行的工作台规则。
+命题：研究是一份持续编辑的文档。窄侧导航、宽文档、序章式标题、紧接参数与实验范围；右侧结果笔记；下方全宽任务。
+颜色：#F7F6F3 / #FFFFFF / #2F3437 / #787774 / #EDF3EC / #E1F3FE。
+字体：Georgia + SimSun 标题，Segoe UI + Microsoft YaHei 正文，Consolas 版本标识。无渐变、无阴影、细边框、低饱和状态色。
+
+D / Anthropic frontend-design
+预案：深色研究空间，宽幅曲线是唯一视觉主角，右侧检查器承载可修改方案，下方任务。自检：舍弃常见绿色荧光金融终端，改为蓝灰底、明亮冷蓝数据线、低饱和紫色主操作；没有发光、渐变、营销大字或所有卡片等大。
+颜色：#171E2A / #202A3A / #344154 / #EAF0F7 / #93BAE7 / #BAAFE6。
+字体：Bahnschrift + Microsoft YaHei 界面，tabular-nums 数值。
+命题：让研究者先看见一条完整的比较曲线，再触及可复现实验的参数。原技能的 plan → review → build → critique 流程用于这一版。
+
+限制：这些是同模型、同会话、共享行为代码的设计探索，非独立 A/B 实验。收益序列为固定合成数据，不根据保存参数回测。HTML 能演示产品操作，不代表真实后端功能已经在这些 Demo 里实现。

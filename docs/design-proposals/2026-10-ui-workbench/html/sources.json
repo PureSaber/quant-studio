@@ -1,0 +1,31 @@
+[
+  {
+    "repo": "https://github.com/pbakaus/impeccable",
+    "name": "Impeccable",
+    "folder": "impeccable",
+    "sha256": "3c5eae6363d8fbf062c0b146063b968d757d236671326b011a8adfad651ca578",
+    "ref": "d631a8827f99414d2b6daba4ef08b7f8701751d7"
+  },
+  {
+    "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+    "name": "UI UX Pro Max",
+    "folder": "ui-ux-pro-max",
+    "sha256": "88aadd21220542083a455e373bd162ffe7843266a71f06f4d837bb3b34f9c9c7",
+    "ref": "67803eac81607188194aea9842a723b89326d90d"
+  },
+  {
+    "repo": "https://github.com/Leonxlnx/taste-skill",
+    "name": "Taste minimalist-ui",
+    "folder": "minimalist-skill",
+    "sha256": "1a292d1459292649dc5b422e029093259b6127e7df2f37ad8c22033174333a57",
+    "ref": "717446e07a78d4e6d7918b1fde1a263378eebac9"
+  },
+  {
+    "repo": "https://github.com/anthropics/skills",
+    "name": "Anthropic frontend-design",
+    "folder": "frontend-design",
+    "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+    "ref": "41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f",
+    "note": "Original demo fetched main on 2026-10-11; SKILL.md bytes verified against this pinned commit during archival."
+  }
+]
