@@ -259,6 +259,15 @@ def editor_body(template_id, token, record=None, datasets=None, selected_dataset
     )
     if selected_item:
         snapshot = selected_item["path"]
+        if record is None and template.metadata.get("free_derivative_source"):
+            config = copy.deepcopy(config)
+            config.update(
+                {
+                    k: v
+                    for k, v in selected_item.get("suggested_config", {}).items()
+                    if k in {"mode", "legs", "product"} and isinstance(v, str)
+                }
+            )
         if record is None and template_id == "hk-equity-daily":
             from datetime import date, timedelta
 
@@ -340,7 +349,12 @@ href="{target}/config?revision={revision}">导出原生配置</a>
     )
     external_fields = ""
     parameter_help = "名单可逐项编辑，复杂配置保留高级导入入口。"
-    derivative = template_id in {"options-research", "global-futures-research"}
+    derivative = template_id in {
+        "options-research",
+        "global-futures-research",
+        "options-free-sources",
+        "global-futures-free-sources",
+    }
     if derivative:
         parameter_help = template.metadata["data_help"]
     if template_id == "hk-equity-daily":

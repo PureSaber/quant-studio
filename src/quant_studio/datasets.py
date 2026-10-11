@@ -123,16 +123,33 @@ def describe_input(template_id, path):
         if any(v in provider.lower() for v in ("fixture", "synthetic", "demo"))
         else "来源按原始清单；待原生预检"
     )
+    suggested = origin.get("suggested_config", {}) if isinstance(origin, dict) else {}
+    suggested = (
+        {
+            k: v
+            for k, v in suggested.items()
+            if k in {"mode", "legs", "product"}
+            and isinstance(v, str)
+            and len(v) <= 2000
+        }
+        if isinstance(suggested, dict)
+        else {}
+    )
     return {
+        "suggested_config": suggested,
         "path": str(path),
         "hashes": {name: file_hash(p) for name, p in selected.items()},
         "provider": provider,
-        "symbols": manifest.get("symbols", []),
+        "symbols": manifest.get("symbols", manifest.get("instrument_ids", [])),
         "start": manifest.get("start", manifest.get("requested_start", "未声明")),
         "end": manifest.get("end", manifest.get("requested_end", "未声明")),
         "evidence": evidence,
         "limits": (
-            "文件字节与登记时一致；日期完整性、历史规则和因子要求以原生预检为准。"
+            str(
+                manifest.get("limits")
+                or "文件字节与登记时一致；"
+                "日期完整性、历史规则和因子要求以原生预检为准。"
+            )
         ),
     }
 

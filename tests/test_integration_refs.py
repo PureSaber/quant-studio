@@ -25,5 +25,12 @@ def test_template_revisions_match_the_public_integration_matrix():
             continue
         assert re.fullmatch(r"[0-9a-f]{40}", template.upstream_ref), name
         runtime = template.metadata.get("runtime_key") or template.workspace_repo
+        if template.metadata.get("free_derivative_source"):
+            if runtime == "quant-futures-global":
+                assert (
+                    template.upstream_ref
+                    == workflow["jobs"]["free-derivatives"]["steps"][1]["with"]["ref"]
+                )
+            continue
         if runtime in tested:
             assert template.upstream_ref == tested[runtime], name

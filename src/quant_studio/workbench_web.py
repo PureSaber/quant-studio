@@ -9,6 +9,7 @@ from quant_studio import QuantStudioError
 from quant_studio.datasets import DatasetStore, collection_request
 from quant_studio.derivative_datasets import form as derivative_form
 from quant_studio.experiments import ExperimentStore, configuration_diff
+from quant_studio.free_derivative_datasets import form as free_derivative_form
 from quant_studio.templates import load_template, template_ids
 
 
@@ -207,6 +208,7 @@ href="/data">查看原生预检证据与缺失项</a>
 </header>
 <div
 class="recipe-grid">{cards_html}</div>
+{free_derivative_form(csrf(token))}
 {derivative_form(csrf(token))}
 <section
 class="panel">
@@ -550,8 +552,16 @@ class WorkbenchHandler:
             "/datasets/collect",
             "/datasets/refresh",
             "/datasets/derivatives",
+            "/datasets/free-derivatives",
         }:
-            if path.endswith("/derivatives"):
+            if path.endswith("/free-derivatives"):
+                from quant_studio.free_derivative_datasets import FIELDS
+                from quant_studio.free_derivative_datasets import (
+                    collection_request as free_request,
+                )
+
+                request = free_request(*(field(data, name, "") for name in FIELDS))
+            elif path.endswith("/derivatives"):
                 from quant_studio.derivative_datasets import (
                     collection_request as derivative_request,
                 )
