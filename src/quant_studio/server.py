@@ -2115,7 +2115,7 @@ def _artifact_tables(
         "portfolio_greeks.csv": "组合敏感度",
         "scenarios.csv": "组合风险情景",
         "valuations.csv": "债券价格、利差与久期",
-        "cashflows.csv": "债券现金流",
+        "cashflows.csv": "现金流与费用",
         "rate_futures.csv": "国债与短端利率期货风险",
         "etfs.csv": "债券 ETF 篮子估值",
         "components.csv": "债券 ETF 成分券",
@@ -2128,7 +2128,6 @@ def _artifact_tables(
         "rolls.csv": "换月决策",
         "ledger.csv": "账户分录",
         "lifecycle.csv": "结算与到期事件",
-        "cashflows.csv": "利息、借券与费用现金流",
         "basis.csv": "股指期货基差与持有成本",
         "reference_prices.csv": "公开参考价格（非逐合约）",
     }
