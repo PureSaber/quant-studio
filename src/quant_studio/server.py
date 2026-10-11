@@ -33,6 +33,7 @@ from quant_studio.desk import (
     scan_datasets,
     workspace_root,
 )
+from quant_studio.durable_web import DurableHandler
 from quant_studio.flow import compile_document, flow_steps
 from quant_studio.fund_reconciliation import (
     BATCH_CONFIRMATION_COLUMNS,
@@ -1289,6 +1290,7 @@ class _Handler(
     IntakeHandler,
     BatchHandler,
     MaintenanceHandler,
+    DurableHandler,
     BaseHTTPRequestHandler,
 ):
     runs_root = Path("runs")
@@ -1316,7 +1318,9 @@ class _Handler(
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path in {"/data-center", "/history", "/delivery"}:
+            if path == "/durable-research" or path.startswith("/durable-research/"):
+                self._durable_get(path)
+            elif path in {"/data-center", "/history", "/delivery"}:
                 self._maintenance_get(path)
             elif path == "/onboarding":
                 from quant_studio.onboarding import onboarding_body
@@ -1458,7 +1462,7 @@ class _Handler(
         path = unquote(urlparse(self.path).path)
         code_view = False
         accepted = (
-            path.startswith(("/data-center/", "/delivery/"))
+            path.startswith(("/data-center/", "/delivery/", "/durable-research/"))
             or path.startswith("/templates/")
             or path.startswith("/research/")
             or path.startswith("/datasets/")
@@ -1512,6 +1516,9 @@ class _Handler(
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path.startswith("/durable-research/"):
+                self._durable_post(path, data)
                 return
             if path.startswith(("/data-center/", "/delivery/")):
                 self._maintenance_post(path, data)
@@ -2317,6 +2324,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("history", "研究历史", "/history"),
         ("research", "研究方案", "/research"),
         ("batches", "批量实验", "/batches"),
+        ("durable", "后台因子研究", "/durable-research"),
         ("experiments", "实验笔记", "/experiments"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),
