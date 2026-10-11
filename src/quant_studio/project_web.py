@@ -17,7 +17,8 @@ from quant_studio.workbench_web import csrf, field
 
 def table(headers, rows):
     return (
-        '<div class="table-scroll"><table><thead><tr>'
+        '<div class="table-scroll" tabindex="0" role="region" '
+        'aria-label="可左右滚动的表格"><table><thead><tr>'
         + "".join(f"<th>{escape(str(h))}</th>" for h in headers)
         + "</tr></thead><tbody>"
         + "".join(
@@ -88,7 +89,9 @@ def project_body(root, token, identifier=None, query=None):
     if identifier is None:
         query = query or {}
         body = """<header class="page-head"><h1>研究项目</h1>
-<p>从研究问题出发，把数据、方案、代码、实验和结论放在一起。</p></header>
+<p>从研究问题出发，把数据、方案、代码、实验和结论放在一起。</p>
+<a class="btn" href="/projects/templates">研究模板库</a>
+<a class="btn" href="/projects/notebook-compare">Notebook实验比较</a></header>
 <section class="panel"><form method="get"><label>搜索项目<input name="q"></label>
 <button class="btn">搜索</button></form></section>"""
         for project in store.list(query=query.get("q", [""])[0]):
@@ -185,12 +188,23 @@ value="{record["run_id"]}">
 
 
 def notebook_body(root, token, project):
+    from quant_studio.notebook_template_web import template_save_form
+    from quant_studio.notebook_templates import NotebookTemplateStore
+
     store = NotebookStore(root)
     identifier = project["id"]
     body = '<section class="panel"><h2>交互研究与Notebook实验</h2>'
     body += (
         "<p>在JupyterLab编辑草稿；提交后台实验时复制代码与已登记输入，"
         "结果单独保存。</p>"
+    )
+    binding = NotebookTemplateStore(root).binding(identifier)
+    if binding:
+        body += f"<p>使用模板：{escape(binding['template']['name'])}</p>"
+        body += table(["研究参数", "值"], list(binding["parameters"].items()))
+    body += (
+        '<p><a href="/projects/templates">从模板开始新研究</a> · '
+        '<a href="/projects/notebook-compare">并排比较Notebook实验</a></p>'
     )
     body += f'''<form method="post" action="/projects/{identifier}/notebook-init">
 {csrf(token)}<input type="hidden" name="revision" value="{project["revision"]}">
@@ -214,7 +228,10 @@ rel="noopener noreferrer">打开JupyterLab</a></p>'''
     for record in store.list(identifier):
         body += f"""<p><a href="/projects/{identifier}/notebook/{record["id"]}">
 {escape(record["created_at"])}</a> · {escape(record["status"])}</p>"""
-    return body + "</section>"
+    body += "</section>"
+    if (store.workspace(identifier) / "research.ipynb").is_file():
+        body += template_save_form(root, token, project)
+    return body
 
 
 def notebook_result_body(root, identifier, execution):
@@ -252,10 +269,40 @@ style="width:100%;height:600px"></iframe>'''
 
 class ProjectHandler:
     def _project_get(self, path):
+        from quant_studio.notebook_template_web import (
+            comparison_body,
+            template_library_body,
+        )
         from quant_studio.server import _layout
 
         query = parse_qs(urlparse(self.path).query)
-        if path == "/catalog":
+        if path == "/projects/templates":
+            body, active = (
+                template_library_body(self.runs_root, self.csrf_token, query),
+                "projects",
+            )
+        elif path == "/projects/notebook-compare":
+            if query.get("download") == ["csv"]:
+                from quant_studio.notebook_metrics import (
+                    compare_notebooks,
+                    comparison_csv,
+                )
+
+                content = comparison_csv(
+                    compare_notebooks(self.runs_root, query.get("run", []))
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="notebook-comparison.csv"',
+                )
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+            body, active = comparison_body(self.runs_root, query), "projects"
+        elif path == "/catalog":
             body, active = catalog_body(self.runs_root, query), "catalog"
         elif "/advice/" in path:
             parts = path.removeprefix("/projects/").split("/")
@@ -299,6 +346,12 @@ class ProjectHandler:
 
     def _project_post(self, path, data):
         store = ProjectStore(self.runs_root)
+        if path == "/projects/templates/create":
+            from quant_studio.notebook_template_web import create_from_template
+
+            project = create_from_template(self.runs_root, data)
+            self._redirect(f"/projects/{project['id']}")
+            return
         if path == "/projects/new":
             name, question = field(data, "name"), field(data, "question")
             if data:
@@ -310,6 +363,12 @@ class ProjectHandler:
                 raise QuantStudioError("未知项目操作")
             identifier, action = parts
             revision = field(data, "revision")
+            if action == "template-save":
+                from quant_studio.notebook_template_web import save_template
+
+                template = save_template(self.runs_root, identifier, revision, data)
+                self._redirect(f"/projects/templates?template={template['id']}")
+                return
             if action == "assistant-prepare":
                 question = field(data, "question")
                 if data:
