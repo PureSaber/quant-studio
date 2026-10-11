@@ -1,0 +1,14 @@
+{
+  "line": "fx",
+  "instrument": "spot",
+  "strategy": "carry",
+  "initial_cash": 100000,
+  "notional_base": 10000,
+  "fee_bps": 1,
+  "slippage_bps": 0,
+  "borrowing_spread": 0.005,
+  "lookback": 5,
+  "max_leverage": 2,
+  "max_quote_age_hours": 24,
+  "max_gap_days": 7
+}

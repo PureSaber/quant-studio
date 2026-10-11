@@ -1,0 +1,192 @@
+{
+  "id": "macro-fx-research",
+  "title": "外汇现货与远期研究",
+  "summary": "历史时点数据预检、专项研究与可复算报告。",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "runtime_key": "quant-macro",
+  "upstream_ref": "3c705e1931ca0c423ea6d34f09117a9f883ccc15",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "外汇现货与远期数据包目录",
+    "environment": "QUANT_MACRO_FX_BUNDLE",
+    "required_files": [
+      "manifest.json",
+      "data.json"
+    ]
+  },
+  "data_help": "选择 quant.macro.bundle/v1 数据包。合成样例可用 quant_macro.cli demo 生成。真实输入须保留报价及发布时间、来源和授权；外汇参考汇率不能直接作为成交报价。",
+  "knobs": [
+    {
+      "name": "instrument",
+      "label": "研究工具",
+      "path": "instrument",
+      "default": "spot",
+      "type": "enum",
+      "choices": [
+        "spot",
+        "forward"
+      ],
+      "choice_labels": {
+        "spot": "现货与双币种现金账户",
+        "forward": "现金结算远期与展期"
+      }
+    },
+    {
+      "name": "strategy",
+      "label": "策略",
+      "path": "strategy",
+      "default": "carry",
+      "type": "enum",
+      "choices": [
+        "carry",
+        "momentum",
+        "long"
+      ],
+      "choice_labels": {
+        "carry": "利差",
+        "momentum": "历史动量",
+        "long": "持有基准货币"
+      }
+    },
+    {
+      "name": "initial_cash",
+      "label": "初始资金（报价币种）",
+      "path": "initial_cash",
+      "default": 100000,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 1000000000000.0
+    },
+    {
+      "name": "notional_base",
+      "label": "基准货币名义数量",
+      "path": "notional_base",
+      "default": 10000,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 1000000000000.0
+    },
+    {
+      "name": "fee_bps",
+      "label": "单边手续费（基点）",
+      "path": "fee_bps",
+      "default": 1,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "slippage_bps",
+      "label": "单边不利滑点（基点）",
+      "path": "slippage_bps",
+      "default": 0,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    {
+      "name": "borrowing_spread",
+      "label": "负现金余额额外年化融资利差",
+      "path": "borrowing_spread",
+      "default": 0.005,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    {
+      "name": "lookback",
+      "label": "动量回看观察数",
+      "path": "lookback",
+      "default": 5,
+      "type": "int",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    {
+      "name": "max_leverage",
+      "label": "最大名义敞口／净值",
+      "path": "max_leverage",
+      "default": 2,
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 20
+    },
+    {
+      "name": "max_quote_age_hours",
+      "label": "最大报价发布延迟（小时）",
+      "path": "max_quote_age_hours",
+      "default": 24,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 168
+    },
+    {
+      "name": "max_gap_days",
+      "label": "最大观察间隔（日）",
+      "path": "max_gap_days",
+      "default": 7,
+      "type": "number",
+      "minimum": 1,
+      "maximum": 31
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "run",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "preflight",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查可知时刻、计价单位、现金流、曲线范围及完整研究窗口。",
+  "preflight_contract": {
+    "schema_version": "quant.macro.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "nav.csv": "nav.csv",
+    "fills.csv": "fills.csv",
+    "ledger.csv": "ledger.csv",
+    "positions.csv": "positions.csv",
+    "rolls.csv": "rolls.csv",
+    "study.json": "study.json",
+    "report.html": "report.html",
+    "artifacts.json": "artifacts.json"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "离线研究与模型估值；不表示真实可成交、市场数据认证或实盘接入。具体计息、报价、到期和模型适用边界见报告及数据规范。",
+  "nav_initial_value_key": "initial_cash"
+}

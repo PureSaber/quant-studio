@@ -1,0 +1,155 @@
+{
+  "id": "macro-credit-research",
+  "title": "公司债与债券 ETF研究",
+  "summary": "历史时点数据预检、专项研究与可复算报告。",
+  "kind": "external",
+  "workspace_repo": "quant-futures-spread",
+  "runtime_key": "quant-macro",
+  "upstream_ref": "3c705e1931ca0c423ea6d34f09117a9f883ccc15",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "label": "公司债与债券 ETF数据包目录",
+    "environment": "QUANT_MACRO_CREDIT_BUNDLE",
+    "required_files": [
+      "manifest.json",
+      "data.json"
+    ]
+  },
+  "data_help": "选择 quant.macro.bundle/v1 数据包。合成样例可用 quant_macro.cli demo 生成。真实输入须保留报价及发布时间、来源和授权；外汇参考汇率不能直接作为成交报价。",
+  "knobs": [
+    {
+      "name": "as_of",
+      "label": "历史可知时刻（含时区）",
+      "path": "as_of",
+      "default": "2026-01-05T17:00:00+00:00",
+      "type": "text",
+      "max_length": 64,
+      "pattern": "[^\\r\\n\\x00]{1,64}"
+    },
+    {
+      "name": "settlement",
+      "label": "结算日期／零息曲线锚点",
+      "path": "settlement",
+      "default": "2026-01-05",
+      "type": "date"
+    },
+    {
+      "name": "shock_bp",
+      "label": "平行利率／利差冲击（基点）",
+      "path": "shock_bp",
+      "default": 100,
+      "type": "number",
+      "minimum": -1000,
+      "maximum": 1000
+    },
+    {
+      "name": "stale_policy",
+      "label": "缺失或陈旧单券报价",
+      "path": "stale_policy",
+      "default": "reject",
+      "type": "enum",
+      "choices": [
+        "reject",
+        "model"
+      ],
+      "choice_labels": {
+        "reject": "终止研究",
+        "model": "显式模型估值并标注"
+      }
+    },
+    {
+      "name": "model_spread",
+      "label": "模型估值使用的连续复利利差",
+      "path": "model_spread",
+      "default": 0.01,
+      "type": "number",
+      "minimum": -0.5,
+      "maximum": 2
+    },
+    {
+      "name": "max_quote_age_days",
+      "label": "报价最大年龄（日）",
+      "path": "max_quote_age_days",
+      "default": 3,
+      "type": "int",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    {
+      "name": "max_curve_age_days",
+      "label": "曲线最大年龄（日）",
+      "path": "max_curve_age_days",
+      "default": 3,
+      "type": "int",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    {
+      "name": "max_holdings_age_days",
+      "label": "ETF 成分最大年龄（日）",
+      "path": "max_holdings_age_days",
+      "default": 31,
+      "type": "int",
+      "minimum": 0,
+      "maximum": 3650
+    }
+  ],
+  "argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "run",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_macro.cli",
+    "preflight",
+    "--bundle",
+    "{snapshot}",
+    "--config",
+    "{config}"
+  ],
+  "preflight_summary": "只读检查可知时刻、计价单位、现金流、曲线范围及完整研究窗口。",
+  "preflight_contract": {
+    "schema_version": "quant.macro.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": [
+      "rows",
+      "contracts"
+    ],
+    "instrument_ids_required": true
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "valuations.csv": "valuations.csv",
+    "cashflows.csv": "cashflows.csv",
+    "scenarios.csv": "scenarios.csv",
+    "rate_futures.csv": "rate_futures.csv",
+    "etfs.csv": "etfs.csv",
+    "components.csv": "components.csv",
+    "study.json": "study.json",
+    "report.html": "report.html",
+    "artifacts.json": "artifacts.json"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "离线研究与模型估值；不表示真实可成交、市场数据认证或实盘接入。具体计息、报价、到期和模型适用边界见报告及数据规范。"
+}
