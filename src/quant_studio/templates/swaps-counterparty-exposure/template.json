@@ -1,0 +1,87 @@
+{
+  "id": "swaps-counterparty-exposure",
+  "title": "互换对手方敞口",
+  "summary": "使用明确的数据、时点和模型假设，生成可复查的研究报告。",
+  "kind": "external",
+  "workspace_repo": "quant-swaps",
+  "runtime_key": "quant-swaps-market",
+  "upstream_ref": "3dad5907d4a3771689b60e94d2715706cbba2edd",
+  "integration_job": "option-swaps-local",
+  "base_config": "base.json",
+  "config_format": "json",
+  "knobs": [
+    {
+      "name": "paths",
+      "label": "模拟路径数",
+      "path": "paths",
+      "default": 500,
+      "minimum": 100,
+      "maximum": 50000,
+      "type": "int"
+    },
+    {
+      "name": "volatility",
+      "label": "短利率波动率假设",
+      "path": "volatility",
+      "default": 0.01,
+      "minimum": 0,
+      "maximum": 1,
+      "type": "number"
+    },
+    {
+      "name": "seed",
+      "label": "随机种子",
+      "path": "seed",
+      "default": 42,
+      "minimum": 0,
+      "maximum": 2147483647,
+      "type": "int"
+    }
+  ],
+  "requires_snapshot": false,
+  "argv": [
+    "python",
+    "-m",
+    "quant_swaps.workbench",
+    "--config",
+    "{config}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_swaps.workbench",
+    "--config",
+    "{config}",
+    "--preflight"
+  ],
+  "preflight_summary": "只读验证输入、报价时点和模型计算；不会提交订单。",
+  "preflight_contract": {
+    "schema_version": "quant-swaps.preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": []
+  },
+  "output_dirs": [
+    "{output}"
+  ],
+  "result_files": {
+    "report.html": "report.html",
+    "study.json": "study.json",
+    "artifacts.json": "artifacts.json",
+    "fixed_cashflows.csv": "fixed_cashflows.csv",
+    "floating_cashflows.csv": "floating_cashflows.csv",
+    "quote_repricing.csv": "quote_repricing.csv",
+    "exposure.csv": "exposure.csv"
+  },
+  "result_evidence": {
+    "file": "study.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "默认输入为合成验收样例；真实研究需替换有来源的历史输入。保证金是研究规则，清算回执仅离线核对。"
+}

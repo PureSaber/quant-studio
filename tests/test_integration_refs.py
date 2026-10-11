@@ -19,12 +19,27 @@ def test_template_revisions_match_the_public_integration_matrix():
     tested["quant-timing"] = timing["ref"]
     derivatives = workflow["jobs"]["derivatives"]["steps"][1]["with"]
     tested["quant-futures-global"] = derivatives["ref"]
+    macro = yaml.safe_load(
+        (root / ".github/workflows/macro-integration.yml").read_text()
+    )["jobs"]["macro"]["steps"][1]["with"]["ref"]
+    tested["quant-macro"] = macro
+    tested["quant-macro-futures"] = macro
     for name in template_ids():
         template = load_template(name)
         if template.kind == "synthetic":
             continue
         assert re.fullmatch(r"[0-9a-f]{40}", template.upstream_ref), name
         runtime = template.metadata.get("runtime_key") or template.workspace_repo
+        if template.metadata.get("integration_job") == "research-extensions":
+            checkouts = {
+                step["with"]["repository"].split("/")[-1]: step["with"]["ref"]
+                for step in workflow["jobs"]["research-extensions"]["steps"]
+                if "repository" in step.get("with", {})
+            }
+            # Private options has its own CI plus authenticated local CLI acceptance.
+            if template.workspace_repo != "quant-options":
+                assert template.upstream_ref == checkouts[template.workspace_repo], name
+            continue
         if template.metadata.get("free_derivative_source"):
             if runtime == "quant-futures-global":
                 assert (

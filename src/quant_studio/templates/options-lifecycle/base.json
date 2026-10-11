@@ -1,0 +1,145 @@
+{
+  "currency": "USD",
+  "events": [
+    {
+      "id": "capital",
+      "type": "deposit",
+      "at": "2025-01-02T21:00:01+00:00",
+      "available_at": "2025-01-02T21:00:01+00:00",
+      "amount": "100000"
+    },
+    {
+      "id": "locate",
+      "type": "locate",
+      "at": "2025-01-02T21:00:01+00:00",
+      "available_at": "2025-01-02T21:00:01+00:00",
+      "instrument": "DEMO-SPOT",
+      "quantity": "1000",
+      "expires_at": "2025-03-01T00:00:00Z"
+    },
+    {
+      "id": "open-option",
+      "type": "fill",
+      "at": "2025-01-02T21:00:01+00:00",
+      "available_at": "2025-01-02T21:00:01+00:00",
+      "instrument": "DEMO:M-C100",
+      "quantity": "1",
+      "price": "2.01",
+      "quote_at": "2025-01-02T21:00:00+00:00",
+      "order_at": "2025-01-02T20:00:00Z",
+      "fee": "1"
+    },
+    {
+      "id": "mark",
+      "type": "mark",
+      "at": "2025-01-02T21:00:01+00:00",
+      "available_at": "2025-01-02T21:00:01+00:00",
+      "prices": {
+        "DEMO:M-C100": "2",
+        "DEMO-SPOT": "100"
+      }
+    },
+    {
+      "id": "delta",
+      "type": "delta_decision",
+      "at": "2025-01-02T21:00:02Z",
+      "available_at": "2025-01-02T21:00:02Z",
+      "underlying": "DEMO-SPOT"
+    },
+    {
+      "id": "hedge",
+      "type": "hedge_tick",
+      "at": "2025-01-02T21:00:04Z",
+      "available_at": "2025-01-02T21:00:04Z",
+      "observed_at": "2025-01-02T21:00:03Z",
+      "instrument": "DEMO-SPOT",
+      "bid": "100",
+      "ask": "100.10",
+      "bid_size": "100",
+      "ask_size": "100"
+    },
+    {
+      "id": "margin",
+      "type": "margin",
+      "at": "2025-01-02T21:00:04Z",
+      "available_at": "2025-01-02T21:00:04Z",
+      "requirement": "1000",
+      "model": "synthetic declared scenario requirement"
+    },
+    {
+      "id": "ex-dividend",
+      "type": "dividend_ex",
+      "at": "2025-01-04T12:00:00Z",
+      "available_at": "2025-01-04T12:00:00Z",
+      "instrument": "DEMO-SPOT",
+      "dividend_id": "D1",
+      "amount_per_share": "0.5",
+      "pay_at": "2025-01-05T12:00:00Z"
+    },
+    {
+      "id": "pay-dividend",
+      "type": "dividend_pay",
+      "at": "2025-01-05T12:00:00Z",
+      "available_at": "2025-01-05T12:00:00Z",
+      "dividend_id": "D1"
+    },
+    {
+      "id": "expiry",
+      "type": "exercise",
+      "at": "2025-02-21T21:00:00+00:00",
+      "available_at": "2025-02-21T21:00:00+00:00",
+      "instrument": "DEMO:M-C100",
+      "fixing": "110",
+      "fixing_at": "2025-02-21T21:00:00+00:00",
+      "fixing_available_at": "2025-02-21T21:00:00+00:00"
+    },
+    {
+      "id": "flat-target",
+      "type": "delta_decision",
+      "at": "2025-02-21T21:00:00+00:00",
+      "available_at": "2025-02-21T21:00:00+00:00",
+      "underlying": "DEMO-SPOT"
+    },
+    {
+      "id": "close-hedge",
+      "type": "hedge_tick",
+      "at": "2025-02-21T21:00:02Z",
+      "available_at": "2025-02-21T21:00:02Z",
+      "observed_at": "2025-02-21T21:00:01Z",
+      "instrument": "DEMO-SPOT",
+      "bid": "110",
+      "ask": "110.1",
+      "bid_size": "100",
+      "ask_size": "100"
+    },
+    {
+      "id": "release",
+      "type": "margin",
+      "at": "2025-02-21T21:00:02Z",
+      "available_at": "2025-02-21T21:00:02Z",
+      "requirement": "0",
+      "model": "flat portfolio"
+    }
+  ],
+  "rate": 0.03,
+  "dividend": 0,
+  "max_quote_age_seconds": 300,
+  "hedge_lot": 1,
+  "hedge_fee_per_unit": "0.01",
+  "funding": {
+    "known_at": "2024-09-24T21:00:00+00:00",
+    "debit_rate": "0.05",
+    "credit_rate": "0.02",
+    "borrow_rates": {
+      "DEMO-SPOT": "0.03"
+    }
+  },
+  "hedges": {
+    "DEMO-SPOT": {
+      "instrument_id": "DEMO-SPOT",
+      "beta": 1,
+      "known_at": "2024-09-24T21:00:00+00:00",
+      "source": "synthetic direct spot hedge"
+    }
+  }
+}

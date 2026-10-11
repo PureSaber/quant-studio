@@ -1,0 +1,80 @@
+{
+  "schema": "quant-swaps.market/v1",
+  "evidence_kind": "synthetic",
+  "source": "synthetic curve quote acceptance",
+  "rights_note": "generated locally",
+  "curves": {
+    "as_of": "2026-01-02T18:00:00Z",
+    "currency": "EUR",
+    "discount_quotes": [
+      {
+        "tenor": "1M",
+        "rate": 0.03,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "3M",
+        "rate": 0.031,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "6M",
+        "rate": 0.032,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "1Y",
+        "rate": 0.033,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "2Y",
+        "rate": 0.035,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "5Y",
+        "rate": 0.036,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "10Y",
+        "rate": 0.038,
+        "available_at": "2026-01-02T18:00:00Z"
+      }
+    ],
+    "index_tenor": "3M",
+    "projection_quotes": [
+      {
+        "tenor": "1Y",
+        "rate": 0.035,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "2Y",
+        "rate": 0.037000000000000005,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "5Y",
+        "rate": 0.038,
+        "available_at": "2026-01-02T18:00:00Z"
+      },
+      {
+        "tenor": "10Y",
+        "rate": 0.04,
+        "available_at": "2026-01-02T18:00:00Z"
+      }
+    ]
+  },
+  "swap": {
+    "trade_id": "EURIBOR-3M",
+    "effective": "2026-01-06",
+    "maturity": "2031-01-06",
+    "notional": 1000000,
+    "fixed_rate": 0.035,
+    "floating_type": "term",
+    "index_tenor": "3M",
+    "fixed_day_count": "30/360"
+  }
+}

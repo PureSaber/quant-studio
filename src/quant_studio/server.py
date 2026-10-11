@@ -33,6 +33,7 @@ from quant_studio.desk import (
     scan_datasets,
     workspace_root,
 )
+from quant_studio.durable_web import DurableHandler
 from quant_studio.flow import compile_document, flow_steps
 from quant_studio.fund_reconciliation import (
     BATCH_CONFIRMATION_COLUMNS,
@@ -1289,6 +1290,7 @@ class _Handler(
     IntakeHandler,
     BatchHandler,
     MaintenanceHandler,
+    DurableHandler,
     BaseHTTPRequestHandler,
 ):
     runs_root = Path("runs")
@@ -1316,7 +1318,9 @@ class _Handler(
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path in {"/data-center", "/history", "/delivery"}:
+            if path == "/durable-research" or path.startswith("/durable-research/"):
+                self._durable_get(path)
+            elif path in {"/data-center", "/history", "/delivery"}:
                 self._maintenance_get(path)
             elif path == "/onboarding":
                 from quant_studio.onboarding import onboarding_body
@@ -1458,7 +1462,7 @@ class _Handler(
         path = unquote(urlparse(self.path).path)
         code_view = False
         accepted = (
-            path.startswith(("/data-center/", "/delivery/"))
+            path.startswith(("/data-center/", "/delivery/", "/durable-research/"))
             or path.startswith("/templates/")
             or path.startswith("/research/")
             or path.startswith("/datasets/")
@@ -1512,6 +1516,9 @@ class _Handler(
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path.startswith("/durable-research/"):
+                self._durable_post(path, data)
                 return
             if path.startswith(("/data-center/", "/delivery/")):
                 self._maintenance_post(path, data)
@@ -2114,11 +2121,26 @@ def _artifact_tables(
         "surface.csv": "波动率观察值",
         "portfolio_greeks.csv": "组合敏感度",
         "scenarios.csv": "组合风险情景",
+        "valuations.csv": "债券价格、利差与久期",
+        "cashflows.csv": "现金流与费用",
+        "fixed_cashflows.csv": "固定端现金流",
+        "floating_cashflows.csv": "浮动端现金流",
+        "quote_repricing.csv": "曲线报价重定价",
+        "exposure.csv": "对手方与抵押品敞口",
+        "rate_futures.csv": "国债与短端利率期货风险",
+        "etfs.csv": "债券 ETF 篮子估值",
+        "components.csv": "债券 ETF 成分券",
+        "settlements.csv": "逐币种结算",
+        "signals.csv": "历史信号与篮子溢价",
+        "reference.csv": "公开参考数据与风险",
+        "coverage.csv": "数据覆盖区间",
         "curve.csv": "期货期限结构",
         "spreads.csv": "跨月价差",
         "rolls.csv": "换月决策",
         "ledger.csv": "账户分录",
         "lifecycle.csv": "结算与到期事件",
+        "basis.csv": "股指期货基差与持有成本",
+        "reference_prices.csv": "公开参考价格（非逐合约）",
     }
     labels = {
         "event_time": "事件时间（UTC）" if native else "事件时间（原时区）",
@@ -2317,6 +2339,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("history", "研究历史", "/history"),
         ("research", "研究方案", "/research"),
         ("batches", "批量实验", "/batches"),
+        ("durable", "后台因子研究", "/durable-research"),
         ("experiments", "实验笔记", "/experiments"),
         ("strategy", "策略", "/strategy"),
         ("backtest", "回测", "/backtest"),
