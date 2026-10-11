@@ -36,6 +36,7 @@ jobs:
         if: always()
         with:
           name: notebook-containment-evidence
+          include-hidden-files: true
           path: |
             image-identity.json
             image-packages.txt
