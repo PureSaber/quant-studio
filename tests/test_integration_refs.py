@@ -31,7 +31,9 @@ def test_template_revisions_match_the_public_integration_matrix():
                 for step in workflow["jobs"]["research-extensions"]["steps"]
                 if "repository" in step.get("with", {})
             }
-            assert template.upstream_ref == checkouts[template.workspace_repo], name
+            # Private options has its own CI plus authenticated local CLI acceptance.
+            if template.workspace_repo != "quant-options":
+                assert template.upstream_ref == checkouts[template.workspace_repo], name
             continue
         if template.metadata.get("free_derivative_source"):
             if runtime == "quant-futures-global":

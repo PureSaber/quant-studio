@@ -6,11 +6,17 @@ import shutil
 import sys
 from pathlib import Path
 
+import pytest
+
 from quant_studio.recipes import RecipeStore, recipe_template
 from quant_studio.runner import preflight, run
 from quant_studio.settings import use_settings
 
 
+@pytest.mark.skipif(
+    not os.environ.get("QUANT_OPTIONS_REPO"),
+    reason="Private options upstream is verified in authenticated local acceptance",
+)
 def test_convertible_account_installed_upstream(tmp_path):
     from quant_execution.derivative_replay import verify_artifacts
 
