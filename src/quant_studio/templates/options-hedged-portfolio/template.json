@@ -4,7 +4,7 @@
   "summary": "读取已登记的研究输入，验证约束并生成可核验报告。",
   "kind": "external",
   "workspace_repo": "quant-options",
-  "upstream_ref": "e1292424a9a60c15ad8dc12d7ce1859d6bc3106a",
+  "upstream_ref": "b732470227fb8bf869791eb205717ad97516fb4e",
   "runtime_key": "quant-institutional",
   "base_config": "base.json",
   "config_format": "json",
@@ -84,5 +84,6 @@
     ]
   },
   "report_name": "report.html",
-  "disclaimer": "离线研究。合成输入不代表市场历史表现；真实数据、借券和交割依据须由使用者提供。"
+  "disclaimer": "离线研究。合成输入不代表市场历史表现；真实数据、借券和交割依据须由使用者提供。",
+  "integration_job": "institutional-local"
 }
