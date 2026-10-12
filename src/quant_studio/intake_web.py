@@ -5,7 +5,13 @@ from html import escape
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from quant_studio import QuantStudioError
-from quant_studio.intake_tools import PURPOSES, IntakeWorkspace, contract_from_form
+from quant_studio.intake_tools import (
+    PURPOSES,
+    IntakeWorkspace,
+    contract_from_form,
+    dataset_identifier,
+    request_status,
+)
 from quant_studio.project_web import table
 from quant_studio.recipes import _atomic
 from quant_studio.workbench_web import csrf, field
@@ -126,6 +132,8 @@ def _preview_columns(store, upload_id):
 
 
 def _published_version(record):
+    if request_status(record) != "succeeded":
+        return ""
     response = record.get("response")
     data = response.get("data") if isinstance(response, dict) else None
     version = data.get("version") if isinstance(data, dict) else None
@@ -218,8 +226,20 @@ def intake_body(store, token):
         body += f'<p role="alert">原件列表暂不可读：{escape(str(exc))}</p>'
     body += "</section>"
     try:
-        datasets = _data(store.backend("list"))["datasets"]
+        catalog = store.root / "catalog"
+        first_import = (
+            not catalog.exists()
+            and not catalog.is_symlink()
+            and not catalog.is_junction()
+            and not any(
+                item.get("status") == "succeeded" for item in store.request_list()
+            )
+        )
+        datasets = [] if first_import else _data(store.backend("list"))["datasets"]
+        datasets = [item for item in datasets if item.get("latest")]
         body += '<section class="panel"><h2>已发布数据版本</h2>'
+        if not datasets:
+            body += "<p>尚未发布数据版本。确认原件字段映射后，提交完整检查。</p>"
         for item in datasets:
             link = urlencode(
                 {"name": item["name"], "version": item.get("latest") or ""}
@@ -238,7 +258,8 @@ def intake_body(store, token):
     if not requests:
         body += "<p>尚未提交字段映射。</p>"
     for item in requests:
-        status = _STATUS_LABELS.get(item["status"], item["status"])
+        effective_status = request_status(item)
+        status = _STATUS_LABELS.get(effective_status, effective_status)
         body += (
             f'<p><a href="/intake/requests/{item["id"]}">'
             f"{escape(item['name'])}</a> · {escape(status)}"
@@ -289,7 +310,10 @@ def mapping_body(
     refresh = None
     refresh_notice = ""
     contract = {}
-    name = uploaded["filename"].rsplit(".", 1)[0]
+    try:
+        name = dataset_identifier(uploaded["filename"].rsplit(".", 1)[0])
+    except QuantStudioError:
+        name = f"dataset-{identifier[:12]}"
     parent = ""
     reuse_hidden = ""
     if reuse_request:
@@ -408,7 +432,14 @@ def mapping_body(
 <label>复用已确认映射<select name="reuse">{choices}</select></label>
 <button class="btn">检查字段并带入</button></form></section>'''
     primary_key = ",".join(contract.get("primary_key", []))
-    name_input = _input("name", "数据集名称", name)
+    name_input = (
+        '<label>数据集标识<input name="name" '
+        f'value="{escape(name, quote=True)}" required maxlength="120" '
+        'pattern="[A-Za-z0-9][A-Za-z0-9._\\-]{0,119}">'
+        "<small>使用英文字母、数字、点、短横线或下划线，"
+        "以英文字母或数字开头，不以点结尾，不使用CON、AUX等系统保留名。"
+        "原始文件名会完整保留。</small></label>"
+    )
     source_input = _input("source", "原始来源/文件出处", metadata.get("source", ""))
     provider_input = _input(
         "provider", "供应商或导出系统", metadata.get("provider", "")
@@ -590,7 +621,8 @@ class IntakeHandler:
             )
         elif path.startswith("/intake/requests/"):
             record = store.request(path.rsplit("/", 1)[1])
-            status = _STATUS_LABELS.get(record["status"], record["status"])
+            effective_status = request_status(record)
+            status = _STATUS_LABELS.get(effective_status, effective_status)
             uploaded = store.upload_record(record["upload_id"])
             parent_label = escape(str(record.get("parent") or "首次导入"))
             body = (

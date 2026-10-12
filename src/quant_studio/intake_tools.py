@@ -21,6 +21,15 @@ from quant_studio.workbench_web import field
 
 UPLOAD_LIMIT = 24 * 1024 * 1024
 _ID = re.compile(r"[a-f0-9]{32}\Z")
+_DATASET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}\Z")
+_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 _LOCK = threading.RLock()
 _TYPES = {"string", "integer", "number", "boolean", "date", "datetime"}
 PURPOSES = {
@@ -28,6 +37,47 @@ PURPOSES = {
     "daily_bars_research": "日线行情研究",
     "historical_financial_factor_backtest": "历史财务因子回放",
 }
+
+
+def dataset_identifier(name):
+    """Validate the portable QDK identifier before creating an import request."""
+    value = name.strip() if isinstance(name, str) else ""
+    if (
+        not _DATASET_NAME.fullmatch(value)
+        or value.endswith(".")
+        or value.split(".", 1)[0].upper() in _RESERVED_NAMES
+    ):
+        raise QuantStudioError(
+            "数据集标识须为1至120个英文字母、数字、点、短横线或下划线，"
+            "以英文字母或数字开头，不能以点结尾或使用CON、AUX等系统保留名"
+        )
+    return value
+
+
+def import_status(response):
+    """An executed import can retain a blocked version without publishing it."""
+    if not isinstance(response, dict) or response.get("ok") is not True:
+        return "blocked"
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return "blocked"
+    version, report = data.get("version"), data.get("report")
+    if (
+        isinstance(version, dict)
+        and isinstance(version.get("id"), str)
+        and version["id"]
+        and version.get("status") == "ready"
+        and isinstance(report, dict)
+        and report.get("status") == "ready"
+    ):
+        return "succeeded"
+    return "blocked"
+
+
+def request_status(record):
+    """Correct old false-success labels without rewriting archived receipts."""
+    status = record.get("status", "prepared")
+    return import_status(record.get("response")) if status == "succeeded" else status
 
 
 def _hash(path):
@@ -124,8 +174,7 @@ class IntakeWorkspace:
 
     def prepare(self, upload_id, name, contract, *, parent=None):
         self.source(upload_id)
-        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
-            raise QuantStudioError("数据集名称须为1至120字")
+        name = dataset_identifier(name)
         identifier = uuid.uuid4().hex
         directory = _safe_directory(self.root, "requests", identifier)
         directory.mkdir(parents=True)
@@ -136,7 +185,7 @@ class IntakeWorkspace:
         record = {
             "id": identifier,
             "upload_id": upload_id,
-            "name": name.strip(),
+            "name": name,
             "parent": parent,
             "contract_sha256": _hash(contract_path),
             "source_sha256": self.upload_record(upload_id)["sha256"],
@@ -363,7 +412,7 @@ class IntakeWorkspace:
             argv += ["--parent", record["parent"]]
         try:
             value = self.backend("import", argv, control=control)
-            status = "succeeded" if value.get("ok") else "blocked"
+            status = import_status(value)
             _atomic(directory / "response.json", json.dumps(value, ensure_ascii=False))
             self.update(identifier, status=status, response=value)
             return {

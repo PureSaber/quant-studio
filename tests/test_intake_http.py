@@ -185,15 +185,21 @@ def test_refresh_reuses_exact_mapping_and_reports_schema_change(tmp_path, monkey
         "metadata": {"provider": "旧供应商", "units": {"close": "CNY"}},
         "limits": {"max_bytes": 1, "max_rows": 100},
     }
-    request = store.prepare(old["id"], "已确认行情", contract)
+    request = store.prepare(old["id"], "confirmed-bars", contract)
     store.update(
         request["id"],
         status="succeeded",
-        response={"ok": True, "data": {"version": {"id": "version-001"}}},
+        response={
+            "ok": True,
+            "data": {
+                "version": {"id": "version-001", "status": "ready"},
+                "report": {"status": "ready"},
+            },
+        },
     )
 
     reused = mapping_body(store, "token", new["id"], reuse_request=request["id"])
-    assert 'value="已确认行情"' in reused
+    assert 'value="confirmed-bars"' in reused
     assert 'value="version-001"' in reused
     assert 'name="reuse_request"' in reused
     assert 'name="map_1" value="close"' in reused
@@ -247,7 +253,7 @@ def test_intake_submit_leaves_linked_state_to_job_manager(tmp_path):
         "/intake/import",
         {
             "upload": [uploaded["id"]],
-            "name": ["示例"],
+            "name": ["example"],
             "parent": [""],
             "encoding": ["utf-8-sig"],
             "delimiter": [","],
