@@ -3,6 +3,8 @@
 import base64
 import importlib.metadata
 import json
+import os
+import random
 import sys
 from html import escape
 from pathlib import Path
@@ -22,14 +24,15 @@ def environment_identity():
     }
 
 
-def execute(directory, timeout):
+def execute(directory, timeout, output=None):
     import nbformat
     from jupyter_client import KernelManager
     from jupyter_client.kernelspec import KernelSpecManager
     from nbclient import NotebookClient
 
     directory = Path(directory)
-    kernel_root = directory / ".kernel"
+    output_dir = Path(output) if output else directory
+    kernel_root = (Path("/tmp") if output_dir != directory else directory) / ".kernel"
     spec = kernel_root / "research"
     spec.mkdir(parents=True)
     (spec / "kernel.json").write_text(
@@ -49,20 +52,30 @@ def execute(directory, timeout):
         encoding="utf-8",
     )
     environment = environment_identity()
-    (directory / "environment.json").write_text(
+    (output_dir / "environment.json").write_text(
         json.dumps(environment, indent=2), encoding="utf-8"
     )
     requested = json.loads(
         (directory / "requested-environment.json").read_text(encoding="utf-8")
     )
-    if requested != environment:
+    if requested.get("identity_kind") == "docker-image":
+        if output_dir == directory or requested["image_id"] != os.environ.get(
+            "QUANT_IMAGE_ID"
+        ):
+            raise RuntimeError("Frozen container image identity mismatch")
+    elif requested != environment:
         raise RuntimeError("Notebook environment changed after submission")
+    seed = int(os.environ.get("QUANT_RESEARCH_SEED", "42"))
+    random.seed(seed)
     notebook = nbformat.read(directory / "source.ipynb", as_version=4)
     # Parameters are parsed as data, never interpolated into Python source.
     notebook.cells.insert(
         0,
         nbformat.v4.new_code_cell(
             "import json\nfrom pathlib import Path\n"
+            f"import random\nrandom.seed({seed})\n"
+            f"try:\n    import numpy\n    numpy.random.seed({seed})\n"
+            "except ImportError:\n    pass\n"
             "context = json.loads(Path('inputs.json').read_text(encoding='utf-8'))\n"
             "parameters = context.get('parameters', {})\n"
             "from research import Research\n"
@@ -77,7 +90,7 @@ def execute(directory, timeout):
             "if 'research_metrics' in globals():\n"
             "    import json as _studio_json\n"
             "    from pathlib import Path as _StudioPath\n"
-            f"    _StudioPath({str(directory / 'metrics.json')!r}).write_text(\n"
+            f"    _StudioPath({str(output_dir / 'metrics.json')!r}).write_text(\n"
             "        _studio_json.dumps(research_metrics,\n"
             "            ensure_ascii=False, allow_nan=False),\n"
             "        encoding='utf-8')",
@@ -107,7 +120,7 @@ def execute(directory, timeout):
         failed = True
         print(str(exc), file=sys.stderr)
     finally:
-        nbformat.write(notebook, directory / "executed.ipynb")
+        nbformat.write(notebook, output_dir / "executed.ipynb")
         body = [
             '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
             "<title>研究实验</title>",
@@ -137,7 +150,7 @@ def execute(directory, timeout):
                     text = output.get("ename", "") + ": " + output.get("evalue", "")
                 body.append("<pre>" + escape(str(text)) + "</pre>")
         body.append("</html>")
-        (directory / "report.html").write_text("".join(body), encoding="utf-8")
+        (output_dir / "report.html").write_text("".join(body), encoding="utf-8")
     return int(failed)
 
 
@@ -145,4 +158,10 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--environment"]:
         print(json.dumps(environment_identity()))
     else:
-        raise SystemExit(execute(sys.argv[1], int(sys.argv[2])))
+        raise SystemExit(
+            execute(
+                sys.argv[1],
+                int(sys.argv[2]),
+                sys.argv[3] if len(sys.argv) > 3 else None,
+            )
+        )

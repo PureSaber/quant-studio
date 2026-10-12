@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ ARTIFACTS = {
     "execution.log",
     "environment.json",
     "metrics.json",
+    "isolation.json",
 }
 
 
@@ -62,14 +64,32 @@ def notebook_config():
             raise ValueError("超时须在10至86400秒之间")
         if type(max_bytes) is not int or not 1 <= max_bytes <= 100 * 1024**3:
             raise ValueError("输入复制上限无效")
+        isolation = value.get("isolation")
+        if isolation is not None:
+            backend = isolation_backend()
+            try:
+                isolation = backend.validate_policy(isolation)
+            except RuntimeError as exc:
+                raise ValueError(str(exc)) from exc
         return {
             "python": str(python),
             "lab_url": value["lab_url"].rstrip("/"),
             "timeout_seconds": timeout,
             "max_input_bytes": max_bytes,
+            **({"isolation": isolation} if isolation is not None else {}),
         }
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise QuantStudioError("Notebook配置无效：" + str(exc)) from exc
+
+
+def isolation_backend():
+    try:
+        from quant_pipeline import isolation
+    except ImportError as exc:
+        raise QuantStudioError(
+            "隔离模式需要可选 quant-pipeline 后端，请安装已锁定的隔离依赖"
+        ) from exc
+    return isolation
 
 
 def _notebook(text):
@@ -335,22 +355,38 @@ class NotebookStore:
                 Path(__file__).with_name("research_sdk.py"), directory / "research.py"
             )
             try:
-                inspected = subprocess.run(
-                    [
-                        config["python"],
-                        "-I",
-                        "-X",
-                        "utf8",
-                        str(worker),
-                        "--environment",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=30,
-                    check=True,
-                )
-                environment = json.loads(inspected.stdout)
+                if config.get("isolation"):
+                    if any(
+                        item.get("kind") == "intake" for item in context["datasets"]
+                    ):
+                        raise QuantStudioError(
+                            "隔离模式暂不支持宿主QDK独立解释器；请使用已登记的普通数据文件"
+                        )
+                    try:
+                        identity = isolation_backend().preflight(config["isolation"])
+                    except RuntimeError as exc:
+                        raise QuantStudioError("隔离后端不可用：" + str(exc)) from exc
+                    environment = {
+                        "identity_kind": "docker-image",
+                        "image_id": identity["image_id"],
+                    }
+                else:
+                    inspected = subprocess.run(
+                        [
+                            config["python"],
+                            "-I",
+                            "-X",
+                            "utf8",
+                            str(worker),
+                            "--environment",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        timeout=30,
+                        check=True,
+                    )
+                    environment = json.loads(inspected.stdout)
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 raise QuantStudioError("无法记录Notebook环境身份") from exc
             _atomic(directory / "requested-environment.json", json.dumps(environment))
@@ -539,21 +575,24 @@ class NotebookStore:
         )
         try:
             self.verify_inputs(record)
-            result = _execute_subprocess(
-                [
-                    runtime["python"],
-                    "-I",
-                    "-X",
-                    "utf8",
-                    str(directory / "executor.py"),
-                    str(directory),
-                    str(runtime["timeout_seconds"]),
-                ],
-                cwd=directory,
-                env=env,
-                timeout=runtime["timeout_seconds"] + 90,
-                control=control,
-            )
+            if runtime.get("isolation"):
+                result = self._execute_isolated(record, directory, control)
+            else:
+                result = _execute_subprocess(
+                    [
+                        runtime["python"],
+                        "-I",
+                        "-X",
+                        "utf8",
+                        str(directory / "executor.py"),
+                        str(directory),
+                        str(runtime["timeout_seconds"]),
+                    ],
+                    cwd=directory,
+                    env=env,
+                    timeout=runtime["timeout_seconds"] + 90,
+                    control=control,
+                )
             (directory / "execution.log").write_text(
                 result.stdout + result.stderr, encoding="utf-8"
             )
@@ -579,6 +618,7 @@ class NotebookStore:
                 "executed.ipynb",
                 "execution.log",
                 "environment.json",
+                "isolation.json",
             )
             if (directory / name).is_file() and not (directory / name).is_symlink()
         }
@@ -586,6 +626,61 @@ class NotebookStore:
             record["artifacts"]["metrics.json"] = file_hash(directory / "metrics.json")
         self._save(directory, record)
         return {"status": record["status"], "message": record.get("message", "")}
+
+    def _execute_isolated(self, record, directory, control):
+        """Mount only frozen inputs; host records never enter the container."""
+        backend = isolation_backend()
+        with tempfile.TemporaryDirectory(
+            prefix="notebook-inputs-", dir=directory.parent
+        ) as temp:
+            inputs = Path(temp)
+            for name, expected in record["hashes"].items():
+                destination = inputs / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(directory / name, destination)
+                if file_hash(destination) != expected:
+                    raise QuantStudioError("冻结输入复制身份不匹配：" + name)
+            try:
+                manifest = backend.run_isolated(
+                    [
+                        "/usr/local/bin/python",
+                        "-I",
+                        "/inputs/executor.py",
+                        "/inputs",
+                        str(record["runtime"]["timeout_seconds"]),
+                        "/work",
+                    ],
+                    inputs,
+                    directory / "isolation-run",
+                    record["runtime"]["isolation"],
+                    cancelled=(lambda: control.cancel_requested) if control else None,
+                )
+            except (backend.IsolationError, ValueError, TypeError) as exc:
+                raise QuantStudioError("隔离执行拒绝：" + str(exc)) from exc
+        shutil.copyfile(
+            directory / "isolation-run/isolation.json", directory / "isolation.json"
+        )
+        for name in ARTIFACTS - {"isolation.json", "execution.log"}:
+            source = directory / "isolation-run/artifacts" / name
+            if source.is_file() and not source.is_symlink():
+                shutil.copyfile(source, directory / name)
+        logs = []
+        for name in ("stdout.log", "stderr.log"):
+            source = directory / "isolation-run" / name
+            logs.append(
+                source.read_text("utf-8", errors="replace") if source.exists() else ""
+            )
+        (directory / "execution.log").write_text("".join(logs), "utf-8")
+        if manifest["status"] == "cancelled":
+            raise ExecutionCancelled()
+        if manifest["status"] != "succeeded":
+            raise QuantStudioError(
+                "隔离执行未成功："
+                + manifest["status"]
+                + " "
+                + manifest.get("error", "")
+            )
+        return subprocess.CompletedProcess(manifest["argv"], 0, logs[0], logs[1])
 
     def verify_inputs(self, record):
         directory = self.directory(record["project_id"], record["id"])
