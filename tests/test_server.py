@@ -364,7 +364,7 @@ def test_synthetic_result_embeds_report_and_shows_disclaimer(tmp_path):
     ) in page
 
 
-def test_legacy_hk_results_use_frozen_opening_and_original_report_without_rewriting(
+def test_legacy_hk_results_keep_history_without_silently_recertifying(
     tmp_path,
 ):
     result = preview("hk-equity-daily", runs_root=tmp_path)
@@ -381,12 +381,8 @@ def test_legacy_hk_results_use_frozen_opening_and_original_report_without_rewrit
     (directory / "result.json").write_text(json.dumps(payload), encoding="utf-8")
     before = {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
     page = render_run(directory)
-    assert "+1.00%" in page and "50.00%" in page
-    assert f"/runs/{result.run_id}/files/strategy-output/report.html" in page
-    assert (
-        f'<a href="/runs/{result.run_id}/files/strategy-output/report.html" '
-        'target="_blank" rel="noopener">独立打开完整报告</a>'
-    ) in page
+    assert "历史结果缺少产物哈希清单" in page
+    assert "+1.00%" not in page and "<iframe" not in page
     assert before == {p: p.read_bytes() for p in directory.rglob("*") if p.is_file()}
 
 
@@ -398,6 +394,11 @@ def test_only_run_html_csv_and_upstream_json_evidence_can_be_served(tmp_path):
     evidence = run_dir / "strategy-output" / "holdout" / "ledger.json"
     evidence.parent.mkdir(parents=True)
     evidence.write_text("{}", encoding="utf-8")
+    from quant_studio.result_integrity import output_hashes
+
+    (run_dir / "result.json").write_text(
+        json.dumps({"status": "succeeded", "output_hashes": output_hashes(run_dir)})
+    )
 
     assert resolve_run_asset(tmp_path, "safe-run", "report.html").is_file()
     assert (

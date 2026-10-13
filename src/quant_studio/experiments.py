@@ -50,7 +50,21 @@ class ExperimentStore:
         path = self.notes / f"{identifier}.json"
         if not path.exists():
             return {"title": "", "note": "", "revision": ""}
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict) or any(
+                not isinstance(value.get(key), str)
+                for key in ("title", "note", "revision")
+            ):
+                raise ValueError("Invalid annotation")
+            return value
+        except (OSError, ValueError):
+            return {
+                "title": "",
+                "note": "",
+                "revision": "",
+                "annotation_error": "备注无法读取",
+            }
 
     def annotate(self, identifier, title, note, *, expected):
         if (
@@ -62,6 +76,8 @@ class ExperimentStore:
             raise QuantStudioError("实验名称最多 120 字，备注最多 4000 字")
         with _LOCK:
             previous = self.annotation(identifier)
+            if previous.get("annotation_error"):
+                raise QuantStudioError("备注无法读取；请保留损坏文件并恢复备份后重试")
             if previous["revision"] != expected:
                 raise QuantStudioError("备注已更新，请刷新后重试")
             value = {
@@ -189,6 +205,9 @@ class ExperimentStore:
         ):
             return row
         try:
+            from quant_studio.result_integrity import verify_result
+
+            verify_result(directory, result, asset="nav.csv")
             path = resolve_run_asset(self.root, identifier, "nav.csv")
             series = parse_nav_csv(path, initial_nav=opening)
             if series:
@@ -200,3 +219,27 @@ class ExperimentStore:
         except (OSError, ValueError, QuantStudioError) as exc:
             row["error"] = str(exc)
         return row
+
+    def evidence_summary(self, identifier):
+        """Only expose measured values after the same gate used by result views."""
+        row = self.measure(identifier)
+        return {
+            "run_id": identifier,
+            "status": row["status"],
+            "verified": row["return"] is not None and not row["error"],
+            "return": str(row["return"]) if row["return"] is not None else None,
+            "drawdown": str(row["drawdown"]) if row["drawdown"] is not None else None,
+            "metric_units": "ratio",
+            "currency": row["currency"],
+            "dates": [row["dates"][0], row["dates"][-1]] if row["dates"] else [],
+            "observations": len(row["dates"]),
+            "evidence_kind": row["evidence"],
+            "opening_basis": row["opening_basis"],
+            "error": row["error"],
+            "unavailable": ["gross_return", "fees", "turnover", "benchmark_return"],
+            "configuration": (
+                json.loads(json.dumps(row["configuration"], default=str))
+                if not row["error"]
+                else None
+            ),
+        }

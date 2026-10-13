@@ -170,6 +170,9 @@ def test_report_only_nested_result_is_visible_but_escape_is_not(tmp_path):
     (folder / "report.html").write_text("report")
     result = run.as_json()
     result.update(status="succeeded", report="strategy-output/report.html")
+    from quant_studio.result_integrity import output_hashes
+
+    result["output_hashes"] = output_hashes(run.run_dir)
     path = run.run_dir / "result.json"
     path.write_text(json.dumps(result))
     assert list_runs(tmp_path)[0]["has_report"] == "1"

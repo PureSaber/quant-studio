@@ -123,6 +123,11 @@ def test_research_result_uses_weight_and_return_units(tmp_path, monkeypatch):
     (path / "positions.csv").write_text("symbol,quantity,market_value\nAAA,0.2,0.2\n")
     (path / "orders.csv").write_text("symbol,quantity,status\nAAA,0.2,target\n")
     (path / "costs.csv").write_text("commission,total_cost\n0.001,0.002\n")
+    from quant_studio.result_integrity import output_hashes
+
+    payload = json.loads((path / "result.json").read_text())
+    payload["output_hashes"] = output_hashes(path)
+    (path / "result.json").write_text(json.dumps(payload))
     page = render_run(path)
     assert "回顾性历史数据" in page and "未提供基准净值" in page
     assert "研究目标变动" in page and "研究持仓权重" in page

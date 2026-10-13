@@ -264,6 +264,7 @@ class RunResult:
     research_view_sha256: str | None = None
     verification_status: str = "not_requested"
     verification_sha256: str | None = None
+    output_hashes: dict[str, str] | None = None
 
     def as_json(self) -> dict[str, Any]:
         data = asdict(self)
@@ -402,6 +403,9 @@ def run(
         result = RunResult(
             "succeeded", identifier, run_dir, argv, loaded.report_name, 0
         )
+        from quant_studio.result_integrity import output_hashes
+
+        result.output_hashes = output_hashes(run_dir)
         _write_json(run_dir / "result.json", result.as_json())
         return result
 
@@ -603,6 +607,10 @@ def run(
         verification_status,
         verification_sha256,
     )
+    if succeeded or family_report_verified:
+        from quant_studio.result_integrity import output_hashes
+
+        result.output_hashes = output_hashes(run_dir)
     _write_json(run_dir / "result.json", result.as_json())
     return result
 

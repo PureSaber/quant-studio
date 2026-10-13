@@ -69,6 +69,9 @@ def _saved(tmp_path, *, complete=True, style=True):
         report="strategy-output/report.html",
         research_view_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
     )
+    from quant_studio.result_integrity import output_hashes
+
+    result["output_hashes"] = output_hashes(run)
     (run / "result.json").write_text(json.dumps(result), encoding="utf-8")
     return run, result, view
 
