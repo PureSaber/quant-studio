@@ -88,3 +88,15 @@ def test_comparison_and_assistant_recheck_the_native_verification_digest(tmp_pat
     assert not store.evidence_summary(run_result.run_id)["verified"]
     with pytest.raises(QuantStudioError, match="账本核验记录已改变"):
         resolve_run_asset(tmp_path, run_result.run_id, "nav.csv")
+
+
+@pytest.mark.parametrize("filename", ["request.json", "config.yaml"])
+def test_comparison_checks_integrity_before_parsing_damaged_metadata(
+    tmp_path, filename
+):
+    one = run("synthetic-demo", execute=True, runs_root=tmp_path)
+    two = run("synthetic-demo", execute=True, runs_root=tmp_path)
+    (one.run_dir / filename).write_text("{broken")
+    store = ExperimentStore(tmp_path)
+    assert not store.compare([one.run_id, two.run_id])["comparable"]
+    assert "结果文件已改变" in store.evidence_summary(one.run_id)["error"]

@@ -12,6 +12,7 @@ from quant_studio import QuantStudioError
 from quant_studio.desk import list_runs
 from quant_studio.nav import parse_nav_csv
 from quant_studio.recipes import _atomic
+from quant_studio.run_record import load_run_result
 from quant_studio.runner import safe_run_file
 from quant_studio.templates import load_template
 
@@ -154,8 +155,31 @@ class ExperimentStore:
         from quant_studio.server import resolve_run_asset
 
         directory = self._run(identifier)
+        result = load_run_result(directory)
+        # Check frozen metadata bytes before parsing their values as configuration.
+        # A damaged YAML/JSON input must not turn comparison into a server error.
+        if result["status"] == "succeeded":
+            try:
+                from quant_studio.result_integrity import verify_result
+
+                verify_result(directory, result, asset="nav.csv")
+            except (OSError, ValueError, QuantStudioError) as exc:
+                return {
+                    "run_id": identifier,
+                    "title": self.annotation(identifier)["title"] or identifier[:12],
+                    "template_id": "",
+                    "status": result["status"],
+                    "return": None,
+                    "drawdown": None,
+                    "currency": "未声明",
+                    "dates": [],
+                    "evidence": "未声明",
+                    "opening_basis": "未核验",
+                    "series": None,
+                    "configuration": {},
+                    "error": str(exc),
+                }
         request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
-        result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
         provenance_path = directory / "provenance.json"
         provenance = (
             json.loads(provenance_path.read_text(encoding="utf-8"))
@@ -205,9 +229,6 @@ class ExperimentStore:
         ):
             return row
         try:
-            from quant_studio.result_integrity import verify_result
-
-            verify_result(directory, result, asset="nav.csv")
             path = resolve_run_asset(self.root, identifier, "nav.csv")
             series = parse_nav_csv(path, initial_nav=opening)
             if series:
