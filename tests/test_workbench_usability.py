@@ -78,6 +78,11 @@ def test_comparison_does_not_merge_different_input_sources(tmp_path):
         (tmp_path / result.run_id / "provenance.json").write_text(
             json.dumps({"input": {"provider": provider}}), encoding="utf-8"
         )
+        # Freeze each distinct source at collection, not as a later file mutation.
+        from quant_studio.result_integrity import output_hashes
+
+        result.output_hashes = output_hashes(result.run_dir)
+        (result.run_dir / "result.json").write_text(json.dumps(result.as_json()))
     comparison = ExperimentStore(tmp_path).compare([one.run_id, two.run_id])
     assert not comparison["comparable"]
     assert "数据性质不同" in comparison["reasons"]

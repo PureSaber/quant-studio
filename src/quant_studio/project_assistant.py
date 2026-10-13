@@ -95,10 +95,17 @@ class AssistantStore:
                 )
             )
         for run in ProjectStore(self.root).experiments(project_id)[:5]:
+            from quant_studio.experiments import ExperimentStore
+
             outcome = load_run_result(safe_run_file(self.root, run["run_id"]))
+            try:
+                measured = ExperimentStore(self.root).evidence_summary(run["run_id"])
+            except (OSError, ValueError, KeyError, TypeError, QuantStudioError) as exc:
+                measured = {"verified": False, "error": str(exc)}
             texts.append(
                 (
                     f"实验：{run['title']}；状态：{run['status']}；"
+                    f"核验指标：{json.dumps(measured, ensure_ascii=False)}；"
                     f"诊断：{outcome.get('message', '')}；备注：{run['note']}",
                     f"/experiments/{run['run_id']}",
                 )

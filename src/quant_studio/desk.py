@@ -108,6 +108,15 @@ def list_runs(runs_root: Path, *, limit: int | None = 40) -> list[dict[str, str]
             result["status"] == "succeeded"
             and result.get("verification_status") != "failed"
         )
+        integrity_error = ""
+        if results_available:
+            from quant_studio.result_integrity import verify_result
+
+            try:
+                verify_result(directory, result)
+            except (OSError, ValueError, QuantStudioError) as exc:
+                results_available = False
+                integrity_error = str(exc)
         report_name = str(result.get("report") or "")
         try:
             has_report = (
@@ -123,6 +132,7 @@ def list_runs(runs_root: Path, *, limit: int | None = 40) -> list[dict[str, str]
                 "run_id": directory.name,
                 "template_id": str(request.get("template_id", "")),
                 "status": str(result.get("status", "")),
+                "integrity_error": integrity_error,
                 "has_nav": "1"
                 if results_available and (directory / "nav.csv").is_file()
                 else "0",

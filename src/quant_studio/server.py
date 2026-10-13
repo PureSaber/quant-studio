@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import secrets
@@ -697,21 +696,6 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         result = {**result, "status": "verification_failed"}
     if result["status"] in {"running", "checking", "incomplete", "verification_failed"}:
         return _render_unfinished_run(directory, request, result, template, csrf_token)
-    verified_evidence = None
-    if result.get("verification_status") == "pass":
-        try:
-            content = (directory / "verification.json").read_bytes()
-            if hashlib.sha256(content).hexdigest() != result.get("verification_sha256"):
-                raise QuantStudioError("账本核验记录已改变")
-            verified_evidence = json.loads(content)
-        except (OSError, ValueError, QuantStudioError) as exc:
-            return _render_unfinished_run(
-                directory,
-                request,
-                {**result, "status": "verification_failed", "message": str(exc)},
-                template,
-                csrf_token,
-            )
     family_view = (
         load_counterfactual_view(directory, result)
         if template.metadata.get("counterfactual_view")
@@ -722,6 +706,24 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if template.metadata.get("timing_view")
         else None
     )
+    verified_evidence = None
+    if (
+        result.get("verification_status") == "pass"
+        or result["status"] == "succeeded"
+        or family_view
+    ):
+        try:
+            from quant_studio.result_integrity import verify_result
+
+            verified_evidence = verify_result(directory, result)
+        except (OSError, ValueError, QuantStudioError) as exc:
+            return _render_unfinished_run(
+                directory,
+                request,
+                {**result, "status": "verification_failed", "message": str(exc)},
+                template,
+                csrf_token,
+            )
     argv = " ".join(escape(str(item)) for item in result.get("argv", []))
     report_html = ""
     if result["status"] == "succeeded" and result.get("report") and not family_view:
@@ -1092,6 +1094,8 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
     result_path = safe_run_file(run_dir, "result.json")
     if result_path.is_file():
         result = json.loads(result_path.read_text(encoding="utf-8"))
+        from quant_studio.result_integrity import verify_result
+
         request_path = safe_run_file(run_dir, "request.json")
         family = False
         if request_path.is_file():
@@ -1110,6 +1114,12 @@ def resolve_run_asset(runs_root: str | Path, run_id: str, relative_path: str) ->
                 raise QuantStudioError("反事实下载文件未通过候选族核验")
         elif result.get("research_view_sha256"):
             load_timing_view(run_dir, result)
+        try:
+            verify_result(run_dir, result, asset=path.relative_to(run_dir).as_posix())
+        except (OSError, ValueError) as exc:
+            raise QuantStudioError(f"结果核验未通过：{exc}") from exc
+    else:
+        raise QuantStudioError("运行结果记录不存在，无法核验下载文件")
     return path
 
 

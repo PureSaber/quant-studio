@@ -306,7 +306,7 @@ href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
 <small>{escape(r["template_id"])} · {revision[:12]}</small>
 </td>
 <td>{escape(r["status"])}</td>
-<td>{escape(r["note"][:100])}</td>
+<td>{escape(r.get("annotation_error") or r["note"][:100])}</td>
 <td>{escape(r["when"])}</td>
 </tr>'''
         )
@@ -383,6 +383,12 @@ def experiment_body(root, token, identifier):
     store = ExperimentStore(root)
     directory = store._run(identifier)
     record = store.annotation(identifier)
+    note_error = (
+        '<p class="banner" role="alert">'
+        "备注无法读取；原文件已保留，请从备份恢复后编辑。</p>"
+        if record.get("annotation_error")
+        else ""
+    )
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
     recipe = request.get("recipe") or {}
     provenance = directory / "provenance.json"
@@ -423,8 +429,9 @@ name="note"
 maxlength="4000" rows="6">{escape(record["note"])}</textarea>
 </label>
 <button
-class="btn primary">保存笔记</button>
+class="btn primary" {"disabled" if note_error else ""}>保存笔记</button>
 </form>
+{note_error}
 <p
 class="note">笔记独立保存，不改写原始配置、净值或运行结果。</p>
 </section>

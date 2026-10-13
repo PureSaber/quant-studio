@@ -44,6 +44,9 @@ def _collected(tmp_path):
     )
     assert before == {p: p.read_bytes() for p in output.rglob("*") if p.is_file()}
     result.status = "succeeded"
+    from quant_studio.result_integrity import output_hashes
+
+    result.output_hashes = output_hashes(result.run_dir)
     (result.run_dir / "result.json").write_text(json.dumps(result.as_json()))
     return result.run_dir
 
@@ -81,6 +84,13 @@ def test_render_rejects_mismatched_or_empty_saved_benchmark(
 ):
     directory = _collected(tmp_path)
     (directory / "benchmark_nav.csv").write_text(contents)
+    # Simulate invalid output at collection, independently of later tampering.
+    from quant_studio.result_integrity import output_hashes
+
+    result_path = directory / "result.json"
+    result = json.loads(result_path.read_text())
+    result["output_hashes"] = output_hashes(directory)
+    result_path.write_text(json.dumps(result))
     with pytest.raises(QuantStudioError, match=message):
         render_run(directory)
 
