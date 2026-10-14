@@ -60,6 +60,32 @@ def test_revision_copy_conflict_and_exact_execution(tmp_path):
     assert "/templates/synthetic-demo" not in page
 
 
+def test_template_update_preserves_history_but_requires_revalidation(
+    tmp_path, monkeypatch
+):
+    from quant_studio import recipes
+    from quant_studio.projects import ProjectStore
+
+    original = load_template("synthetic-demo")
+    record = RecipeStore(tmp_path).save("Frozen", original.id, original.base_config)
+    changed = type(original)(
+        copy.deepcopy(original.metadata),
+        copy.deepcopy(original.base_config),
+        original.directory,
+    )
+    changed.metadata["title"] = "New template revision"
+    monkeypatch.setattr(recipes, "load_template", lambda _: changed)
+    assert RecipeStore(tmp_path).get(record["id"]) == record
+    project = ProjectStore(tmp_path).save(
+        "Existing research",
+        "Hypothesis",
+        recipes=[{"id": record["id"], "revision": record["revision"]}],
+    )
+    assert ProjectStore(tmp_path).get(project["id"])["recipes"]
+    with pytest.raises(QuantStudioError, match="模板已变更"):
+        recipe_template(record)
+
+
 @pytest.mark.parametrize(
     "text",
     ["x: &x [*x]", "x: .nan", "[]", "a: 1\na: 2", "!!python/object:os.system {}"],
