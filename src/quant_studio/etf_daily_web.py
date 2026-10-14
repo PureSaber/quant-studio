@@ -27,6 +27,7 @@ LABELS = {
     "candidate_required": "需要候选决策与登记",
 }
 STAGES = {
+    "master_refresh": "官方主表证据更新",
     "collection": "数据更新",
     "preflight": "研究预检",
     "frozen_identity": "冻结身份",
@@ -147,9 +148,14 @@ def today_body(token, root=None):
             ["币种", "账本费用类型", "累计模拟费用"], execution.get("cost_totals", [])
         )
         body += details(execution.get("metrics", {}), "原生研究与成本指标")
-        forecast = (execution.get("target_evidence") or {}).get("cost_forecast")
+        window = execution.get("cost_window")
+        forecast = window.get("forecast") if window else None
         if forecast:
             body += "<h3>最近目标的预估综合成本</h3>"
+            body += (
+                f"<p>同一观察窗口：{escape(window['start'])} 至 "
+                f"{escape(window['end'])}；成交尚可能未完成。</p>"
+            )
             body += table(
                 ["原生预算", "目标换手", "估算口径"],
                 [
@@ -161,9 +167,13 @@ def today_body(token, root=None):
                 ],
             )
             body += (
-                "<p>预算对应最近一次目标；上表为整个观察窗口的账本费用。"
-                "两者区间及成本范围不同，不直接相减。"
-                "成交数量差异见目标、持仓及原生委托。</p>"
+                "<p>以下费用和成交数量按最近目标窗口对齐。综合预算包含价格影响，"
+                "账本费用仅为原生收费，两者不直接相减；滑点保持冻结模型假设。</p>"
+            )
+            body += table(["币种", "原生费用类型", "本窗口账本费用"], window["fees"])
+            body += table(
+                ["证券", "方向", "委托数量", "模拟成交数量", "数量差额"],
+                window["quantities"],
             )
         if "costs" in execution["tables"]:
             item = execution["tables"]["costs"]
