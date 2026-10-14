@@ -13,7 +13,9 @@ from quant_studio.settings import subprocess_environment
 
 def configuration():
     value = os.environ.get("QUANT_STUDIO_ETF_DAILY")
-    python = configured_python("quant-pipeline")
+    python = configured_python("quant-pipeline-frozen") or configured_python(
+        "quant-pipeline"
+    )
     if not value or not python:
         raise QuantStudioError("尚未连接ETF每日配置或quant-pipeline独立环境")
     path = Path(value)
