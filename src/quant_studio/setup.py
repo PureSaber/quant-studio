@@ -12,10 +12,15 @@ from pathlib import Path
 from threading import RLock
 
 from quant_studio import QuantStudioError
-from quant_studio.settings import use_settings
+from quant_studio.settings import current_settings, use_settings
 from quant_studio.templates import load_template, template_ids
 
 SCHEMA = "quant-studio.settings/v1"
+SERVER_CONFIG_KEYS = {
+    "QUANT_STUDIO_ETF_DAILY",
+    "QUANT_STUDIO_REGISTRATION",
+    "QUANT_STUDIO_DELIVERY_CONFIG",
+}
 
 
 def repositories() -> list[str]:
@@ -26,7 +31,12 @@ def repositories() -> list[str]:
             for key in template_ids()
         }
         - {None}
-    ) + ["quant-pipeline", "quant-pipeline-frozen", "quant-data-kit"]
+    ) + [
+        "quant-pipeline",
+        "quant-pipeline-frozen",
+        "quant-pipeline-registration",
+        "quant-data-kit",
+    ]
 
 
 def input_sources() -> dict[str, dict]:
@@ -42,7 +52,12 @@ def empty_profile() -> dict:
 
 
 def environment_keys() -> set[str]:
-    return {"QUANT_WORKSPACE_ROOT", "QUANT_STUDIO_ACCOUNTS", *input_sources()}
+    return {
+        "QUANT_WORKSPACE_ROOT",
+        "QUANT_STUDIO_ACCOUNTS",
+        *input_sources(),
+        *SERVER_CONFIG_KEYS,
+    }
 
 
 def validate_shape(profile: object) -> None:
@@ -84,6 +99,13 @@ def profile_from_form(form: dict[str, list[str]]) -> dict:
     if set(form) - allowed or any(len(values) != 1 for values in form.values()):
         raise QuantStudioError("配置字段未知或重复；请重新填写")
     profile = empty_profile()
+    # Host-managed operational bindings are not editable form fields. A normal
+    # setup save must retain them rather than silently disconnecting operations.
+    current = current_settings()
+    if current is not None:
+        profile["environment"].update(
+            {k: v for k, v in current["environment"].items() if k in SERVER_CONFIG_KEYS}
+        )
     for key, values in form.items():
         value = values[0].strip()
         if not value:
@@ -140,7 +162,7 @@ def validate_profile(profile: dict) -> list[tuple[str, str]]:
     for key, value in profile["environment"].items():
         path = Path(value)
         source = input_sources().get(key)
-        file = key == "QUANT_STUDIO_ACCOUNTS" or (
+        file = key in {"QUANT_STUDIO_ACCOUNTS", *SERVER_CONFIG_KEYS} or (
             source and source.get("kind") == "file"
         )
         if not (path.is_file() if file else path.is_dir()):
@@ -167,7 +189,9 @@ def validate_profile(profile: dict) -> list[tuple[str, str]]:
                     for key in template_ids()
                     if load_template(key).metadata.get("runtime_key") == repo
                 ),
-                repo,
+                "quant-pipeline"
+                if repo in {"quant-pipeline-frozen", "quant-pipeline-registration"}
+                else repo,
             )
             if not root or not (Path(root) / checkout).is_dir():
                 raise QuantStudioError(
