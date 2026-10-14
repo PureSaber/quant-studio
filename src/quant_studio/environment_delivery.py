@@ -50,6 +50,13 @@ def delivery_config():
                 raise ValueError(f"{key}必须是服务端绝对路径")
         if not Path(value["python"]).is_file():
             raise ValueError("交付解释器不存在")
+        for key in ("maintenance_entrypoint", "maintenance_installation"):
+            if value.get(key) and not Path(value[key]).is_absolute():
+                raise ValueError("统一维护入口必须是服务端绝对路径")
+        if bool(value.get("maintenance_entrypoint")) != bool(
+            value.get("maintenance_installation")
+        ):
+            raise ValueError("统一维护入口与安装配置须同时提供")
         if (
             value.get("local_control")
             and not Path(value["local_control"]).is_absolute()

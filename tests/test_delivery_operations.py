@@ -105,3 +105,31 @@ def test_bad_controller_and_frozen_probe_are_honest_not_page_failures(
     result = operational_snapshot()
     assert "delivery_error" in result
     assert result["studio_process"]["pid"] == os.getpid()
+
+
+def test_etf_installation_shows_repeatable_entrypoint_and_matching_actions(
+    tmp_path, monkeypatch
+):
+    path, config = configured(tmp_path, monkeypatch)
+    config.update(
+        installation_kind="etf-single-venv",
+        maintenance_entrypoint=str(tmp_path / "profile/maintain.ps1"),
+        maintenance_installation=str(tmp_path / "installation.json"),
+    )
+    path.write_text(json.dumps(config))
+    release_state = Path(config["state_dir"])
+    release_state.mkdir(parents=True, exist_ok=True)
+    (release_state / "etf-current.json").write_text(
+        '{"runtime_root":"accepted-etf-runtime"}'
+    )
+    body = delivery_body(tmp_path / "runs", "token")
+    assert "-Action backup" in body and "-Action restart" in body
+    assert '<option value="doctor">' not in body
+    assert '<option value="control-status">' in body
+    assert "自动创建独立批次" in body
+    assert "accepted-etf-runtime" in body
+    assert "尚无发布指针" not in body
+    config["maintenance_entrypoint"] = "relative.ps1"
+    path.write_text(json.dumps(config))
+    with pytest.raises(QuantStudioError, match="绝对路径"):
+        delivery_config()
