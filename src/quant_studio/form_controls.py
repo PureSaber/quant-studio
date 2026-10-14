@@ -81,7 +81,7 @@ def help_text(key):
     return ""
 
 
-def special_control(name, key, value):
+def special_control(name, key, value, *, factor_risk=False):
     if (
         key == "allocation"
         and isinstance(value, dict)
@@ -91,7 +91,12 @@ def special_control(name, key, value):
 
         validate_v2(value)
         raw = escape(json.dumps(value, ensure_ascii=False), quote=True)
-        methods = escape(json.dumps(METHODS), quote=True)
+        supported = {
+            key: item
+            for key, item in METHODS.items()
+            if not factor_risk or key not in {"hrp", "risk_parity"}
+        }
+        methods = escape(json.dumps(supported), quote=True)
         return (
             f'<div class="allocation-editor" data-methods="{methods}">'
             '<div class="allocation-controls"></div>'

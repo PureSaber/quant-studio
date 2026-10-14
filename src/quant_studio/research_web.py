@@ -41,7 +41,7 @@ _LABELS = {
 def _leaves(value, prefix=""):
     for key, child in value.items():
         path = prefix + "/" + key.replace("~", "~0").replace("/", "~1")
-        if (
+        if key in {"benchmark_weights", "factor_bounds", "active_factor_bounds"} or (
             key == "allocation"
             and isinstance(child, dict)
             and child.get("protocol_version") == 2
@@ -65,7 +65,9 @@ def _fields(value, prefix, knobs=()):
         label = escape(
             knob["label"] if knob else _LABELS.get(key, LABELS.get(key, key))
         )
-        special = special_control(name, key, child)
+        special = special_control(
+            name, key, child, factor_risk=bool(value.get("risk_model"))
+        )
         if knob and knob["type"] == "enum":
             options = "".join(
                 f'<option value="{escape(str(v), quote=True)}"'
