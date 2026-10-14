@@ -58,7 +58,8 @@ def today_body(token, root=None):
             + f"<p>{escape(str(exc))}</p></section>"
         )
     data, latest = value["data"], value.get("latest") or {}
-    if latest.get("research_recipe"):
+    research_input = value.get("research_input") or latest
+    if research_input.get("research_recipe"):
         choices = '<option value="">新建研究项目</option>'
         if root is not None:
             from quant_studio.projects import ProjectStore
@@ -69,7 +70,8 @@ def today_body(token, root=None):
             )
         body += f'''<form method="post" action="/today/run">{csrf(token)}
 <input type="hidden" name="command" value="connect-project">
-<input type="hidden" name="operation" value="{latest["id"]}">
+<input type="hidden" name="operation" value="{research_input["id"]}">
+<p>可连接的研究快照截止：{escape(research_input["data"]["covered_through"])}</p>
 <label>连接到项目<select name="project_id">{choices}</select></label>
 <button class="btn">将此快照与冻结配方连接到研究项目</button></form>'''
     body += '<section class="panel"><h2>数据更新了吗？</h2>'

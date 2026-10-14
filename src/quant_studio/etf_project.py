@@ -18,7 +18,7 @@ def connect(root, operation_id, *, project_id=None):
     from pathlib import Path
 
     value = inspect_daily()
-    operation = value.get("latest") or {}
+    operation = value.get("research_input") or value.get("latest") or {}
     if operation.get("id") != operation_id or not operation.get("research_recipe"):
         raise QuantStudioError("数据或预检已更新，请刷新今日运行后连接")
     path = Path(operation["research_recipe"])

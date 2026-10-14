@@ -43,7 +43,14 @@ def test_connect_freezes_inputs_and_duplicate_click_reuses_project(
         "research_recipe_sha256": file_hash(recipe_path),
         "data": {"covered_through": "2026-01-01", "quality": {}},
     }
-    monkeypatch.setattr(etf_project, "inspect_daily", lambda: {"latest": operation})
+    monkeypatch.setattr(
+        etf_project,
+        "inspect_daily",
+        lambda: {
+            "latest": {"id": "failed-refresh", "state": "collection_retryable"},
+            "research_input": operation,
+        },
+    )
     root = tmp_path / "runs"
     root.mkdir()
     project = etf_project.connect(root, operation["id"])
