@@ -57,7 +57,11 @@ def account_sources() -> list[AccountSource]:
 
 
 def inspect_source(source: AccountSource, *, timeout: float = 30) -> dict:
-    python = configured_python("quant-pipeline") or sys.executable
+    python = (
+        configured_python("quant-pipeline-frozen")
+        or configured_python("quant-pipeline")
+        or sys.executable
+    )
     if not source.path.is_dir():
         raise QuantStudioError(
             f"账户目录不存在：{source.path}。请修正账户配置中的path。"

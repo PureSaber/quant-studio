@@ -26,7 +26,7 @@ def repositories() -> list[str]:
             for key in template_ids()
         }
         - {None}
-    ) + ["quant-pipeline", "quant-data-kit"]
+    ) + ["quant-pipeline", "quant-pipeline-frozen", "quant-data-kit"]
 
 
 def input_sources() -> dict[str, dict]:

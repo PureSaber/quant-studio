@@ -443,7 +443,11 @@ class="panel">
 
 
 def compare_body(root, identifiers):
+    from quant_studio import etf_experiments
     from quant_studio.result_explorer import comparison_explorer
+
+    if any(etf_experiments.is_etf(root, identifier) for identifier in identifiers):
+        return etf_experiments.compare_body(root, identifiers)
 
     result = ExperimentStore(root).compare(identifiers)
 

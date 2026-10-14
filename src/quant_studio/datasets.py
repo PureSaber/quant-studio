@@ -267,7 +267,9 @@ class DatasetStore:
 
     def select(self, identifier, template_id):
         item = self.get(identifier)
-        if item["template_id"] != template_id:
+        if item["template_id"] != template_id and not (
+            template_id == "etf-weekly-research" and item.get("kind") == "research-etf"
+        ):
             raise QuantStudioError("数据集不属于此研究类型")
         report = self.verify(identifier)
         if not report["valid"]:
@@ -310,6 +312,10 @@ def collect_dataset(runs_root, job, control):
 
     root = Path(runs_root)
     request = job["collection"]
+    if request.get("collection_type") == "etf-daily":
+        from quant_studio.etf_daily import execute_daily
+
+        return execute_daily(runs_root, job, control)
     if request.get("collection_type") == "etf-maintenance":
         from quant_studio.data_maintenance import DataMaintenance
 

@@ -305,6 +305,7 @@ def preview(
         {
             "template_id": loaded.id,
             "recipe": loaded.metadata.get("recipe"),
+            "research_project": loaded.metadata.get("research_project"),
             "knobs": knobs or {},
             "factors": factors,
             "snapshot": str(selected_snapshot) if selected_snapshot else None,
@@ -370,6 +371,7 @@ def run(
         {
             "template_id": loaded.id,
             "recipe": loaded.metadata.get("recipe"),
+            "research_project": loaded.metadata.get("research_project"),
             "knobs": knobs or {},
             "factors": factors,
             "execute": True,

@@ -313,3 +313,15 @@ python -m quant_studio run stat-arb-research --snapshot H:/Quant/research/study.
 ```
 
 `Upstream integration`工作流在Windows/Linux上使用固定提交的上游依赖，执行港股、模拟盘和基金原生CLI，并检验A股输出、预检及账户检查契约。美股应用为私有仓，其自身CI检出固定提交的公共Studio运行同一集成测试，不向公共工作流增加私有仓访问凭据。基金/美股集成检查输入内容及修改时间、相同配置、原生净值口径、报告和损坏输入拒绝；测试行情为合成fixture，不代表市场表现。
+# Optimizer v2 and frozen account environments
+
+New research uses `python_by_repo.quant-pipeline`. When upgrading software while
+retaining an existing frozen ETF account, set `python_by_repo.quant-pipeline-frozen`
+to that account's verified old Python. The ETF daily bridge and read-only account
+inspection then use the frozen environment; research continues to use the new one.
+The optional key applies to the connected account registry as a whole. Its accounts
+must share that frozen runtime. A missing explicitly configured executable fails;
+it never falls back to the research environment. Native frozen-code checks remain
+mandatory. Keep the one existing scheduler on the same frozen executable. This
+does not re-register, migrate or promote an account or strategy.
+

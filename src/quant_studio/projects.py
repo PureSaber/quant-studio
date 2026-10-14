@@ -80,6 +80,7 @@ class ProjectStore:
         datasets=None,
         recipes=None,
         notes="",
+        research_card=None,
     ):
         for label, value, limit in (
             ("名称", name, 120),
@@ -109,6 +110,14 @@ class ProjectStore:
             previous = self.get(project_id) if project_id else None
             if previous and previous["revision"] != expected:
                 raise QuantStudioError("项目已更新，请刷新后再保存")
+            from quant_studio.research_cards import validate_card
+
+            card = validate_card(
+                research_card
+                if research_card is not None
+                else (previous or {}).get("research_card"),
+                previous=(previous or {}).get("research_card"),
+            )
             value = {
                 "schema": "quant-studio.project/v1",
                 "id": project_id or uuid.uuid4().hex,
@@ -120,6 +129,8 @@ class ProjectStore:
                 "created_at": datetime.now(UTC).isoformat(),
                 "parent": previous["revision"] if previous else None,
             }
+            if card is not None:
+                value.update(schema="quant-studio.project/v2", research_card=card)
             value["revision"] = digest(value)
             directory = self.root / value["id"]
             directory.mkdir(exist_ok=True)
@@ -139,11 +150,46 @@ class ProjectStore:
             for project in self.history(identifier)
             for r in project["recipes"]
         }
-        return [
-            r
-            for r in ExperimentStore(self.runs_root).list()
-            if (r["recipe"].get("id"), r["recipe"].get("revision")) in selected
-        ]
+        bindings = {}
+        for path in (self.runs_root / ".jobs").glob("*.json"):
+            try:
+                job = json.loads(path.read_text(encoding="utf-8"))
+                if job.get("run_id") and job.get("research_project"):
+                    bindings[job["run_id"]] = job["research_project"]
+            except (OSError, ValueError, TypeError) as exc:
+                raise QuantStudioError("项目任务关联记录无法核验") from exc
+        records = []
+        for record in ExperimentStore(self.runs_root).list():
+            binding = bindings.get(record["run_id"])
+            request = json.loads(
+                (self.runs_root / record["run_id"] / "request.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            frozen = request.get("research_project")
+            if frozen:
+                if binding and frozen != binding:
+                    raise QuantStudioError("实验项目版本与任务关联不一致")
+                binding = frozen
+            if binding:
+                if binding["id"] != identifier:
+                    continue
+                self.get(identifier, binding["revision"])
+            elif (
+                record["recipe"].get("id"),
+                record["recipe"].get("revision"),
+            ) not in selected:
+                continue
+            records.append(
+                {
+                    **record,
+                    "research_project": binding,
+                    "association": "explicit_project"
+                    if binding
+                    else "historical_recipe_version",
+                }
+            )
+        return records
 
     def history(self, identifier):
         current, records, seen = self.get(identifier), [], set()

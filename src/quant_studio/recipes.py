@@ -42,6 +42,12 @@ _INPUT_PATHS = {
     ),
 }
 _INPUT_PATHS["timing-counterfactual"] = _INPUT_PATHS["timing-research"]
+_INPUT_PATHS["etf-weekly-research"] = (
+    "inputs.bundle",
+    "inputs.catalog",
+    "inputs.history",
+    "inputs.return_forecasts",
+)
 
 
 def load_input_config(template_id, path):
@@ -73,6 +79,14 @@ def _normalize_input(template_id, value):
     ):
         raise QuantStudioError("外部研究配置格式无效")
     _check_tree(value)
+    allocation = value["config"].get("allocation")
+    if isinstance(allocation, dict) and allocation.get("protocol_version") == 2:
+        from quant_data_kit.allocation_protocol import validate_v2
+
+        try:
+            validate_v2(allocation)
+        except ValueError as exc:
+            raise QuantStudioError(str(exc)) from exc
     result = copy.deepcopy(value)
     base = Path(value["source_path"]).parent
     for dotted in _INPUT_PATHS[template_id]:
@@ -164,7 +178,7 @@ def _merge_defaults(defaults, supplied):
     return result
 
 
-def _validate(record: dict) -> Template:
+def _validate(record: dict, *, require_current_template=True) -> Template:
     required = {
         "schema_version",
         "id",
@@ -211,7 +225,9 @@ def _validate(record: dict) -> Template:
         raise QuantStudioError("模板标识须为文本")
     template = load_template(record["template_id"])
     _normalize_input(record["template_id"], record.get("input_config"))
-    if record["template_digest"] != _digest(template.metadata):
+    if require_current_template and record["template_digest"] != _digest(
+        template.metadata
+    ):
         raise QuantStudioError("模板已变更；请将配置导入当前模板重新预检")
     if not isinstance(record["config"], dict) or not isinstance(record["cli"], dict):
         raise QuantStudioError("配置与运行参数须为对象")
@@ -273,7 +289,9 @@ class RecipeStore:
                 value = json.loads(
                     (directory / f"{selected}.json").read_text(encoding="utf-8")
                 )
-                _validate(value)
+                # Historical records remain readable after a template update.
+                # Execution still calls recipe_template with the strict gate.
+                _validate(value, require_current_template=False)
                 if value["id"] != recipe_id or value["revision"] != selected:
                     raise QuantStudioError("研究方案索引校验失败")
                 return value
