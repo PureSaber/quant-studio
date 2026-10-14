@@ -104,6 +104,7 @@ def today_body(token, root=None):
             + f"<p>{escape(str(exc))}</p></section>"
         )
     data, latest = value["data"], value.get("latest") or {}
+    account = value.get("account") or {}
     research_input = value.get("research_input") or latest
     if research_input.get("research_recipe"):
         choices = '<option value="">新建研究项目</option>'
@@ -136,6 +137,8 @@ def today_body(token, root=None):
     if schedule:
         state = schedule["state"]
         label = "到达采集时段" if state == "ready" else LABELS.get(state, state)
+        if state == "collection_exhausted" and data["fresh"]:
+            label = "当日采集时段已结束"
         body += f"<p>运行安排：{escape(label)}</p>"
         body += "<p>北京时间采集时段：" + escape("、".join(schedule["slots"])) + "</p>"
         body += (
@@ -144,12 +147,15 @@ def today_body(token, root=None):
             + "</p>"
         )
         if state == "collection_exhausted":
-            body += (
-                "<p>本日不再自动采集或观察，保留最近成功状态。"
-                "请检查数据源发布情况。</p>"
-            )
+            if data["fresh"]:
+                body += "<p>当天完整行情已到齐，请查看下方账户状态。</p>"
+            else:
+                body += (
+                    "<p>本日不再自动采集或观察，保留最近成功状态。"
+                    "请检查数据源发布情况。</p>"
+                )
     body += (
-        "<p>最近完整预检通过："
+        "<p>当前配置最近完整预检通过："
         + escape(local_time(value.get("preflight_passed_at")))
         + "</p>"
     )
@@ -162,6 +168,8 @@ def today_body(token, root=None):
 <button class="btn">{label}</button></form>'''
     body += '</section><section class="panel"><h2>今天执行了吗？</h2>'
     current = latest.get("state", "尚无记录")
+    if not latest and account.get("state") == "pending":
+        current = "等待首个观察日"
     body += f"<p>本次状态：{escape(LABELS.get(current, current))}</p>"
     body += f"<p>最近运行：{escape(local_time(latest.get('started_at')))}</p>"
     stages = {s["stage"]: s for s in latest.get("stages", [])}
@@ -176,6 +184,14 @@ def today_body(token, root=None):
     body += f"<p>最近成功观察：{escape(success.get('as_of', '尚无成功观察'))}</p>"
     forward = value.get("forward")
     if forward:
+        if account:
+            body += (
+                f"<p>模拟账户：{escape(account['account_id'])}；"
+                f"实际登记：{escape(local_time(account['created_at']))}；"
+                f"观察起点：{escape(account['window']['start'])}；"
+                f"窗口截止：{escape(account['window']['end'])}。</p>"
+                '<p><a href="/accounts">查看模拟账户与原生记录</a></p>'
+            )
         gate = escape(LABELS.get(forward["state"], forward["state"]))
         body += f"<p>当前账户门禁：{gate}</p>"
         body += details(forward, "身份、日历与输入检查")
