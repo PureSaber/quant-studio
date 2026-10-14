@@ -4,6 +4,7 @@ import importlib.metadata
 import json
 import os
 import re
+import subprocess
 import sys
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from quant_studio import QuantStudioError
 from quant_studio.datasets import file_hash
 from quant_studio.projects import digest
 from quant_studio.recipes import _atomic
+from quant_studio.settings import setting
 
 ACTIONS = {
     "platform-status": "核对平台版本与验收",
@@ -20,15 +22,18 @@ ACTIONS = {
     "prepare-preview": "预览候选安装",
     "prepare": "安装到新目录",
     "accept": "运行候选验收",
-    "activate": "登记候选为当前发布",
-    "rollback": "登记回滚发布",
+    "activate": "仅登记发布指针（服务切换使用独立控制器）",
+    "rollback": "仅登记回滚指针（服务切换使用独立控制器）",
     "verify-transfer": "校验迁移包",
     "restore-transfer": "恢复到新目录",
+    "control-status": "核实独立控制器与实际监听进程",
+    "verify-backup": "校验完整运维备份",
+    "restore-drill": "在隔离新目录验证恢复",
 }
 
 
 def delivery_config():
-    raw = os.environ.get("QUANT_STUDIO_DELIVERY_CONFIG")
+    raw = setting("QUANT_STUDIO_DELIVERY_CONFIG")
     if not raw:
         raise QuantStudioError("请连接Workspace交付配置后使用此入口")
     try:
@@ -45,6 +50,19 @@ def delivery_config():
                 raise ValueError(f"{key}必须是服务端绝对路径")
         if not Path(value["python"]).is_file():
             raise ValueError("交付解释器不存在")
+        if (
+            value.get("local_control")
+            and not Path(value["local_control"]).is_absolute()
+        ):
+            raise ValueError("本地控制器配置必须是服务端绝对路径")
+        for name, row in value.get("backups", {}).items():
+            if (
+                not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name)
+                or not isinstance(row, dict)
+                or set(row) != {"config"}
+                or not Path(row["config"]).is_absolute()
+            ):
+                raise ValueError("备份必须使用命名的服务端配置")
         for section in ("candidates", "transfers"):
             if not isinstance(value.get(section, {}), dict):
                 raise ValueError("候选与迁移配置须为命名对象")
@@ -74,12 +92,77 @@ def running_version():
     distribution = importlib.metadata.distribution("quant-studio")
     direct = distribution.read_text("direct_url.json")
     return {
+        "pid": os.getpid(),
         "python": sys.executable,
         "version": distribution.version,
         "source": str(Path(__file__).resolve().parent),
         "installation": json.loads(direct) if direct else None,
         "scope": "当前Studio进程；发布指针不等同于进程已重启",
     }
+
+
+def operational_snapshot():
+    """Separate this process's identity from persisted operational intent."""
+    from quant_studio.runtime import configured_python
+
+    result = {"studio_process": running_version()}
+    try:
+        python = configured_python("quant-pipeline-frozen")
+        result["frozen_runtime"] = {"configured_python": python}
+        if python:
+            from quant_workspace.runtime_identity import probe_python
+
+            result["frozen_runtime"]["import_check"] = probe_python(
+                python, ("quant-pipeline", "quant-lab", "quant-data-kit")
+            )
+        else:
+            result["frozen_runtime"]["status"] = "未显式配置冻结解释器"
+    except (
+        OSError,
+        ValueError,
+        ImportError,
+        subprocess.SubprocessError,
+        QuantStudioError,
+    ) as exc:
+        result["frozen_runtime"] = {"status": "无法核实", "error": str(exc)}
+    try:
+        config, _ = delivery_config()
+        pointer = Path(config["state_dir"]) / "current.json"
+        result["recorded_release"] = (
+            json.loads(pointer.read_text("utf-8")) if pointer.exists() else None
+        )
+        etf_pointer = Path(config["state_dir"]) / "etf-current.json"
+        result["recorded_etf_release"] = (
+            json.loads(etf_pointer.read_text("utf-8")) if etf_pointer.exists() else None
+        )
+        if config.get("local_control"):
+            control = json.loads(Path(config["local_control"]).read_text("utf-8-sig"))
+            state = Path(control["state_dir"])
+            result["local_control"] = {
+                "config": config["local_control"],
+                "scope": "以下为最近持久化回执；请执行核实操作取得当前监听进程状态",
+                **{
+                    name: json.loads((state / f"{name}.json").read_text("utf-8"))
+                    for name in ("process", "runtime", "last-operation")
+                    if (state / f"{name}.json").is_file()
+                },
+            }
+        result["backups"] = {}
+        for name, row in config.get("backups", {}).items():
+            backup = json.loads(Path(row["config"]).read_text("utf-8-sig"))
+            state = Path(backup["state_dir"])
+            result["backups"][name] = {
+                "config": row["config"],
+                "scope": "历史校验回执；不表示当前归档或生产路径已重新核验",
+                **{
+                    key: json.loads((state / f"{key}.json").read_text("utf-8"))
+                    for key in ("backup", "restore")
+                    if (state / f"{key}.json").is_file()
+                },
+            }
+    except (OSError, ValueError, KeyError, QuantStudioError) as exc:
+        result["delivery_error"] = str(exc)
+    return result
 
 
 class DeliveryStore:
@@ -133,7 +216,39 @@ class DeliveryStore:
             config["source_root"],
         ]
         files = [config_path, Path(config["workspace_config"])]
-        if action == "platform-status":
+        if action == "control-status":
+            if not config.get("local_control"):
+                raise QuantStudioError("请配置独立本机控制器")
+            argv = [
+                config["python"],
+                "-I",
+                "-X",
+                "utf8",
+                "-m",
+                "quant_workspace.local_control",
+                "--config",
+                config["local_control"],
+                "status",
+            ]
+            files.append(Path(config["local_control"]))
+        elif action in {"verify-backup", "restore-drill"}:
+            target = config.get("backups", {}).get(name)
+            if not target:
+                raise QuantStudioError("请选择已配置备份")
+            backup = json.loads(Path(target["config"]).read_text("utf-8-sig"))
+            argv = [
+                config["python"],
+                "-I",
+                "-X",
+                "utf8",
+                "-m",
+                "quant_workspace.operational_backup",
+                "--config",
+                target["config"],
+                "verify" if action == "verify-backup" else "restore-drill",
+            ]
+            files.extend([Path(target["config"]), Path(backup["archive"])])
+        elif action == "platform-status":
             argv += [
                 "platform-status",
                 "--source-root",

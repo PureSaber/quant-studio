@@ -258,6 +258,8 @@ def supervise(config_path):
 
 
 def operations_body(runs_root):
+    from quant_studio.environment_delivery import operational_snapshot
+
     state = Path(runs_root).parent
     status_path = state / "operations-status.json"
     status = read_json(status_path) if status_path.exists() else {}
@@ -277,6 +279,11 @@ class="page-head">
 <h1>服务与备份</h1>
 <p>本机健康状态和自动备份；真实跨设备连接需在客户端验收。</p>
 </header>
+<section class="panel"><h2>进程、发布与冻结环境</h2>
+<p>当前进程、已登记发布和历史控制回执分别列出。
+<a href="/delivery">环境检查、隔离恢复与独立控制工具</a></p>
+<pre>{escape(json.dumps(operational_snapshot(), ensure_ascii=False, indent=2))}</pre>
+</section>
 <section
 class="panel">
 <h2>运行状态</h2>
