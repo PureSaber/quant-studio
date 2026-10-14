@@ -86,6 +86,7 @@ jobs:
           python-version: '3.12'
       - name: Install native timing and Studio
         run: |
+          python -m pip install --no-deps -r quant-studio/requirements.lock
           python -m pip install -e "quant-timing[dev]"
           python -m pip install --no-deps -e quant-studio
           python -m pip check
