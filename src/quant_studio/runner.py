@@ -106,6 +106,9 @@ def _execute_subprocess(
 ) -> subprocess.CompletedProcess:
     """Keep synchronous CLI semantics, with a live handle for queued HTTP jobs."""
     if control is None:
+        hidden_options = (
+            {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        )
         return subprocess.run(
             argv,
             cwd=cwd,
@@ -117,6 +120,7 @@ def _execute_subprocess(
             env=env,
             timeout=timeout,
             check=False,
+            **hidden_options,
         )
     popen_options = {
         "cwd": cwd,
@@ -129,7 +133,9 @@ def _execute_subprocess(
         "env": env,
     }
     if os.name == "nt":
-        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        popen_options["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        )
     else:
         popen_options["start_new_session"] = True
     process = subprocess.Popen(argv, **popen_options)

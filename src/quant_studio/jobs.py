@@ -12,7 +12,7 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -225,9 +225,13 @@ class JobManager:
             ).encode("utf-8")
         ).hexdigest()
         record["request_identity"] = request["request_identity"] = identity
-        with self._lock:
+        with self._lock, _admission_lock(self.runs_root):
             if self._closed:
                 raise QuantStudioError("任务队列已经关闭")
+            if (self.runs_root / ".local-maintenance.json").exists():
+                raise QuantStudioError(
+                    "本机正在维护，暂不接收新任务；请在维护完成后重试"
+                )
             if dispatch_key is not None:
                 for previous in self.list():
                     if previous.get("dispatch_key") == dispatch_key:
@@ -549,6 +553,21 @@ class JobManager:
 def _terminate_bound_process(process: subprocess.Popen, *, force: bool = False) -> bool:
     # The caller owns this live Popen handle; persisted PIDs are never used.
     return _terminate_process_scope(process, force=force)
+
+
+@contextmanager
+def _admission_lock(runs_root: Path):
+    # The external maintenance controller uses the same one-byte file lock.
+    # Keep it until the accepted request is persisted and enqueued, so the
+    # controller cannot observe an idle queue between admission and publication.
+    try:
+        stream = _acquire_root_lock(runs_root / ".local-admission.lock")
+    except QuantStudioError as exc:
+        raise QuantStudioError("任务提交或本机维护检查正在进行，请稍后重试") from exc
+    try:
+        yield
+    finally:
+        _release_root_lock(stream)
 
 
 def _acquire_root_lock(path: Path):
