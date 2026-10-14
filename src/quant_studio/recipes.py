@@ -46,6 +46,7 @@ _INPUT_PATHS["etf-weekly-research"] = (
     "inputs.bundle",
     "inputs.catalog",
     "inputs.history",
+    "inputs.return_forecasts",
 )
 
 
@@ -78,6 +79,14 @@ def _normalize_input(template_id, value):
     ):
         raise QuantStudioError("外部研究配置格式无效")
     _check_tree(value)
+    allocation = value["config"].get("allocation")
+    if isinstance(allocation, dict) and allocation.get("protocol_version") == 2:
+        from quant_data_kit.allocation_protocol import validate_v2
+
+        try:
+            validate_v2(allocation)
+        except ValueError as exc:
+            raise QuantStudioError(str(exc)) from exc
     result = copy.deepcopy(value)
     base = Path(value["source_path"]).parent
     for dotted in _INPUT_PATHS[template_id]:

@@ -17,6 +17,11 @@ ADVANCED = {
 }
 
 LABELS = {
+    "allocation": "组合优化器",
+    "benchmark_weights": "基准完整权重",
+    "max_tracking_error": "年化跟踪误差上限",
+    "factor_bounds": "因子暴露限制",
+    "active_factor_bounds": "主动因子暴露限制",
     "sfc_rate": "证监会交易征费率",
     "afrc_rate": "会财局交易征费率",
     "trading_rate": "交易费率",
@@ -77,6 +82,25 @@ def help_text(key):
 
 
 def special_control(name, key, value):
+    if (
+        key == "allocation"
+        and isinstance(value, dict)
+        and value.get("protocol_version") == 2
+    ):
+        from quant_data_kit.allocation_protocol import METHODS, validate_v2
+
+        validate_v2(value)
+        raw = escape(json.dumps(value, ensure_ascii=False), quote=True)
+        methods = escape(json.dumps(METHODS), quote=True)
+        return (
+            f'<div class="allocation-editor" data-methods="{methods}">'
+            '<div class="allocation-controls"></div>'
+            "<p>总仓位由策略参数决定。跟踪误差和主动风险需要完整基准权重；"
+            "IC 使用决策时点前成熟且不重叠的标签，样本不足会停止候选。</p>"
+            "<details><summary>优化器原生配置</summary>"
+            f'<textarea class="allocation-json" name="{name}" rows="6">{raw}</textarea>'
+            "</details></div>"
+        )
     if isinstance(value, list) and value and all(isinstance(v, str) for v in value):
         return f'''<textarea
 name="{name}" rows="4">{escape(chr(10).join(value))}</textarea>'''
@@ -115,5 +139,10 @@ name="{name}" rows="6">{raw}</textarea>
 EDITOR_SCRIPT = (
     files("quant_studio")
     .joinpath("assets/research-editor.html")
+    .read_text(encoding="utf-8")
+)
+EDITOR_SCRIPT += (
+    files("quant_studio")
+    .joinpath("assets/allocation-editor.html")
     .read_text(encoding="utf-8")
 )

@@ -41,7 +41,13 @@ _LABELS = {
 def _leaves(value, prefix=""):
     for key, child in value.items():
         path = prefix + "/" + key.replace("~", "~0").replace("/", "~1")
-        if isinstance(child, dict) and child:
+        if (
+            key == "allocation"
+            and isinstance(child, dict)
+            and child.get("protocol_version") == 2
+        ):
+            yield path, key, child
+        elif isinstance(child, dict) and child:
             yield from _leaves(child, path)
         else:
             yield path, key, child
@@ -105,7 +111,7 @@ type="{kind}" step="any"
 name="{name}" '''
                 f'value="{escape(str(child), quote=True)}">'
             )
-        wide = key == "instruments"
+        wide = key in {"instruments", "allocation"}
         field = (
             f'<div class="recipe-field{" wide" if wide else ""}">'
             + (

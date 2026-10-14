@@ -1,0 +1,37 @@
+<style>.allocation-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.allocation-controls label{display:flex;flex-direction:column;gap:5px}.allocation-controls select,.allocation-controls input{box-sizing:border-box;width:100%;min-width:0}.allocation-json{width:100%;box-sizing:border-box}</style>
+<script>
+document.querySelectorAll('.allocation-editor').forEach(editor=>{
+ const raw=editor.querySelector('.allocation-json'), controls=editor.querySelector('.allocation-controls');
+ let config=JSON.parse(raw.value); const capabilities=JSON.parse(editor.dataset.methods);
+ const names={equal:'等权目标',inverse_vol:'逆波动率',risk_parity:'风险平价目标',hrp:'层次风险平价',cost_aware:'收益、风险与成本',max_sharpe:'最大夏普',max_diversification:'最大分散化',cvar:'CVaR',evar:'EVaR',cdar:'CDaR'};
+ function select(key,label,options){
+  const wrap=document.createElement('label'), input=document.createElement('select');wrap.textContent=label;
+  options.forEach(([v,title])=>{const o=document.createElement('option');o.value=v;o.textContent=title;o.selected=config[key]===v;input.append(o)});
+  input.onchange=()=>{config[key]=input.value;if(key==='mode'){
+    const uses=['cost_aware','max_sharpe','cvar','evar','cdar'].includes(config.mode);
+    config.expected_return_model=uses?(config.expected_return_model==='provided'?'provided':'ic_vol'):'none';
+    if(config.mode!=='cost_aware')config.risk_objective='absolute';
+    ['cvar_beta','evar_beta','cdar_beta','risk_free_rate'].forEach(k=>delete config[k]);render();
+   }sync();};wrap.append(input);controls.append(wrap);
+ }
+ function number(key,label,def,min,max){
+  const wrap=document.createElement('label'), input=document.createElement('input');wrap.textContent=label;
+  input.type='number';input.step='any';input.min=min;if(max!==undefined)input.max=max;
+  input.value=config[key]??def;input.onchange=()=>{config[key]=input.value===''?null:Number(input.value);sync()};wrap.append(input);controls.append(wrap);
+ }
+ function sync(){raw.value=JSON.stringify(config,null,2)}
+ function render(){controls.replaceChildren();
+  select('mode','分配方法',Object.keys(capabilities).map(k=>[k,names[k]]));
+  select('risk_objective','风险目标',config.mode==='cost_aware'?[['absolute','绝对风险'],['active','相对完整基准的风险']]:[['absolute','绝对目标；可单独施加基准约束']]);
+  select('expected_return_model','收益预测',config.expected_return_model==='none'?[['none','此方法不使用收益预测']]:[['ic_vol','成熟 IC × 期限波动率 × 标准化信号'],['provided','显式提供同期限收益预测']]);
+  number('forecast_horizon_sessions','预测期限（交易日）',1,1);number('max_turnover','双边换手上限',1,0,2);
+  number('max_tracking_error','年化跟踪误差上限（空白表示不设限）','',0);
+  if(config.mode==='cost_aware'||['cvar','evar','cdar'].includes(config.mode))number('risk_aversion','风险惩罚系数',5,0);
+  if(config.expected_return_model==='ic_vol'){number('ic_lookback','IC 滚动样本窗口',120,2);number('ic_min_periods','最少成熟非重叠期数',20,2);}
+  if(['cvar','evar','cdar'].includes(config.mode))number(config.mode+'_beta','尾部置信水平',.95,0,1);
+  if(config.mode==='max_sharpe')number('risk_free_rate','同期限无风险收益',0,-1);
+ }
+ raw.addEventListener('change',()=>{try{config=JSON.parse(raw.value);raw.setCustomValidity('');render()}catch(e){raw.setCustomValidity('请输入有效 JSON')}});
+ render();
+});
+</script>
