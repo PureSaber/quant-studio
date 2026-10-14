@@ -14,7 +14,7 @@ from quant_studio.recipes import RecipeStore, _atomic, load_input_config
 _LOCK = threading.RLock()
 
 
-def connect(root, operation_id):
+def connect(root, operation_id, *, project_id=None):
     from pathlib import Path
 
     value = inspect_daily()
@@ -29,8 +29,12 @@ def connect(root, operation_id):
         index = Path(root) / ".etf-project-links.json"
         links = json.loads(index.read_text(encoding="utf-8")) if index.exists() else {}
         projects = ProjectStore(root)
-        if operation_id in links:
-            return projects.get(links[operation_id])
+        link_key = (
+            operation_id if project_id is None else operation_id + ":" + project_id
+        )
+        if link_key in links:
+            return projects.get(links[link_key])
+        previous = projects.get(project_id) if project_id else None
         from quant_studio.notebook_data_reader import snapshot_hashes
 
         snapshot = Path(inputs["config"]["inputs"]["bundle"])
@@ -69,12 +73,19 @@ def connect(root, operation_id):
             dataset_id=dataset["id"],
         )
         project = projects.save(
-            "四ETF研究 · " + operation["data"]["covered_through"],
-            inputs["config"]["hypothesis"],
-            datasets=[dataset["id"]],
-            recipes=[{"id": recipe["id"], "revision": recipe["revision"]}],
-            notes="请登记研究卡，再预检运行。历史数据保持回顾性标签；负面结论保留。",
+            previous["name"]
+            if previous
+            else "四ETF研究 · " + operation["data"]["covered_through"],
+            previous["question"] if previous else inputs["config"]["hypothesis"],
+            project_id=project_id,
+            expected=previous["revision"] if previous else None,
+            datasets=(previous["datasets"] if previous else []) + [dataset["id"]],
+            recipes=(previous["recipes"] if previous else [])
+            + [{"id": recipe["id"], "revision": recipe["revision"]}],
+            notes=previous["notes"]
+            if previous
+            else "请登记研究卡，再预检运行。历史数据保持回顾性标签；负面结论保留。",
         )
-        links[operation_id] = project["id"]
+        links[link_key] = project["id"]
         _atomic(index, json.dumps(links))
         return project

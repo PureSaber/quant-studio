@@ -52,6 +52,13 @@ def test_connect_freezes_inputs_and_duplicate_click_reuses_project(
     ref = project["recipes"][0]
     recipe = RecipeStore(root).get(ref["id"], ref["revision"])
     assert DatasetStore(root).select(recipe["dataset_id"], "etf-weekly-research")
+    existing = ProjectStore(root).save("原有研究", "同一经济假设", notes="保留负面结论")
+    linked = etf_project.connect(root, operation["id"], project_id=existing["id"])
+    assert linked["id"] == existing["id"]
+    assert linked["notes"] == "保留负面结论" and len(linked["recipes"]) == 1
+    assert (
+        etf_project.connect(root, operation["id"], project_id=existing["id"]) == linked
+    )
     recipe_path.write_text("modified")
     assert recipe["input_config"]["config"]["hypothesis"] == "四ETF研究"
     with pytest.raises(QuantStudioError, match="变化"):

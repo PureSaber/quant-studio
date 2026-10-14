@@ -1340,7 +1340,9 @@ class _Handler(
                 from quant_studio.etf_daily_web import today_body
 
                 self._send_html(
-                    _layout("今日运行", today_body(self.csrf_token), "today")
+                    _layout(
+                        "今日运行", today_body(self.csrf_token, self.runs_root), "today"
+                    )
                 )
             elif path == "/durable-research" or path.startswith("/durable-research/"):
                 self._durable_get(path)

@@ -43,7 +43,7 @@ def details(value, label="查看原生证据"):
     )
 
 
-def today_body(token):
+def today_body(token, root=None):
     body = """<header class="page-head"><h1>今日运行 · 四 ETF</h1>
 <p>510300 · 510500 · 159915 · 588000；日频数据、周频基线、模拟账户。</p>
 <a class="btn" href="/projects">研究项目与决策</a>
@@ -59,9 +59,18 @@ def today_body(token):
         )
     data, latest = value["data"], value.get("latest") or {}
     if latest.get("research_recipe"):
+        choices = '<option value="">新建研究项目</option>'
+        if root is not None:
+            from quant_studio.projects import ProjectStore
+
+            choices += "".join(
+                f'<option value="{p["id"]}">{escape(p["name"])}</option>'
+                for p in ProjectStore(root).list()
+            )
         body += f'''<form method="post" action="/today/run">{csrf(token)}
 <input type="hidden" name="command" value="connect-project">
 <input type="hidden" name="operation" value="{latest["id"]}">
+<label>连接到项目<select name="project_id">{choices}</select></label>
 <button class="btn">将此快照与冻结配方连接到研究项目</button></form>'''
     body += '<section class="panel"><h2>数据更新了吗？</h2>'
     body += table(
@@ -86,11 +95,12 @@ def today_body(token):
     current = latest.get("state", "尚无记录")
     body += f"<p>本次状态：{escape(LABELS.get(current, current))}</p>"
     body += f"<p>最近运行：{escape(latest.get('started_at', '尚无记录'))}</p>"
+    stages = {s["stage"]: s for s in latest.get("stages", [])}
     body += table(
         ["阶段", "状态"],
         [
             [STAGES.get(s["stage"], s["stage"]), LABELS.get(s["state"], s["state"])]
-            for s in latest.get("stages", [])
+            for s in stages.values()
         ],
     )
     success = value.get("last_success") or {}
@@ -135,6 +145,24 @@ def today_body(token):
             ["币种", "账本费用类型", "累计模拟费用"], execution.get("cost_totals", [])
         )
         body += details(execution.get("metrics", {}), "原生研究与成本指标")
+        forecast = (execution.get("target_evidence") or {}).get("cost_forecast")
+        if forecast:
+            body += "<h3>最近目标的预估综合成本</h3>"
+            body += table(
+                ["原生预算", "目标换手", "估算口径"],
+                [
+                    [
+                        forecast.get("estimated_cost_amount"),
+                        forecast.get("turnover"),
+                        "冻结的每单位换手成本率；含费用与价格影响预算",
+                    ]
+                ],
+            )
+            body += (
+                "<p>预算对应最近一次目标；上表为整个观察窗口的账本费用。"
+                "两者区间及成本范围不同，不直接相减。"
+                "成交数量差异见目标、持仓及原生委托。</p>"
+            )
         if "costs" in execution["tables"]:
             item = execution["tables"]["costs"]
             body += table(item["columns"], item["rows"])
@@ -144,6 +172,20 @@ def today_body(token):
     body += (
         f"<p>{escape(latest.get('error', '检查下方各阶段证据与原生风险事件。'))}</p>"
     )
+    issues = []
+    for stage in stages.values():
+        issues.extend(stage.get("evidence", {}).get("issues", []))
+        if stage.get("reason"):
+            issues.append(stage["reason"])
+    if issues:
+        body += table(
+            ["阻断原因", "修复入口"],
+            [[str(issue), "数据更新与质量 / 运行环境"] for issue in issues],
+        )
+        body += (
+            '<p><a href="/data-center">数据更新与质量</a> · '
+            '<a href="/delivery">运行环境</a></p>'
+        )
     body += (
         "<p>数据问题进入质量中心；配置问题进入运行环境；"
         "账户中断先核验，再显式重试。历史修订或冻结身份变化需停止观察。</p>"
@@ -160,9 +202,10 @@ def today_post(handler, data):
         from quant_studio.etf_project import connect
 
         operation = field(data, "operation")
+        project_id = field(data, "project_id", "") or None
         if data:
             raise QuantStudioError("未知ETF连接字段")
-        project = connect(handler.runs_root, operation)
+        project = connect(handler.runs_root, operation, project_id=project_id)
         handler._redirect(f"/projects/{project['id']}#research-card")
         return
     if data:
