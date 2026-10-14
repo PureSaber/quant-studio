@@ -1,0 +1,72 @@
+{
+  "id": "etf-weekly-research",
+  "title": "四 ETF 周频研究",
+  "summary": "冻结原生配方，预检后运行全部候选、基准、消融和成本压力，保留失败证据。",
+  "kind": "external",
+  "workspace_repo": "quant-pipeline",
+  "base_config": "base.json",
+  "config_format": "json",
+  "requires_snapshot": true,
+  "input_source": {
+    "kind": "file",
+    "label": "已冻结 ETF 研究配方",
+    "environment": "QUANT_ETF_RECIPE"
+  },
+  "data_help": "使用四 ETF 的原生 quant.research-recipe/v1 配方。费用、风险、周频策略全部来自配方；输入应为已有不可变快照。",
+  "knobs": [],
+  "argv": [
+    "python",
+    "-m",
+    "quant_pipeline.etf_research",
+    "run",
+    "--recipe",
+    "{snapshot}",
+    "--output",
+    "{output}"
+  ],
+  "preflight_argv": [
+    "python",
+    "-m",
+    "quant_pipeline.etf_research",
+    "check",
+    "--recipe",
+    "{snapshot}"
+  ],
+  "preflight_contract": {
+    "schema_version": "quant.etf-research-preflight/v1",
+    "status_field": "software_preflight",
+    "positive_counts": []
+  },
+  "preflight_summary": "只读检查原生配方、四 ETF 数据、主表、公司行动、日历及费用；不会产生观察。",
+  "output_dirs": [
+    "{output}"
+  ],
+  "verification_argv": [
+    "python",
+    "-m",
+    "quant_pipeline.etf_research",
+    "inspect",
+    "--output",
+    "{output}"
+  ],
+  "verification_contract": {
+    "schema_version": "quant.etf-research-view/v1",
+    "verification": "native_study_artifacts",
+    "read_only": true,
+    "investable": false
+  },
+  "result_files": {
+    "report.html": "research.html"
+  },
+  "result_evidence": {
+    "file": "studio-view.json",
+    "field": "evidence_kind",
+    "values": [
+      "synthetic",
+      "retrospective"
+    ]
+  },
+  "report_name": "report.html",
+  "disclaimer": "研究模拟；完整保留负面结论，不自动选择有效策略或切换账户。",
+  "upstream_ref": "2c626ebe9f0970d76a5cb9096653ec0ef53933df"
+}

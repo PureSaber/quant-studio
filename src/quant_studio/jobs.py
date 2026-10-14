@@ -139,6 +139,12 @@ class JobManager:
             raise QuantStudioError("环境交付须绑定已预览请求")
         if dispatch_key is not None and not re.fullmatch(r"[a-f0-9]{64}", dispatch_key):
             raise QuantStudioError("派发标识无效")
+        if (
+            template_id == "etf-weekly-research"
+            and action in {"workflow", "execute"}
+            and research_project is None
+        ):
+            raise QuantStudioError("请从已登记研究卡的项目提交四ETF实验")
         if research_project is not None:
             from quant_studio.projects import ProjectStore
 
@@ -147,6 +153,10 @@ class JobManager:
             linked_project = ProjectStore(self.runs_root).get(
                 research_project["id"], research_project["revision"]
             )
+            if template_id == "etf-weekly-research" and not linked_project.get(
+                "research_card"
+            ):
+                raise QuantStudioError("请先登记研究卡，实验将固定本次协议版本")
             if (
                 not recipe
                 or {"id": recipe["id"], "revision": recipe["revision"]}

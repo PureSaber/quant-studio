@@ -1,0 +1,177 @@
+"""One operational landing page with evidence links and explicit actions."""
+
+import json
+from html import escape
+
+from quant_studio import QuantStudioError
+from quant_studio.etf_daily import inspect_daily, request
+from quant_studio.project_web import table
+from quant_studio.workbench_web import csrf, field
+
+LABELS = {
+    "completed": "已完成",
+    "research_ready": "研究预检通过",
+    "ready": "可观察",
+    "blocked": "已阻断",
+    "collection_retryable": "采集可补试",
+    "preflight_blocked": "研究预检阻断",
+    "verification_failed": "身份核验失败",
+    "paused": "暂停",
+    "running": "执行中",
+    "interrupted": "已中断",
+    "retryable_failure": "需显式重试",
+    "data_missing": "数据缺失",
+    "outside_window": "不在观察区间",
+    "not_due": "尚未到时",
+    "sealed": "已封存",
+    "candidate_required": "需要候选决策与登记",
+}
+STAGES = {
+    "collection": "数据更新",
+    "preflight": "研究预检",
+    "frozen_identity": "冻结身份",
+    "observe": "账户观察",
+    "verify": "账本核验",
+}
+
+
+def details(value, label="查看原生证据"):
+    return (
+        f"<details><summary>{label}</summary><pre>"
+        + escape(json.dumps(value, ensure_ascii=False, indent=2))
+        + "</pre></details>"
+    )
+
+
+def today_body(token):
+    body = """<header class="page-head"><h1>今日运行 · 四 ETF</h1>
+<p>510300 · 510500 · 159915 · 588000；日频数据、周频基线、模拟账户。</p>
+<a class="btn" href="/projects">研究项目与决策</a>
+<a class="btn" href="/data-center">数据更新与质量</a>
+<a class="btn" href="/delivery">运行环境</a></header>"""
+    try:
+        value = inspect_daily()
+    except QuantStudioError as exc:
+        return (
+            body
+            + '<section class="panel"><h2>尚未就绪</h2>'
+            + f"<p>{escape(str(exc))}</p></section>"
+        )
+    data, latest = value["data"], value.get("latest") or {}
+    if latest.get("research_recipe"):
+        body += f'''<form method="post" action="/today/run">{csrf(token)}
+<input type="hidden" name="command" value="connect-project">
+<input type="hidden" name="operation" value="{latest["id"]}">
+<button class="btn">将此快照与冻结配方连接到研究项目</button></form>'''
+    body += '<section class="panel"><h2>数据更新了吗？</h2>'
+    body += table(
+        ["应到交易日", "实际截止", "真实采集时间", "新鲜度"],
+        [
+            [
+                value["expected_session"],
+                data["covered_through"],
+                data["captured_at"],
+                "已覆盖" if data["fresh"] else "需要更新",
+            ]
+        ],
+    )
+    for command, label in (
+        ("refresh", "更新到最新已收盘交易日并预检"),
+        ("observe", "核验并观察已登记模拟账户"),
+    ):
+        body += f'''<form method="post" action="/today/run">{csrf(token)}
+<input type="hidden" name="command" value="{command}">
+<button class="btn">{label}</button></form>'''
+    body += '</section><section class="panel"><h2>今天执行了吗？</h2>'
+    current = latest.get("state", "尚无记录")
+    body += f"<p>本次状态：{escape(LABELS.get(current, current))}</p>"
+    body += f"<p>最近运行：{escape(latest.get('started_at', '尚无记录'))}</p>"
+    body += table(
+        ["阶段", "状态"],
+        [
+            [STAGES.get(s["stage"], s["stage"]), LABELS.get(s["state"], s["state"])]
+            for s in latest.get("stages", [])
+        ],
+    )
+    success = value.get("last_success") or {}
+    body += f"<p>最近成功观察：{escape(success.get('as_of', '尚无成功观察'))}</p>"
+    forward = value.get("forward")
+    if forward:
+        gate = escape(LABELS.get(forward["state"], forward["state"]))
+        body += f"<p>当前账户门禁：{gate}</p>"
+        body += details(forward, "身份、日历与输入检查")
+    else:
+        body += "<p>尚未登记模拟账户；请先在研究项目记录候选决策。</p>"
+    body += '</section><section class="panel"><h2>目标与模拟持仓差多少？</h2>'
+    execution = value["execution"]
+    if not execution["available"]:
+        body += "<p>暂无已核验模拟观察；持仓与差额不可用，不按零处理。</p>"
+    else:
+        body += f"<p>账本观察日：{escape(execution['as_of'])}</p>"
+        if execution.get("position_comparison"):
+            body += table(
+                ["证券", "目标数量", "模拟持仓", "差额", "待成交净数量"],
+                execution["position_comparison"],
+            )
+        else:
+            body += "<p>未提供可核验的目标数量对照；查看原生委托、成交及拒绝原因。</p>"
+        for name, label in (
+            ("positions", "模拟持仓"),
+            ("orders", "原生委托"),
+            ("fills", "模拟成交"),
+        ):
+            if name in execution["tables"]:
+                item = execution["tables"][name]
+                body += (
+                    f"<h3>{label}</h3>"
+                    f"<p>显示最后100行以内，共{item['total_rows']}行。</p>"
+                )
+                body += table(item["columns"], item["rows"])
+    body += '</section><section class="panel"><h2>成本偏在哪里？</h2>'
+    body += "<p>本页为模拟费用与滑点假设；未接真实成交和独立报价。</p>"
+    if execution["available"]:
+        body += details(execution.get("cost_assumptions"), "冻结费用与滑点假设")
+        body += table(
+            ["币种", "账本费用类型", "累计模拟费用"], execution.get("cost_totals", [])
+        )
+        body += details(execution.get("metrics", {}), "原生研究与成本指标")
+        if "costs" in execution["tables"]:
+            item = execution["tables"]["costs"]
+            body += table(item["columns"], item["rows"])
+    else:
+        body += "<p>成本数据不可用。</p>"
+    body += '</section><section class="panel"><h2>异常怎么处理？</h2>'
+    body += (
+        f"<p>{escape(latest.get('error', '检查下方各阶段证据与原生风险事件。'))}</p>"
+    )
+    body += (
+        "<p>数据问题进入质量中心；配置问题进入运行环境；"
+        "账户中断先核验，再显式重试。历史修订或冻结身份变化需停止观察。</p>"
+    )
+    body += details(latest, "完整阶段回执") + details(
+        execution.get("diagnostics", {}), "原生风险与未成交原因"
+    )
+    return body + "</section>"
+
+
+def today_post(handler, data):
+    command = field(data, "command")
+    if command == "connect-project":
+        from quant_studio.etf_project import connect
+
+        operation = field(data, "operation")
+        if data:
+            raise QuantStudioError("未知ETF连接字段")
+        project = connect(handler.runs_root, operation)
+        handler._redirect(f"/projects/{project['id']}#research-card")
+        return
+    if data:
+        raise QuantStudioError("未知ETF运行字段")
+    job = handler._jobs().submit(
+        "collect",
+        "etf-weekly-research",
+        {},
+        profile=handler._request_profile,
+        collection=request(command),
+    )
+    handler._redirect(f"/jobs/{job['job_id']}")

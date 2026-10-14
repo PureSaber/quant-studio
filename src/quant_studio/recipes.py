@@ -42,6 +42,11 @@ _INPUT_PATHS = {
     ),
 }
 _INPUT_PATHS["timing-counterfactual"] = _INPUT_PATHS["timing-research"]
+_INPUT_PATHS["etf-weekly-research"] = (
+    "inputs.bundle",
+    "inputs.catalog",
+    "inputs.history",
+)
 
 
 def load_input_config(template_id, path):

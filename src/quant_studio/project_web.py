@@ -136,6 +136,9 @@ value="{rid}@{rev}"
 <a class="btn" href="/projects/{identifier}/evidence">研究证据与复核</a>
 </header>"""
     body += notebook_body(root, token, project)
+    from quant_studio.research_card_web import card_body
+
+    body += card_body(root, token, project)
     edit_open = "" if project["datasets"] or project["recipes"] else " open"
     body += f'''<details class="panel"{edit_open}>
 <summary>编辑研究问题、数据、方案与笔记</summary>
@@ -402,6 +405,12 @@ class ProjectHandler:
                 raise QuantStudioError("未知项目操作")
             identifier, action = parts
             revision = field(data, "revision")
+            if action in {"card-save", "decision"}:
+                from quant_studio.research_card_web import card_post
+
+                card_post(self.runs_root, identifier, revision, action, data)
+                self._redirect(f"/projects/{identifier}#research-card")
+                return
             if action == "evidence-review":
                 from quant_studio.project_evidence_web import evidence_post
 

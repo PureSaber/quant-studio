@@ -26,7 +26,9 @@ def output_hashes(directory):
             safe_run_file(directory, p.relative_to(directory).as_posix()).read_bytes()
         ).hexdigest()
         for p in sorted(paths)
-        if p.is_file() and p.suffix in {".json", ".yaml", ".yml", ".csv", ".html"}
+        if p.is_file() and p.suffix in {
+            ".json", ".yaml", ".yml", ".csv", ".html", ".parquet", ".db", ".sqlite"
+        }
     }
 
 

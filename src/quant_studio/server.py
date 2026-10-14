@@ -1156,6 +1156,8 @@ def _job_executor(runs_root: Path):
         template = (
             recipe_template(job["recipe"]) if job.get("recipe") else job["template_id"]
         )
+        if job.get("research_project"):
+            template.metadata["research_project"] = job["research_project"]
         options = dict(
             factors=job.get("factors"),
             runs_root=runs_root,
@@ -1334,7 +1336,13 @@ class _Handler(
             return
         path = unquote(urlparse(self.path).path)
         try:
-            if path == "/durable-research" or path.startswith("/durable-research/"):
+            if path == "/today":
+                from quant_studio.etf_daily_web import today_body
+
+                self._send_html(
+                    _layout("今日运行", today_body(self.csrf_token), "today")
+                )
+            elif path == "/durable-research" or path.startswith("/durable-research/"):
                 self._durable_get(path)
             elif path in {"/data-center", "/history", "/delivery"}:
                 self._maintenance_get(path)
@@ -1486,7 +1494,8 @@ class _Handler(
         path = unquote(urlparse(self.path).path)
         code_view = False
         accepted = (
-            path.startswith(("/data-center/", "/delivery/", "/durable-research/"))
+            path == "/today/run"
+            or path.startswith(("/data-center/", "/delivery/", "/durable-research/"))
             or path.startswith("/templates/")
             or path.startswith("/research/")
             or path.startswith("/datasets/")
@@ -1540,6 +1549,11 @@ class _Handler(
             submitted_token = data.pop("_csrf_token", [])
             if not self._valid_csrf_token(submitted_token):
                 self.send_error(403)
+                return
+            if path == "/today/run":
+                from quant_studio.etf_daily_web import today_post
+
+                today_post(self, data)
                 return
             if path.startswith("/durable-research/"):
                 self._durable_post(path, data)
@@ -2361,6 +2375,7 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
         ("data-center", "数据更新与质量", "/data-center"),
         ("intake", "导入与质量", "/intake"),
         ("projects", "研究项目", "/projects"),
+        ("today", "今日运行", "/today"),
         ("history", "研究历史", "/history"),
         ("research", "研究方案", "/research"),
         ("batches", "批量实验", "/batches"),
