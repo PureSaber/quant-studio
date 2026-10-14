@@ -1,6 +1,7 @@
 """Fixed-configuration bridge to the native ETF daily CLI in its own environment."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -50,6 +51,7 @@ def inspect_daily():
             timeout=60,
             env=subprocess_environment(),
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         value = json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
