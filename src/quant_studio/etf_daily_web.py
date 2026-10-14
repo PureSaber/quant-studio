@@ -1,7 +1,9 @@
 """One operational landing page with evidence links and explicit actions."""
 
 import json
+from datetime import datetime
 from html import escape
+from zoneinfo import ZoneInfo
 
 from quant_studio import QuantStudioError
 from quant_studio.etf_daily import inspect_daily, request
@@ -39,6 +41,44 @@ STAGES = {
     "observe": "账户观察",
     "verify": "账本核验",
 }
+
+
+def local_time(value, empty="尚无记录"):
+    if not value:
+        return empty
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(ZoneInfo("Asia/Shanghai")).strftime(
+                "%Y-%m-%d %H:%M:%S（北京时间）"
+            )
+    except (ValueError, TypeError):
+        pass
+    return str(value)
+
+
+def issue_text(value):
+    text = str(value)
+    prefix = "ETF daily-price coverage failed: "
+    if text.startswith(prefix):
+        try:
+            missing = json.loads(text[len(prefix) :])[
+                "missing_after_first_available_bar"
+            ]
+            if isinstance(missing, dict) and missing:
+                items = [
+                    f"{symbol}（{'、'.join(dates)}）"
+                    for symbol, dates in sorted(missing.items())
+                ]
+                return "缺少最终日线：" + "；".join(items) + "。完整行情快照尚未更新。"
+        except (ValueError, KeyError, TypeError):
+            pass
+    if text.startswith("TIMELY_ORDER_MISSING:"):
+        return (
+            "缺少开盘前已经完成的订单记录，无法证明成交时点成立；"
+            "本次观察已阻断，不能补造过去成交。"
+        )
+    return text
 
 
 def details(value, label="查看原生证据"):
@@ -82,12 +122,12 @@ def today_body(token, root=None):
 <button class="btn">将此快照与冻结配方连接到研究项目</button></form>'''
     body += '<section class="panel"><h2>数据更新了吗？</h2>'
     body += table(
-        ["应到交易日", "实际截止", "真实采集时间", "新鲜度"],
+        ["应到交易日", "实际截止", "行情采集时间", "新鲜度"],
         [
             [
                 value["expected_session"],
                 data["covered_through"],
-                data["captured_at"],
+                local_time(data["captured_at"]),
                 "已覆盖" if data["fresh"] else "需要更新",
             ]
         ],
@@ -100,7 +140,7 @@ def today_body(token, root=None):
         body += "<p>北京时间采集时段：" + escape("、".join(schedule["slots"])) + "</p>"
         body += (
             "<p>下次补试："
-            + escape(schedule.get("next_attempt_at") or "本轮无后续补试")
+            + escape(local_time(schedule.get("next_attempt_at"), "本轮无后续补试"))
             + "</p>"
         )
         if state == "collection_exhausted":
@@ -110,7 +150,7 @@ def today_body(token, root=None):
             )
     body += (
         "<p>最近完整预检通过："
-        + escape(value.get("preflight_passed_at") or "尚无记录")
+        + escape(local_time(value.get("preflight_passed_at")))
         + "</p>"
     )
     for command, label in (
@@ -123,7 +163,7 @@ def today_body(token, root=None):
     body += '</section><section class="panel"><h2>今天执行了吗？</h2>'
     current = latest.get("state", "尚无记录")
     body += f"<p>本次状态：{escape(LABELS.get(current, current))}</p>"
-    body += f"<p>最近运行：{escape(latest.get('started_at', '尚无记录'))}</p>"
+    body += f"<p>最近运行：{escape(local_time(latest.get('started_at')))}</p>"
     stages = {s["stage"]: s for s in latest.get("stages", [])}
     body += table(
         ["阶段", "状态"],
@@ -214,9 +254,8 @@ def today_body(token, root=None):
     else:
         body += "<p>成本数据不可用。</p>"
     body += '</section><section class="panel"><h2>异常怎么处理？</h2>'
-    body += (
-        f"<p>{escape(latest.get('error', '检查下方各阶段证据与原生风险事件。'))}</p>"
-    )
+    explanation = issue_text(latest.get("error", "检查下方各阶段证据与原生风险事件。"))
+    body += f"<p>{escape(explanation)}</p>"
     issues = []
     for stage in stages.values():
         issues.extend(stage.get("evidence", {}).get("issues", []))
@@ -225,7 +264,7 @@ def today_body(token, root=None):
     if issues:
         body += table(
             ["阻断原因", "修复入口"],
-            [[str(issue), "数据更新与质量 / 运行环境"] for issue in issues],
+            [[issue_text(issue), "数据更新与质量 / 运行环境"] for issue in issues],
         )
         body += (
             '<p><a href="/data-center">数据更新与质量</a> · '

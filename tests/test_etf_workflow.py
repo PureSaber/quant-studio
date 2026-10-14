@@ -152,3 +152,41 @@ def test_binary_native_artifact_tamper_is_detected(tmp_path):
     path.write_bytes(b"corrupted ledger")
     with pytest.raises(QuantStudioError, match="改变"):
         verify_result(tmp_path, {"output_hashes": hashes})
+
+
+def test_today_explains_data_delay_and_keeps_native_receipt(monkeypatch):
+    from quant_studio import etf_daily_web
+
+    reason = "ETF daily-price coverage failed: " + json.dumps(
+        {"missing_after_first_available_bar": {"159915": ["2026-10-14"]}}
+    )
+    monkeypatch.setattr(
+        etf_daily_web,
+        "inspect_daily",
+        lambda: {
+            "data": {
+                "covered_through": "2026-10-13",
+                "captured_at": "2026-10-14T02:01:15+00:00",
+                "fresh": False,
+            },
+            "expected_session": "2026-10-14",
+            "latest": {
+                "state": "collection_retryable",
+                "started_at": "2026-10-14T13:00:24+00:00",
+                "error": reason,
+                "stages": [],
+            },
+            "execution": {"available": False},
+            "schedule": {
+                "state": "waiting_for_slot",
+                "slots": ["21:00", "22:00"],
+                "next_attempt_at": "2026-10-14T22:00:00+08:00",
+            },
+        },
+    )
+    html = today_body("csrf-test")
+    assert "2026-10-14 10:01:15（北京时间）" in html
+    assert "2026-10-14 21:00:24（北京时间）" in html
+    assert "2026-10-14 22:00:00（北京时间）" in html
+    assert "缺少最终日线：159915（2026-10-14）。完整行情快照尚未更新。" in html
+    assert "ETF daily-price coverage failed:" in html  # Original evidence is retained.
