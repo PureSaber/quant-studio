@@ -3,6 +3,7 @@
 from html import escape
 
 from quant_studio import QuantStudioError
+from quant_studio.experiment_context import status_label
 from quant_studio.projects import ProjectStore
 from quant_studio.research_cards import ACTIONS, FIELDS, ROLES, VERDICTS, DecisionStore
 from quant_studio.workbench_web import csrf, field
@@ -42,20 +43,27 @@ def card_body(root, token, project):
             f'value="{escape(card.get(key, ""), quote=True)}"></label>'
         )
     body += '<button class="btn">保存新的研究卡版本</button></form>'
+    from quant_studio.project_registration import candidates
+
+    candidate_options = '<option value="">暂不提名</option>' + "".join(
+        f'<option value="{escape(name, quote=True)}">{escape(name)}</option>'
+        for name in sorted({row["candidate"] for row in candidates(root, identifier)})
+    )
     body += f'''<h3>记录人工决策</h3><p>提名只记录决定；不会自动创建或切换账户。</p>
 <form method="post" action="/projects/{identifier}/decision">{csrf(token)}
 <input type="hidden" name="revision" value="{revision}">
 <label>结论<select name="verdict">{options(VERDICTS, "inconclusive")}</select></label>
 <label>下一步<select name="action">{options(ACTIONS)}</select></label>
 <label>理由<textarea name="rationale" maxlength="8000" required></textarea></label>
-<label>提名的原生候选ID（仅提名时必填）<input name="candidate"></label>
+<label>提名的已完成原生候选（仅提名时必选）
+<select name="candidate">{candidate_options}</select></label>
 <label>已配置的模拟账户ID（可选）<input name="account_id"></label><p>引用实验：</p>'''
     for record in ProjectStore(root).experiments(identifier):
         association = "明确项目关联" if record["research_project"] else "历史配方关联"
         body += (
             f'<label class="check"><input type="checkbox" name="evidence" '
             f'value="{record["run_id"]}">{escape(record["title"])} · '
-            f"{escape(record['status'])} · {association}</label>"
+            f"{escape(status_label(record['status']))} · {association}</label>"
         )
     body += '<button class="btn">保存决策与证据引用</button></form>'
     for decision in DecisionStore(root).list(identifier):

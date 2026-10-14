@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from quant_studio import QuantStudioError
 from quant_studio.data_catalog import catalog, preview_file
 from quant_studio.datasets import DatasetStore
+from quant_studio.experiment_context import status_label
 from quant_studio.notebooks import NotebookStore, notebook_config
 from quant_studio.project_assistant import AssistantStore
 from quant_studio.projects import ProjectStore
@@ -172,8 +173,22 @@ maxlength="120" required></label>
         body += f'''<label class="check"><input type="checkbox" name="run"
 value="{record["run_id"]}">
 <a href="/experiments/{record["run_id"]}">{escape(record["title"])}</a>
- · {escape(record["status"])}</label>'''
+ · {escape(status_label(record["status"]))}
+ · 保存时间：{escape(record.get("when", "未记录"))}
+ · 方案版本：{escape((record.get("recipe") or {}).get("revision", "未记录")[:12])}
+ · 项目版本：{
+            escape(
+                (record.get("research_project") or {}).get("revision", "历史方案关联")[
+                    :12
+                ]
+            )
+        }</label>'''
     body += '<button class="btn">比较所选实验</button></form></section>'
+    body += (
+        f'<section class="panel"><h2>项目模拟账户</h2><a class="btn" '
+        f'href="/projects/{identifier}/registration">选择候选、登记预览与账户核验</a>'
+        "<p>登记和每日调度分别确认；失败及中断回执保留。</p></section>"
+    )
     body += '<details class="panel"><summary>项目版本记录</summary>'
     for version in store.history(identifier):
         body += f"""<p><a href="/projects/{identifier}?revision={version["revision"]}">
@@ -309,6 +324,15 @@ class ProjectHandler:
                 evidence_body(self.runs_root, self.csrf_token, parts[0]),
                 "projects",
             )
+        elif path.endswith("/registration"):
+            from quant_studio.project_registration_web import body as registration_body
+
+            body, active = (
+                registration_body(
+                    self.runs_root, self.csrf_token, path.split("/")[2], query
+                ),
+                "projects",
+            )
         elif path.endswith("/iterations"):
             from quant_studio.notebook_batch_web import iterations_body
 
@@ -405,6 +429,13 @@ class ProjectHandler:
                 raise QuantStudioError("未知项目操作")
             identifier, action = parts
             revision = field(data, "revision")
+            if action in {"registration-preview", "registration-confirm"}:
+                from quant_studio.project_registration_web import (
+                    post as registration_post,
+                )
+
+                registration_post(self, identifier, revision, action, data)
+                return
             if action in {"card-save", "decision"}:
                 from quant_studio.research_card_web import card_post
 
