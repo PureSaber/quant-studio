@@ -127,10 +127,17 @@ def test_today_distinguishes_unavailable_from_zero(monkeypatch):
             "last_success": None,
             "forward": None,
             "execution": {"available": False},
+            "schedule": {
+                "state": "collection_exhausted",
+                "slots": ["21:00", "22:00"],
+                "next_attempt_at": None,
+            },
         },
     )
     html = today_body("csrf-test")
     assert "需要更新" in html and "不按零处理" in html and "尚无成功观察" in html
+    assert "当日补试已结束" in html and "21:00、22:00" in html
+    assert "不补造过去的开盘成交" in html
 
 
 def test_binary_native_artifact_tamper_is_detected(tmp_path):

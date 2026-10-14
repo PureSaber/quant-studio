@@ -13,7 +13,12 @@ LABELS = {
     "research_ready": "研究预检通过",
     "ready": "可观察",
     "blocked": "已阻断",
-    "collection_retryable": "采集可补试",
+    "collection_retryable": "等待数据，稍后补试",
+    "waiting_for_slot": "等待下次补试",
+    "collection_exhausted": "当日补试已结束，数据仍未就绪",
+    "needs_attention": "需要处理",
+    "execution_failed": "模拟观察失败",
+    "market_closed": "休市",
     "preflight_blocked": "研究预检阻断",
     "verification_failed": "身份核验失败",
     "paused": "暂停",
@@ -87,6 +92,27 @@ def today_body(token, root=None):
             ]
         ],
     )
+    schedule = value.get("schedule")
+    if schedule:
+        state = schedule["state"]
+        label = "到达采集时段" if state == "ready" else LABELS.get(state, state)
+        body += f"<p>运行安排：{escape(label)}</p>"
+        body += "<p>北京时间采集时段：" + escape("、".join(schedule["slots"])) + "</p>"
+        body += (
+            "<p>下次补试："
+            + escape(schedule.get("next_attempt_at") or "本轮无后续补试")
+            + "</p>"
+        )
+        if state == "collection_exhausted":
+            body += (
+                "<p>本日不再自动采集或观察，保留最近成功状态。"
+                "请检查数据源发布情况。</p>"
+            )
+    body += (
+        "<p>最近完整预检通过："
+        + escape(value.get("preflight_passed_at") or "尚无记录")
+        + "</p>"
+    )
     for command, label in (
         ("refresh", "更新到最新已收盘交易日并预检"),
         ("observe", "核验并观察已登记模拟账户"),
@@ -114,7 +140,10 @@ def today_body(token, root=None):
         body += f"<p>当前账户门禁：{gate}</p>"
         body += details(forward, "身份、日历与输入检查")
     else:
-        body += "<p>尚未登记模拟账户；请先在研究项目记录候选决策。</p>"
+        body += (
+            "<p>尚未登记模拟账户；已提名候选仍需完成最新数据预检"
+            "与当前版本研究复核。</p>"
+        )
     body += '</section><section class="panel"><h2>目标与模拟持仓差多少？</h2>'
     execution = value["execution"]
     if not execution["available"]:
@@ -142,6 +171,10 @@ def today_body(token, root=None):
                 body += table(item["columns"], item["rows"])
     body += '</section><section class="panel"><h2>成本偏在哪里？</h2>'
     body += "<p>本页为模拟费用与滑点假设；未接真实成交和独立报价。</p>"
+    body += (
+        "<p>收盘形成信号，后续交易日按开盘价与冻结成本假设模拟；"
+        "不补造过去的开盘成交。</p>"
+    )
     if execution["available"]:
         body += details(execution.get("cost_assumptions"), "冻结费用与滑点假设")
         body += table(

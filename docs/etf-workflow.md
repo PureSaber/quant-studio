@@ -24,3 +24,13 @@
 
 本次软件交付不代表自然交易日运维验收已经完成。主表缺口、未批准候选及未来五个
 交易日观察须作为真实未完成项显示，不能用历史回放或软件测试替代。
+
+## Evening data availability
+
+The Today page reads the native optional schedule, next acquisition attempt,
+market capture time and complete-preflight timestamp. It distinguishes data
+waiting/exhaustion from simulation execution failure. The deployment uses
+16:30, 17:00, 18:00, 21:00 and 22:00 Shanghai slots, with a ten-minute collection
+budget. Historical daily prices are not a real-time feed. New paper accounts
+require previously completed order evidence before simulated opening fills;
+the web UI never fabricates catch-up fills or implements a separate ledger.
