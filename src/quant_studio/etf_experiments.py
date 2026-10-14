@@ -69,9 +69,17 @@ def compare_body(root, identifiers):
                 [
                     item["candidate"],
                     item["status"],
-                    str(metrics.get("total_return", "不可用")),
-                    str(metrics.get("max_drawdown", "不可用")),
-                    str(item.get("comparison") or "未登记"),
+                    f"{metrics['total_return']:.2%}"
+                    if metrics.get("total_return") is not None
+                    else "不可用",
+                    f"{metrics['max_drawdown']:.2%}"
+                    if metrics.get("max_drawdown") is not None
+                    else "不可用",
+                    f"{metrics['cost_total']:,.2f}"
+                    if metrics.get("cost_total") is not None
+                    else "不可用",
+                    str(metrics.get("fills", "不可用")),
+                    str(metrics.get("sessions", "不可用")),
                     str(item.get("error") or ""),
                 ]
             )
@@ -79,16 +87,30 @@ def compare_body(root, identifiers):
             [
                 "候选",
                 "状态",
-                "扣费收益（比例）",
-                "最大回撤（比例）",
-                "基准对照",
+                "扣费收益",
+                "最大回撤",
+                "账本费用",
+                "成交笔数",
+                "测试交易日",
                 "失败原因",
             ],
             rows,
         )
         body += "<details><summary>区间、资金、成本、快照与检验协议</summary><pre>"
         body += (
-            escape(json.dumps(basis, ensure_ascii=False, indent=2))
+            escape(
+                json.dumps(
+                    {
+                        "experiment": basis,
+                        "candidates": {
+                            row["candidate"]: row.get("comparison")
+                            for row in view["results"]
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             + "</pre></details></section>"
         )
     comparable = bool(bases) and all(b is not None and b == bases[0] for b in bases)
