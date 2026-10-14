@@ -10,6 +10,26 @@ from quant_studio.projects import ProjectStore
 from quant_studio.recipes import RecipeStore
 
 
+def test_native_etf_family_has_bounded_longer_runtime(tmp_path, monkeypatch):
+    from quant_studio import server
+
+    called = {}
+
+    def run(template, knobs, **options):
+        called.update(options)
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(server, "run", run)
+    execute = server._job_executor(tmp_path)
+    execute(
+        {"action": "execute", "template_id": "etf-weekly-research", "knobs": {}}, None
+    )
+    assert called["timeout"] == 1800
+    called.clear()
+    execute({"action": "execute", "template_id": "synthetic-demo", "knobs": {}}, None)
+    assert "timeout" not in called
+
+
 def test_connect_freezes_inputs_and_duplicate_click_reuses_project(
     tmp_path, monkeypatch
 ):

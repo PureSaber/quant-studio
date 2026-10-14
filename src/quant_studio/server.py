@@ -1174,6 +1174,10 @@ def _job_executor(runs_root: Path):
             if checked.status != "checked":
                 return checked
             control.stage("executing", "预检通过，开始运行已保存方案")
+        if job["template_id"] == "etf-weekly-research":
+            # A full walk-forward family executes training/test windows for
+            # every candidate. The ordinary single-run limit is too short.
+            options["timeout"] = 1800
         return run(template, job["knobs"], execute=True, **options)
 
     def monitored(job, control):
