@@ -32,6 +32,13 @@ LABELS = {
     "not_due": "尚未到时",
     "sealed": "已封存",
     "candidate_required": "需要候选决策与登记",
+    "pending": "等待首个观察日",
+    "awaiting_observation": "已进入窗口，等待首条观察",
+    "observing": "观察中",
+    "ended_unsealed": "观察窗口结束，尚未封存",
+    "historical_backfill_blocked": "历史回填已阻断",
+    "passed": "通过",
+    "failed": "失败",
 }
 STAGES = {
     "master_refresh": "官方主表证据更新",
@@ -105,6 +112,55 @@ def today_body(token, root=None):
         )
     data, latest = value["data"], value.get("latest") or {}
     account = value.get("account") or {}
+    history = value.get("history_context") or {}
+    body += '<section class="panel"><h2>四项状态分别核对</h2>'
+    body += table(
+        ["范围", "当前结论", "证据范围"],
+        [
+            [
+                "数据",
+                "已覆盖应到交易日" if data["fresh"] else "收盘行情待更新",
+                data["covered_through"],
+            ],
+            [
+                "研究预检",
+                "当前配置有通过记录"
+                if value.get("preflight_passed_at")
+                else "当前配置尚无完整通过记录",
+                "历史通过不能替代当前配置预检",
+            ],
+            [
+                "模拟账户",
+                LABELS.get(account.get("state"), account.get("state", "尚未登记")),
+                "无观察数据不等于零收益",
+            ],
+            [
+                "调度时段",
+                "当日采集时段已结束"
+                if data["fresh"]
+                and (value.get("schedule") or {}).get("state") == "collection_exhausted"
+                else LABELS.get(
+                    (value.get("schedule") or {}).get("state"),
+                    (value.get("schedule") or {}).get("state", "未提供"),
+                ),
+                "原生配置的时段判断；实际触发以任务及运行回执为准",
+            ],
+        ],
+    )
+    if not value.get("preflight_passed_at"):
+        body += (
+            "<p>当前配置没有匹配的预检历史，不代表此前从未成功。"
+            "配置、冻结配方或账户绑定变化会划分新的记录范围。</p>"
+        )
+    for key, label in (
+        ("earlier_preflight", "较早配置的预检通过证据"),
+        ("earlier_success", "较早配置的成功运行证据"),
+    ):
+        if history.get(key):
+            body += details(history[key], label + "（不作为当前配置通过）")
+    if history.get("errors"):
+        body += details(history["errors"], "部分历史证据无法核验")
+    body += "</section>"
     research_input = value.get("research_input") or latest
     if research_input.get("research_recipe"):
         choices = '<option value="">新建研究项目</option>'
@@ -171,6 +227,11 @@ def today_body(token, root=None):
     if not latest and account.get("state") == "pending":
         current = "等待首个观察日"
     body += f"<p>本次状态：{escape(LABELS.get(current, current))}</p>"
+    if latest and latest.get("as_of") != value["expected_session"]:
+        body += (
+            "<p>最近回执不属于当前应到交易日；今日尚无匹配的运行证据。"
+            "以下保留较早运行供核查。</p>"
+        )
     body += f"<p>最近运行：{escape(local_time(latest.get('started_at')))}</p>"
     stages = {s["stage"]: s for s in latest.get("stages", [])}
     body += table(
@@ -272,26 +333,45 @@ def today_body(token, root=None):
     body += '</section><section class="panel"><h2>异常怎么处理？</h2>'
     explanation = issue_text(latest.get("error", "检查下方各阶段证据与原生风险事件。"))
     body += f"<p>{escape(explanation)}</p>"
-    issues = []
+    issues = [latest["error"]] if latest.get("error") else []
     for stage in stages.values():
         issues.extend(stage.get("evidence", {}).get("issues", []))
         if stage.get("reason"):
             issues.append(stage["reason"])
+    forward_reason = (value.get("forward") or {}).get("reason")
+    if forward_reason and (value.get("forward") or {}).get("state") in {
+        "verification_failed",
+        "data_missing",
+        "interrupted",
+        "retryable_failure",
+        "historical_backfill_blocked",
+        "execution_failed",
+    }:
+        issues.append(forward_reason)
     if issues:
-        body += table(
-            ["阻断原因", "修复入口"],
-            [[issue_text(issue), "数据更新与质量 / 运行环境"] for issue in issues],
-        )
-        body += (
-            '<p><a href="/data-center">数据更新与质量</a> · '
-            '<a href="/delivery">运行环境</a></p>'
-        )
+        from quant_studio.etf_status_context import explain_issue
+
+        for issue in dict.fromkeys(str(item) for item in issues):
+            guidance = explain_issue(issue)
+            body += (
+                f"<article><h3>{escape(guidance['cause'])}</h3>"
+                f"<p>影响：{escape(guidance['impact'])}</p>"
+                f"<p>下一步：{escape(guidance['action'])}</p>"
+            )
+            body += (
+                f'<a href="{guidance["href"]}">{guidance["label"]}</a>'
+                + details(issue, "错误原文")
+                + "</article>"
+            )
     body += (
         "<p>数据问题进入质量中心；配置问题进入运行环境；"
         "账户中断先核验，再显式重试。历史修订或冻结身份变化需停止观察。</p>"
     )
-    body += details(latest, "完整阶段回执") + details(
-        execution.get("diagnostics", {}), "原生风险与未成交原因"
+    body += (
+        '<div id="daily-evidence">'
+        + details(latest, "完整阶段回执")
+        + "</div>"
+        + details(execution.get("diagnostics", {}), "原生风险与未成交原因")
     )
     return body + "</section>"
 
