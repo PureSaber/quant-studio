@@ -13,7 +13,6 @@ from quant_studio.environment_delivery import (
     ACTIONS,
     DeliveryStore,
     delivery_config,
-    running_version,
 )
 from quant_studio.projects import digest
 from quant_studio.research_history import search_history
@@ -146,17 +145,24 @@ def history_body(root, query):
 
 
 def delivery_body(root, token):
+    from quant_studio.environment_delivery import operational_snapshot
+
     body = '<header class="page-head"><h1>环境与交付</h1></header>'
     body += (
         '<section class="panel"><h2>正在运行的Studio</h2>'
-        + _json(running_version())
+        + _json(operational_snapshot())
         + "</section>"
     )
     try:
         config, _ = delivery_config()
     except QuantStudioError as exc:
         return body + '<section class="panel"><p>' + escape(str(exc)) + "</p></section>"
-    current = Path(config["state_dir"]) / "current.json"
+    pointer_name = (
+        "etf-current.json"
+        if config.get("installation_kind") == "etf-single-venv"
+        else "current.json"
+    )
+    current = Path(config["state_dir"]) / pointer_name
     body += '<section class="panel"><h2>已登记发布与迁移目标</h2>'
     body += _json(
         json.loads(current.read_text("utf-8"))
@@ -166,10 +172,84 @@ def delivery_body(root, token):
     body += _json(
         {"候选": config.get("candidates", {}), "迁移包": config.get("transfers", {})}
     )
+    if config.get("maintenance_entrypoint"):
+        command = "& " + "'" + config["maintenance_entrypoint"].replace("'", "''") + "'"
+        command += (
+            " -Installation '"
+            + config["maintenance_installation"].replace("'", "''")
+            + "'"
+        )
+        body += (
+            "<h3>本机统一维护入口</h3><p>关闭网页后仍可运行。"
+            "restart 预览会重新核验安装与账户兼容性；"
+            "backup 自动创建独立批次，保留旧备份。执行需使用预览返回的摘要。</p>"
+            "<pre>"
+            + escape(
+                command
+                + " -Action status\n"
+                + command
+                + " -Action restart\n"
+                + command
+                + " -Action backup"
+            )
+            + "</pre>"
+        )
+    if config.get("local_control"):
+        body += (
+            "<h3>Studio关闭时的本机控制</h3><p>在独立PowerShell窗口运行下列固定入口，"
+            "先查看预览，确认摘要后加 --execute --expected-plan-sha256 摘要。"
+            "支持 start / stop / restart / activate / rollback；"
+            "切换时加 --target 已配置名称。"
+            "切换前须空闲；失败回退只恢复软件运行环境，保留较新的账户与账本。</p>"
+        )
+        body += _json(
+            {
+                "控制入口": [
+                    config["python"],
+                    "-I",
+                    "-m",
+                    "quant_workspace.local_control",
+                    "--config",
+                    config["local_control"],
+                    "status",
+                ]
+            }
+        )
+    if config.get("backups") and not config.get("maintenance_entrypoint"):
+        body += (
+            "<p>完整备份在本机空闲或Studio关闭后执行 preview → backup；"
+            "本页可校验归档及执行隔离恢复。冻结绝对路径保留，"
+            "恢复验证不会激活生产账户。</p>"
+        )
+        for name, row in config["backups"].items():
+            command = "& " + " ".join(
+                "'" + arg.replace("'", "''") + "'"
+                for arg in [
+                    config["python"],
+                    "-I",
+                    "-m",
+                    "quant_workspace.operational_backup",
+                    "--config",
+                    row["config"],
+                ]
+            )
+            script = (
+                f"$backupPlan = {command} preview | ConvertFrom-Json\n"
+                "$backupPlan | ConvertTo-Json -Depth 20\n"
+                "# 审阅预览后执行：\n"
+                f"{command} backup --expected-plan-sha256 $backupPlan.plan_sha256"
+            )
+            body += f"<h4>{escape(name)}：独立备份入口</h4><pre>{escape(script)}</pre>"
     body += f"""<form method="post" action="/delivery/prepare">{csrf(token)}
 <label>操作<select name="action">"""
+    actions = ACTIONS
+    if config.get("installation_kind") == "etf-single-venv":
+        actions = {
+            a: ACTIONS[a] for a in ("control-status", "verify-backup", "restore-drill")
+        }
+        body += '<option value="control-status" disabled>Windows 本机安装运维</option>'
     body += "".join(
-        f'<option value="{a}">{label}</option>' for a, label in ACTIONS.items()
+        f'<option value="{a}">{label}</option>' for a, label in actions.items()
     )
     body += (
         '</select></label><label>已配置候选或迁移包<select name="name">'
@@ -177,7 +257,11 @@ def delivery_body(root, token):
     )
     body += "".join(
         f'<option value="{escape(n, quote=True)}">{escape(n)}</option>'
-        for n in {*config.get("candidates", {}), *config.get("transfers", {})}
+        for n in {
+            *config.get("candidates", {}),
+            *config.get("transfers", {}),
+            *config.get("backups", {}),
+        }
     )
     body += '</select></label><button class="btn">预览操作</button></form></section>'
     store = DeliveryStore(root)

@@ -190,3 +190,39 @@ def test_today_explains_data_delay_and_keeps_native_receipt(monkeypatch):
     assert "2026-10-14 22:00:00（北京时间）" in html
     assert "缺少最终日线：159915（2026-10-14）。完整行情快照尚未更新。" in html
     assert "ETF daily-price coverage failed:" in html  # Original evidence is retained.
+
+
+def test_new_account_after_last_slot_does_not_report_fresh_data_as_missing(monkeypatch):
+    from quant_studio import etf_daily_web
+
+    monkeypatch.setattr(
+        etf_daily_web,
+        "inspect_daily",
+        lambda: {
+            "data": {
+                "covered_through": "2026-10-14",
+                "captured_at": "2026-10-14T14:00:25+00:00",
+                "fresh": True,
+            },
+            "expected_session": "2026-10-14",
+            "latest": None,
+            "account": {
+                "account_id": "etf-base-20261014",
+                "state": "pending",
+                "created_at": "2026-10-14T22:09:54+08:00",
+                "window": {"start": "2026-10-15", "end": "2026-12-31"},
+            },
+            "forward": {"state": "outside_window"},
+            "execution": {"available": False},
+            "schedule": {
+                "state": "collection_exhausted",
+                "slots": ["21:00", "22:00"],
+                "next_attempt_at": None,
+            },
+        },
+    )
+    html = today_body("csrf-test")
+    assert "当天完整行情已到齐" in html and "数据仍未就绪" not in html
+    assert "等待首个观察日" in html and "观察起点：2026-10-15" in html
+    assert "etf-base-20261014" in html and 'href="/accounts"' in html
+    assert "尚无成功观察" in html and "不按零处理" in html

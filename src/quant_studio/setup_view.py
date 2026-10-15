@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from quant_studio import QuantStudioError
 from quant_studio.setup import (
+    SERVER_CONFIG_KEYS,
     empty_profile,
     inherited_profile,
     input_sources,
@@ -46,6 +47,14 @@ def setup_body(store, csrf_token, *, profile=None, error="", reviewed=None):
         f"{escape(str(store.path))}。重启使用相同保存位置即可恢复；"
         "留空字段沿用启动配置，填写的选择优先用于新请求。</p>"
     )
+    managed = {k: v for k, v in values.items() if k in SERVER_CONFIG_KEYS}
+    if managed:
+        destination += (
+            "<details><summary>已连接的日常运行、登记与运维配置</summary>"
+            "<p>以下绑定由本机部署维护；保存本页其他设置会继续保留。</p><pre>"
+            + escape(json.dumps(managed, ensure_ascii=False, indent=2))
+            + "</pre></details>"
+        )
     if reviewed is not None:
         token, checks = reviewed
         document = escape(json.dumps(profile, ensure_ascii=False, indent=2))

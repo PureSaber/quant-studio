@@ -8,11 +8,11 @@ from pathlib import Path
 from quant_studio import QuantStudioError
 from quant_studio.datasets import file_hash
 from quant_studio.runtime import configured_python
-from quant_studio.settings import subprocess_environment
+from quant_studio.settings import setting, subprocess_environment
 
 
 def configuration():
-    value = os.environ.get("QUANT_STUDIO_ETF_DAILY")
+    value = setting("QUANT_STUDIO_ETF_DAILY")
     python = configured_python("quant-pipeline-frozen") or configured_python(
         "quant-pipeline"
     )
@@ -51,6 +51,7 @@ def inspect_daily():
             timeout=60,
             env=subprocess_environment(),
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         value = json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -63,6 +64,10 @@ def inspect_daily():
         raise QuantStudioError(
             "ETF每日状态核验失败：" + str(value.get("error", result.stderr[-1000:]))
         )
+    from quant_studio.etf_status_context import history_context
+
+    path, _ = configuration()
+    value["history_context"] = history_context(path)
     return value
 
 

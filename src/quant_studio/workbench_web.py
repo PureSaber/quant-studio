@@ -444,6 +444,7 @@ class="panel">
 
 def compare_body(root, identifiers):
     from quant_studio import etf_experiments
+    from quant_studio.experiment_context import context_body, status_label
     from quant_studio.result_explorer import comparison_explorer
 
     if any(etf_experiments.is_etf(root, identifier) for identifier in identifiers):
@@ -460,7 +461,7 @@ def compare_body(root, identifiers):
 <a
 href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
 </td>
-<td>{escape(r["status"])}</td>
+<td>{escape(status_label(r["status"]))}</td>
 <td>{escape(r["currency"])}</td>
 <td>{escape(r["dates"][0] + " → " + r["dates"][-1]) if r["dates"] else "不可用"}</td>
 <td>{pct(r["return"])}</td>
@@ -486,6 +487,9 @@ href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
             f"<h3>{escape(row['title'])} 相对首个实验</h3>" + diff_table(changed)
         )
     diffs = "".join(differences)
+    for row in result["runs"]:
+        diffs += f"<h3>{escape(row['title'])} · 时间与版本</h3>"
+        diffs += context_body(root, row["run_id"])
     return f"""<header
 class="page-head">
 <h1>实验对比</h1>

@@ -308,6 +308,11 @@ def collection_request(name, template_id, symbols, start, end, provider, parent=
 
 
 def collect_dataset(runs_root, job, control):
+    if job["collection"].get("collection_type") == "simulation-registration":
+        from quant_studio.project_registration import execute_registration
+
+        return execute_registration(runs_root, job, control)
+
     from quant_studio.runner import _execute_subprocess
 
     root = Path(runs_root)
