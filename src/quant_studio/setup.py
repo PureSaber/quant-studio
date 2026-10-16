@@ -192,7 +192,12 @@ def validate_profile(profile: dict) -> list[tuple[str, str]]:
                     if load_template(key).metadata.get("runtime_key") == repo
                 ),
                 "quant-pipeline"
-                if repo in {"quant-pipeline-frozen", "quant-pipeline-registration"}
+                if repo
+                in {
+                    "quant-pipeline-frozen",
+                    "quant-pipeline-registration",
+                    "quant-pipeline-operations",
+                }
                 else repo,
             )
             if not root or not (Path(root) / checkout).is_dir():
