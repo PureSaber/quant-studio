@@ -18,6 +18,7 @@ from quant_studio.templates import load_template, template_ids
 SCHEMA = "quant-studio.settings/v1"
 SERVER_CONFIG_KEYS = {
     "QUANT_STUDIO_ETF_DAILY",
+    "QUANT_STUDIO_ETF_OPERATIONS",
     "QUANT_STUDIO_REGISTRATION",
     "QUANT_STUDIO_DELIVERY_CONFIG",
 }
@@ -34,6 +35,7 @@ def repositories() -> list[str]:
     ) + [
         "quant-pipeline",
         "quant-pipeline-frozen",
+        "quant-pipeline-operations",
         "quant-pipeline-registration",
         "quant-data-kit",
     ]

@@ -1345,7 +1345,13 @@ class _Handler(
 
                 self._send_html(
                     _layout(
-                        "今日运行", today_body(self.csrf_token, self.runs_root), "today"
+                        "今日运行",
+                        today_body(
+                            self.csrf_token,
+                            self.runs_root,
+                            parse_qs(urlparse(self.path).query),
+                        ),
+                        "today",
                     )
                 )
             elif path == "/durable-research" or path.startswith("/durable-research/"):
