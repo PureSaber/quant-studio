@@ -122,6 +122,12 @@ def body(value, token, root, preview_id=None):
     page += (
         "<p>原账户续跑核查：" + escape(ops["continuation"]["reason"]) + "</p></section>"
     )
+    if value["schedule"].get("missed_slots"):
+        page += (
+            "<p>今天已错过的窗口："
+            + escape("、".join(value["schedule"]["missed_slots"]))
+            + "。不补记为成功。</p>"
+        )
     page += (
         '<section class="panel"><h2>本次进度</h2>'
         "<p>触发 → 获取数据 → 检查数据 → 策略计算与账户更新 → 核对账本</p>"
@@ -221,15 +227,37 @@ def body(value, token, root, preview_id=None):
             ("positions", "模拟持仓"),
             ("orders", "原生委托"),
             ("fills", "模拟成交"),
+            ("costs", "原生费用明细"),
         ]:
             if name in execution["tables"]:
                 item = execution["tables"][name]
                 page += "<h3>" + label + "</h3>" + table(item["columns"], item["rows"])
+        page += details(execution.get("cost_assumptions"), "冻结费用与滑点假设")
+        page += details(execution.get("metrics"), "原生研究与成本指标")
+        page += details(
+            execution.get("cost_window"), "最近目标窗口的预算、费用及成交数量"
+        )
     else:
         page += "<p>尚无已核验的观察记录，持仓、收益和成本不可用。</p>"
     page += details(value.get("legacy_latest"), "迁移前的最近运行（历史记录）")
     page += details(value.get("history_context"), "历史检查与账户依据")
     page += details(ops["history"], "新运维入口全部记录")
+    research = value.get("research_input") or {}
+    if research.get("research_recipe"):
+        choices = '<option value="">新建研究项目</option>'
+        if root is not None:
+            from quant_studio.projects import ProjectStore
+
+            choices += "".join(
+                f'<option value="{p["id"]}">{escape(p["name"])}</option>'
+                for p in ProjectStore(root).list()
+            )
+        page += f'''<form method="post" action="/today/run">{csrf(token)}
+<input type="hidden" name="command" value="connect-project">
+<input type="hidden" name="operation" value="{escape(research["id"], quote=True)}">
+<p>可连接的研究快照截止：{escape(research["data"]["covered_through"])}</p>
+<label>连接到项目<select name="project_id">{choices}</select></label>
+<button class="btn">将快照与冻结配方连接到研究项目</button></form>'''
     return (
         page
         + '<p><a href="/accounts">查看原生账户</a> · '

@@ -53,6 +53,26 @@ def test_readable_states_and_no_unsafe_legacy_buttons(state):
     assert "old failure" in html
 
 
+def test_existing_research_connection_and_native_costs_remain_available():
+    value = status()
+    value["research_input"] = {
+        "id": "a" * 32,
+        "research_recipe": "frozen",
+        "data": {"covered_through": "2026-10-16"},
+    }
+    value["execution"] = {
+        "available": True,
+        "tables": {},
+        "cost_assumptions": {"commission": 0.001},
+        "metrics": {"equity": 1000000},
+    }
+    value["schedule"]["missed_slots"] = ["16:30"]
+    html = body(value, "csrf", None)
+    assert 'value="connect-project"' in html
+    assert "1000000" in html and "commission" in html
+    assert "今天已错过的窗口" in html
+
+
 def test_error_text_is_escaped_and_never_enables_action_without_preview():
     value = status("needs_attention")
     value["latest"] = {
