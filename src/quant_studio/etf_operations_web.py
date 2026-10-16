@@ -216,7 +216,10 @@ def body(value, token, root, preview_id=None):
         "这里只验证运行可靠性，不证明策略有效。</p>"
     )
     if not scheduler.get("natural_trigger"):
-        page += "<p>尚未取得本次 Windows 时间触发事件凭证；任务手动启动或事件日志不可用时，不计入自然运行验收。</p>"
+        page += (
+            "<p>尚未取得本次 Windows 时间触发事件凭证；"
+            "任务手动启动或事件日志不可用时，不计入自然运行验收。</p>"
+        )
     page += details(acceptance, "验收区间及缺口") + "</section>"
     execution = value["execution"]
     page += (
