@@ -68,6 +68,7 @@ def test_registration_and_frozen_python_use_real_pipeline_checkout(tmp_path):
     profile["python_by_repo"] = {
         "quant-pipeline-registration": sys.executable,
         "quant-pipeline-frozen": sys.executable,
+        "quant-pipeline-operations": sys.executable,
     }
     validate_shape(profile)
     validate_profile(profile)

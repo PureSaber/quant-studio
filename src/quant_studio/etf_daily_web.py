@@ -96,7 +96,7 @@ def details(value, label="查看原生证据"):
     )
 
 
-def today_body(token, root=None):
+def today_body(token, root=None, query=None):
     body = """<header class="page-head"><h1>今日运行 · 四 ETF</h1>
 <p>510300 · 510500 · 159915 · 588000；日频数据、周频基线、模拟账户。</p>
 <a class="btn" href="/projects">研究项目与决策</a>
@@ -109,6 +109,12 @@ def today_body(token, root=None):
             body
             + '<section class="panel"><h2>尚未就绪</h2>'
             + f"<p>{escape(str(exc))}</p></section>"
+        )
+    if value.get("operations"):
+        from quant_studio.etf_operations_web import body as operations_body
+
+        return body + operations_body(
+            value, token, root, (query or {}).get("recovery", [None])[0]
         )
     data, latest = value["data"], value.get("latest") or {}
     account = value.get("account") or {}
@@ -378,6 +384,35 @@ def today_body(token, root=None):
 
 def today_post(handler, data):
     command = field(data, "command")
+    if command == "recovery-preview":
+        from quant_studio.etf_daily import preview_recovery
+
+        operation = field(data, "operation")
+        if data:
+            raise QuantStudioError("未知恢复预览字段")
+        identifier = preview_recovery(handler.runs_root, operation)
+        handler._redirect(f"/today?recovery={identifier}")
+        return
+    if command == "recovery-confirm":
+        from quant_studio.etf_daily import read_preview
+        from quant_studio.projects import digest
+
+        identifier = field(data, "preview")
+        if field(data, "confirmed", "") != "yes" or data:
+            raise QuantStudioError("请明确确认已经审阅恢复方案")
+        payload = request(
+            "recover-execute", read_preview(handler.runs_root, identifier)
+        )
+        job = handler._jobs().submit(
+            "collect",
+            "etf-weekly-research",
+            {},
+            profile=handler._request_profile,
+            collection=payload,
+            dispatch_key=digest(payload),
+        )
+        handler._redirect(f"/jobs/{job['job_id']}")
+        return
     if command == "connect-project":
         from quant_studio.etf_project import connect
 

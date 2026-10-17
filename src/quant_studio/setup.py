@@ -18,6 +18,7 @@ from quant_studio.templates import load_template, template_ids
 SCHEMA = "quant-studio.settings/v1"
 SERVER_CONFIG_KEYS = {
     "QUANT_STUDIO_ETF_DAILY",
+    "QUANT_STUDIO_ETF_OPERATIONS",
     "QUANT_STUDIO_REGISTRATION",
     "QUANT_STUDIO_DELIVERY_CONFIG",
 }
@@ -34,6 +35,7 @@ def repositories() -> list[str]:
     ) + [
         "quant-pipeline",
         "quant-pipeline-frozen",
+        "quant-pipeline-operations",
         "quant-pipeline-registration",
         "quant-data-kit",
     ]
@@ -190,7 +192,12 @@ def validate_profile(profile: dict) -> list[tuple[str, str]]:
                     if load_template(key).metadata.get("runtime_key") == repo
                 ),
                 "quant-pipeline"
-                if repo in {"quant-pipeline-frozen", "quant-pipeline-registration"}
+                if repo
+                in {
+                    "quant-pipeline-frozen",
+                    "quant-pipeline-registration",
+                    "quant-pipeline-operations",
+                }
                 else repo,
             )
             if not root or not (Path(root) / checkout).is_dir():
