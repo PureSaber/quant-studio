@@ -105,13 +105,16 @@ class ExperimentStore:
                 )
                 annotation = self.annotation(item["run_id"])
                 recipe = request.get("recipe") or {}
+                from quant_studio.presentation import template_title
+
                 record = {
                     **item,
                     **annotation,
                     "recipe": recipe,
+                    "research_project": request.get("research_project"),
                     "title": annotation["title"]
                     or recipe.get("name")
-                    or item["template_id"],
+                    or template_title(item["template_id"]),
                 }
                 searchable = json.dumps(record, ensure_ascii=False).casefold()
                 if (
@@ -203,7 +206,7 @@ class ExperimentStore:
             "run_id": identifier,
             "title": self.annotation(identifier)["title"]
             or (request.get("recipe") or {}).get("name")
-            or identifier[:12],
+            or template.title,
             "template_id": template.id,
             "status": result["status"],
             "return": None,
@@ -221,13 +224,14 @@ class ExperimentStore:
                 "cli": request.get("knobs", {}),
                 "snapshot": request.get("snapshot"),
             },
-            "error": "",
+            "error": str(result.get("message") or result.get("error") or ""),
         }
         if (
             result["status"] != "succeeded"
             or result.get("verification_status") == "failed"
         ):
             return row
+        row["error"] = ""
         try:
             path = resolve_run_asset(self.root, identifier, "nav.csv")
             series = parse_nav_csv(path, initial_nav=opening)

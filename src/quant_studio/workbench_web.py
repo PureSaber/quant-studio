@@ -10,6 +10,7 @@ from quant_studio.datasets import DatasetStore, collection_request
 from quant_studio.derivative_datasets import form as derivative_form
 from quant_studio.experiments import ExperimentStore, configuration_diff
 from quant_studio.free_derivative_datasets import form as free_derivative_form
+from quant_studio.presentation import STATUS, status_label, template_title
 from quant_studio.templates import load_template, template_ids
 
 
@@ -28,9 +29,20 @@ def field(data, key, default=None):
 
 
 def diff_table(rows):
+    from quant_studio.form_controls import LABELS
+    from quant_studio.research_web import _LABELS
+
+    def label(path):
+        key = path.rsplit(".", 1)[-1]
+        title = (_LABELS | LABELS).get(key, "高级参数")
+        return (
+            f"{escape(title)}<details><summary>字段标识</summary>"
+            f"<code>{escape(path)}</code></details>"
+        )
+
     content = "".join(
         f"""<tr>
-<td>{escape(row["path"])}</td>
+<td>{label(row["path"])}</td>
 <td
 class="diff-value">{escape(json.dumps(row["before"], ensure_ascii=False))}</td>
 <td
@@ -281,15 +293,35 @@ class="btn">检查文件并登记</button>
 </details>'''
 
 
-def experiments_body(root, token, query):
+def experiments_body(root, token, query, jobs=()):
     store = ExperimentStore(root)
     text, status = query.get("q", [""])[0], query.get("status", [""])[0]
-    records = store.list(query=text, status=status)
+    template = query.get("template", [""])[0]
+    project_id = query.get("project", [""])[0]
+    records = store.list(query=text, status=status, template=template)
+    if project_id:
+        from quant_studio.projects import ProjectStore
+
+        allowed = {r["run_id"] for r in ProjectStore(root).experiments(project_id)}
+        records = [r for r in records if r["run_id"] in allowed]
+    from quant_studio.projects import ProjectStore
+
+    project_options = '<option value="">全部项目</option>' + "".join(
+        f'<option value="{p["id"]}"'
+        + (" selected" if p["id"] == project_id else "")
+        + f">{escape(p['name'])}</option>"
+        for p in ProjectStore(root).list()
+    )
+    template_options = '<option value="">全部模板</option>' + "".join(
+        f'<option value="{key}"'
+        + (" selected" if key == template else "")
+        + f">{escape(load_template(key).title)}</option>"
+        for key in template_ids()
+    )
     page = max(1, int(query.get("page", ["1"])[0]))
     page = min(page, max(1, (len(records) + 24) // 25))
     rows = []
     for r in records[(page - 1) * 25 : page * 25]:
-        revision = r["recipe"].get("revision", "")
         rows.append(
             f'''<tr>
 <td>
@@ -303,27 +335,75 @@ aria-label="选择 {escape(r["title"], quote=True)}">
 <a
 href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
 <br>
-<small>{escape(r["template_id"])} · {revision[:12]}</small>
+<small>{escape(template_title(r["template_id"]))}</small>
 </td>
-<td>{escape(r["status"])}</td>
+<td>{escape(status_label(r["status"]))}</td>
 <td>{escape(r.get("annotation_error") or r["note"][:100])}</td>
 <td>{escape(r["when"])}</td>
 </tr>'''
         )
+
+    def page_link(number):
+        return escape(
+            urlencode(
+                {
+                    "q": text,
+                    "status": status,
+                    "template": template,
+                    "project": project_id,
+                    "page": number,
+                }
+            ),
+            quote=True,
+        )
+
     links = " · ".join(
         f"""<a
-href="/experiments?{escape(urlencode({"q": text, "status": status, "page": p}))}">
+href="/experiments?{page_link(p)}">
 {label}</a>"""
         for p, label in [
             (max(1, page - 1), "上一页"),
             (min(max(1, (len(records) + 24) // 25), page + 1), "下一页"),
         ]
     )
+    tasks = []
+    for job in jobs:
+        if job.get("run_id") and job.get("status") not in {
+            "queued",
+            "running",
+            "cancelling",
+        }:
+            continue
+        title = (job.get("recipe") or {}).get("name") or template_title(
+            job.get("template_id", "")
+        )
+        if status and job.get("status") != status:
+            continue
+        if template and job.get("template_id") != template:
+            continue
+        if project_id and (job.get("research_project") or {}).get("id") != project_id:
+            continue
+        if (
+            text
+            and text.casefold() not in (title + str(job.get("message", ""))).casefold()
+        ):
+            continue
+        tasks.append(
+            f'<p><a href="/jobs/{escape(job["job_id"])}">{escape(title)}</a> · '
+            f"{status_label(job.get('status'))}</p>"
+        )
+    task_panel = (
+        '<section class="panel"><h2>后台任务</h2>' + "".join(tasks) + "</section>"
+        if tasks
+        else ""
+    )
     return f'''<header
 class="page-head">
-<h1>实验笔记与比较</h1>
+<h1>运行记录</h1>
+
 <p>搜索全部历史记录，给实验命名和写备注。选择 2–4 次运行比较参数与结果。</p>
 </header>
+{task_panel}
 <section
 class="panel">
 <form
@@ -341,16 +421,12 @@ value="">全部</option>{
         "".join(
             f'''<option
 value="{v}" {"selected" if v == status else ""}>{label}</option>'''
-            for v, label in [
-                ("succeeded", "运行成功"),
-                ("checked", "预检通过"),
-                ("failed", "失败"),
-                ("blocked", "输入阻断"),
-                ("interrupted", "中断"),
-            ]
+            for v, label in STATUS.items()
         )
     }</select>
 </label>
+<label>项目<select name="project">{project_options}</select></label>
+<label>模板<select name="template">{template_options}</select></label>
 </div>
 <button
 class="btn">搜索</button>
@@ -400,7 +476,7 @@ def experiment_body(root, token, identifier):
     return f'''<header
 class="page-head">
 <h1>实验笔记</h1>
-<p>{escape(recipe.get("name") or request.get("template_id", ""))} · {
+<p>{escape(recipe.get("name") or template_title(request.get("template_id", "")))} · {
         identifier[:12]
     }</p>
 <a
@@ -465,18 +541,27 @@ href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
 <td>{escape(r["currency"])}</td>
 <td>{escape(r["dates"][0] + " → " + r["dates"][-1]) if r["dates"] else "不可用"}</td>
 <td>{pct(r["return"])}</td>
-<td>{pct(r["drawdown"])}</td>
+<td>{pct(-r["drawdown"] if r["drawdown"] is not None else None)}</td>
+<td>{escape(r.get("error") or "—")}</td>
 </tr>"""
         for r in result["runs"]
     )
     chart = ""
+    eligible = [r for r in result["runs"] if r["series"] is not None and not r["error"]]
+    subset = (
+        ExperimentStore(root).compare([r["run_id"] for r in eligible])
+        if len(eligible) >= 2
+        else None
+    )
+    if subset and subset["comparable"]:
+        chart = comparison_explorer(eligible)
     if result["comparable"]:
         chart = comparison_explorer(result["runs"])
     warning = (
         "观测日期、研究类型与币种一致，可查看描述性差异；未据此评选有效策略。"
         if result["comparable"]
-        else "口径不一致，仅并排展示各自结果，不合并曲线或排名："
-        + "；".join(result["reasons"])
+        else "所选记录不能全部合并收益曲线；配置和失败原因仍可比较。"
+        "曲线仅展示其中口径一致且有有效净值的运行：" + "；".join(result["reasons"])
     )
     differences = []
     for row in result["runs"][1:]:
@@ -486,6 +571,11 @@ href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
         differences.append(
             f"<h3>{escape(row['title'])} 相对首个实验</h3>" + diff_table(changed)
         )
+    chart_note = (
+        "图中以各自原始期初归一化；缩放不改变全区间指标。"
+        if chart
+        else "这些记录没有可合并的收益曲线。"
+    )
     diffs = "".join(differences)
     for row in result["runs"]:
         diffs += f"<h3>{escape(row['title'])} · 时间与版本</h3>"
@@ -509,9 +599,10 @@ class="table-scroll">
 <th>观测区间</th>
 <th>区间收益</th>
 <th>最大回撤</th>
+<th>失败或缺失原因</th>
 </tr>{rows}</table>
 </div>{chart}<p
-class="note">图中展示全部所选实验，以各自原始期初归一化；缩放不改变表格的全区间指标。费用、数据性质和模型假设请结合各自报告。</p>
+class="note">{chart_note}费用、数据性质和模型假设请结合各自报告。</p>
 </section>
 <section
 class="panel">
@@ -530,7 +621,9 @@ class WorkbenchHandler:
             )
         elif path == "/experiments":
             body, active = (
-                experiments_body(self.runs_root, self.csrf_token, query),
+                experiments_body(
+                    self.runs_root, self.csrf_token, query, self._jobs().list()
+                ),
                 "experiments",
             )
         elif path == "/experiments/compare":

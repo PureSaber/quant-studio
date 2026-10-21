@@ -51,10 +51,22 @@ from quant_studio.nav import (
     parse_nav_csv,
     validate_comparison,
 )
-from quant_studio.navigation import navigation, template_evidence_label
+from quant_studio.navigation import (
+    navigation,
+    related_navigation,
+    template_evidence_label,
+)
 from quant_studio.platform_status_web import (
     capture_process_identity,
     platform_status_body,
+)
+from quant_studio.presentation import (
+    STATUS,
+    display_time,
+    metric_cards,
+    progress_body,
+    recovery_body,
+    template_title,
 )
 from quant_studio.project_web import ProjectHandler
 from quant_studio.recipes import RecipeStore, recipe_template
@@ -93,100 +105,83 @@ def render_home() -> str:
 <p class="badge evidence">{escape(template_evidence_label(template))}</p>
 <p>{escape(template.summary)}</p>
 <p class="trail">{escape(trail)}</p>
-<p class="badge {state}">{escape(ready.message)}</p>
-<a class="open" href="/templates/{escape(template.id)}">打开积木</a>
+<p class="badge {state}">{"可开始研究" if ready.runnable else "需连接研究工具"}</p>
+<a class="btn primary"
+href="/projects/new?template={escape(template.id)}">用这个模板新建研究</a>
+
+<details>
+<summary>模板与工具详情</summary>
+<a
+href="/templates/{escape(template.id)}">查看模板</a>
+
+<p>{escape(ready.message)}</p>
+</details>
 </article>"""
         )
     body = f"""<header class="page-head">
 <p class="kicker">模板库</p>
 <h1>选择一个研究模板</h1>
-<p class="lede">每个模板是一组固定积木。只改允许的参数，旁边显示将要生成的配置和命令。
-研究模板确认后才执行；合成样例会画出净值，并标明不是市场收益。</p>
+<p class="lede">选择模板后创建项目、调整方案并运行。
+合成样例仅用于熟悉操作，不代表市场收益。</p>
 </header>
 <main class="card-grid">{"".join(cards)}</main>"""
     return _layout("模板库", body, "strategy")
 
 
 def render_overview(runs_root: Path) -> str:
+    from quant_studio.projects import ProjectStore
+
     records = list_runs(runs_root)
-    results = [r for r in records if r["has_nav"] == "1" or r["has_report"] == "1"]
-    datasets = scan_datasets()
-    templates = [load_template(key) for key in template_ids()]
-    ready = [(template, template_readiness(template)) for template in templates]
-    configured = sum(state.runnable for _, state in ready)
-    account_error = ""
-    try:
-        accounts = account_sources()
-    except QuantStudioError as exc:
-        accounts = []
-        account_error = f'<p class="banner">{escape(str(exc))}</p>'
-    cards = []
-    for label, value, description, href in (
+    projects = (
+        ProjectStore(runs_root).list() if (runs_root / ".projects").is_dir() else []
+    )
+    unavailable = sum(
+        not template_readiness(load_template(key)).runnable for key in template_ids()
+    )
+    setup = (
         (
-            "环境",
-            f"{configured}/{len(templates)}",
-            "模板环境就绪；数据另行核验",
-            "/environment",
-        ),
-        (
-            "本地数据",
-            str(len(datasets)),
-            "已发现的数据目录；文件时间不等于行情截止",
-            "/data",
-        ),
-        (
-            "研究记录",
-            str(len(records)),
-            "最近最多40条预览、运行及失败记录",
-            "/backtest",
-        ),
-        (
-            "前向账户",
-            str(len(accounts)),
-            "已配置入口；打开后只读核验保存证据",
-            "/accounts",
-        ),
-        ("结果与报告", str(len(results)), "最近记录中带净值或报告的结果", "/results"),
-    ):
-        cards.append(
-            f'<a class="overview-card" href="{href}"><span>{label}</span>'
-            f"<strong>{value}</strong><small>{description}</small></a>"
+            f'<section class="panel notice"><h2>连接研究工具</h2>'
+            f"<p>{unavailable} 个模板尚未就绪。可在设置中统一检查工具连接；"
+            "合成样例可先体验。</p>"
+            '<a class="btn" href="/setup">检查设置</a></section>'
         )
-    blockers = "".join(
-        f'<li><a href="/templates/{escape(template.id)}">{escape(template.title)}</a>'
-        f'：{escape(state.message)}。<a href="/environment">查看环境配置</a></li>'
-        for template, state in ready
-        if not state.runnable
+        if unavailable
+        else ""
     )
-    account_links = "".join(
-        f'<a class="chip" href="/accounts/{escape(source.id)}">'
-        f"{escape(source.label)}</a>"
-        for source in accounts
+    continued = "".join(
+        f"""<article class="panel">
+<h2>
+<a
+href="/projects/{p["id"]}">{escape(p["name"])}</a>
+</h2>
+<p>{escape(p["question"])}</p>
+<a
+href="/projects/{p["id"]}?tab=plan">继续研究</a>
+</article>"""
+        for p in projects[:4]
     )
-    body = f"""<header class="page-head"><p class="kicker">总览</p>
+    if not continued:
+        continued = """<section class="panel">
+<h2>开始第一项研究</h2>
+<p>选择模板，连接数据，保存方案后运行。</p>
+<a class="btn primary"
+href="/projects/new">新建研究</a> <a
+href="/projects/new?template=synthetic-demo">先体验合成样例</a>
+</section>"""
+    body = f"""<header class="page-head">
 <h1>研究工作台</h1>
-<p class="lede">从数据到研究结果，再查看已登记账户的前向观察。</p></header>
-<section class="overview-grid">{"".join(cards)}</section>
-{account_error}
-<section class="panel"><h2>开始一项研究</h2>
-<a class="chip on" href="/setup">首次配置工作区</a>
-<ol class="onboarding"><li><a href="/environment">检查运行环境</a>：
-确认每个应用使用的Python。</li>
-<li><a href="/data">查看本地数据</a>：核对输入来源，再进入模板。</li>
-<li><a href="/strategy">选择模板</a>：调整参数、检查配置，显式运行。</li>
-<li><a href="/results">查看结果</a>：核对净值、回撤、持仓和原始报告。</li></ol>
-<a class="chip" href="/templates/synthetic-demo">先用合成样例熟悉流程</a>
-<p class="note">合成样例仅验证软件。环境就绪不代表数据完整或策略有效。</p></section>
-<section class="panel"><h2>需要处理</h2>
-<ul>{blockers or "<li>环境检查通过；请继续核验数据和研究条件。</li>"}</ul></section>
-<section class="panel"><h2>最近研究</h2><table>
-<tr><th>模板</th><th>状态</th><th>文件更新</th><th>净值</th></tr>
-{_run_rows(records[:6], "/runs/") or '<tr><td colspan="4">还没有研究记录</td></tr>'}
-</table>{_FILE_TIME_NOTE}</section>
-<section class="panel"><h2>前向账户</h2>
-{account_links or '<p>尚未连接账户。<a href="/accounts">查看连接方法</a></p>'}
-<p class="note">这里只读取明确配置的账户，不登记、观察或封存账户。</p></section>"""
-    return _layout("总览", body, "overview")
+<p>继续研究，查看运行和结果。</p>
+</header>
+{setup}<h2>继续研究</h2><div class="card-grid">{continued}</div>
+<section class="panel"><h2>最近运行</h2><div class="table-scroll"><table>
+<tr><th>研究</th><th>状态</th><th>记录时间</th><th>净值</th></tr>
+{_run_rows(records[:6], "/runs/") or '<tr><td colspan="4">还没有运行记录。</td></tr>'}
+</table>
+</div>
+<a
+href="/experiments">查看全部运行记录</a>
+{_FILE_TIME_NOTE}</section>"""
+    return _layout("首页", body, "overview")
 
 
 def render_accounts(account_id: str | None = None) -> str:
@@ -286,7 +281,8 @@ def _account_view(label: str, result: dict) -> str:
     }
     return f"""<section class="panel"><h2>{escape(label)}</h2>
 <p class="badge ready">已核验保存的登记与观测产物</p>
-<p><b>{states[result["state"]]}</b> · {len(result["observations"])}次已完成观测</p>
+<p>
+<b>{states[result["state"]]}</b> · {len(result["observations"])}次已完成观测</p>
 <p>账户：{escape(result["account_id"])} ·
 候选：{escape(str(result.get("candidate", "")))}</p>
 <p>登记窗口：{escape(window["start"])}至{escape(window["end"])}</p>
@@ -427,7 +423,39 @@ def render_jobs(manager: JobManager) -> str:
 def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str:
     job = manager.get(job_id)
     active = job["status"] in {"queued", "running", "cancelling"}
-    refresh = '<meta http-equiv="refresh" content="2">' if active else ""
+    refresh = ""
+    if active:
+        refresh = """<script>
+async function updateJob() {
+ try {
+  const response = await fetch(location.href, {cache: "no-store"});
+  if (!response.ok) throw new Error("refresh failed");
+  const page = new DOMParser().parseFromString(await response.text(), "text/html");
+  for (const id of ["job-progress", "job-state", "job-log"]) {
+   const next = page.getElementById(id), current = document.getElementById(id);
+   if (next && current) current.replaceWith(next);
+  }
+  const progress = document.getElementById("job-progress");
+  if (progress.dataset.result) { location.assign(progress.dataset.result); return; }
+  if (progress.dataset.active !== "true") return;
+ } catch (_) { /* Keep the last observed state and retry. */ }
+ setTimeout(updateJob, 3000);
+}
+setTimeout(updateJob, 3000);
+</script>"""
+    try:
+        metadata = load_template(job["template_id"]).metadata
+    except QuantStudioError:
+        metadata = {}
+    title = (job.get("recipe") or {}).get("name") or template_title(
+        job.get("template_id", "")
+    )
+    result_target = (
+        f"/runs/{job['run_id']}"
+        if job["status"] == "succeeded" and job.get("run_id")
+        else ""
+    )
+
     cancel = ""
     if job["status"] in {"queued", "running"}:
         cancel = f"""<form method="post" action="/jobs/{escape(job_id)}/cancel">
@@ -480,14 +508,19 @@ def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str
         except QuantStudioError:
             resource_body = '<section class="panel"><p>尚无可用资源记录。</p></section>'
     body = f"""{refresh}<header class="page-head"><p class="kicker">任务</p>
-<h1>{escape(str(job.get("template_id", "")))}</h1>
-<p class="lede">{escape(_STATUS.get(job["status"], job["status"]))}</p></header>
-<section class="panel"><h2>阶段</h2><p>{escape(str(job.get("stage", "")))}</p>
+<h1>{escape(title)}</h1>
+<p class="lede" id="job-state">{escape(_STATUS.get(job["status"], job["status"]))}</p>
+</header>
+<section class="panel" id="job-progress" data-active="{str(active).lower()}"
+data-result="{escape(result_target)}">
+<h2>运行进度</h2>{progress_body(job, metadata)}
 <p>{escape(str(job.get("message") or ""))}</p>{run_link}{cancel}</section>
-<section class="panel"><h2>任务日志</h2><pre>{escape(log) if log else "尚无日志"}</pre>
+<details class="panel">
+<summary>技术日志</summary>
+<pre id="job-log">{escape(log) if log else "尚无日志"}</pre>
 <p class="note">取消只作用于当前服务实例持有的本任务进程句柄；
 取消失败不会显示为成功。</p>
-</section>{resource_body}"""
+</details>{resource_body}"""
     return _layout("任务详情", body, "jobs")
 
 
@@ -513,14 +546,18 @@ def render_fund_reconcile(
 <section class="panel"><form method="post" action="/fund-reconcile">
 <input type="hidden" name="_csrf_token" value="{escape(csrf_token)}">
 <label>基金运行<select name="run_id" required>
-{"".join(options) or '<option value="">尚无成功基金运行</option>'}</select></label>
+{"".join(options) or '<option value="">尚无成功基金运行</option>'}</select>
+</label>
 <label>对账模式<select name="mode"><option value="batches">分批确认与分次实收</option>
 <option value="observations">一单一确认与实收</option></select></label>
 <label>确认CSV绝对路径<input name="confirmations" required></label>
 <label>实收CSV绝对路径<input name="receipts" required></label>
 <button class="btn primary">预览对账</button></form>
 <p>允许目录：{escape(allowed)}</p>
-<details><summary>CSV列说明</summary><p>批次确认：</p><pre>{escape(batch_confirm)}</pre>
+<details>
+<summary>CSV列说明</summary>
+<p>批次确认：</p>
+<pre>{escape(batch_confirm)}</pre>
 <p>批次实收：</p><pre>{escape(batch_receipt)}</pre>
 <p>单笔确认：</p><pre>{escape(observation_confirm)}</pre>
 <p>单笔实收：</p><pre>{escape(observation_receipt)}</pre></details>
@@ -570,13 +607,21 @@ def render_reconciliation(record: dict, *, csrf_token: str = "") -> str:
 <p>批次确认：{escape(str(confirmations))} ·
 实收：{escape(str(receipts))}</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="逐批次到账核对">
-<table><tr><th>确认批次</th><th>确认净额</th><th>实收</th><th>未收/超收差额</th><th>状态</th></tr>
+<table>
+<tr>
+<th>确认批次</th>
+<th>确认净额</th>
+<th>实收</th>
+<th>未收/超收差额</th>
+<th>状态</th>
+</tr>
 {cash or '<tr><td colspan="5">没有逐批次实收记录</td></tr>'}</table>
 </div>
 <h3>差异</h3><pre>{differences}</pre>
 <p class="banner">read_only={escape(str(report.get("read_only")))} ·
 real_business_certified={escape(str(report.get("real_business_certified")))} ·
-classification={escape(str(report.get("classification")))}</p></section>"""
+classification={escape(str(report.get("classification")))}</p>
+</section>"""
     record_status = escape(str(record["status"]))
     record_message = escape(str(record.get("message") or ""))
     run_id = escape(record["run_id"])
@@ -619,7 +664,7 @@ def _run_rows(records: list[dict[str, str]], prefix: str) -> str:
         lines.append(
             "<tr>"
             f'<td><a href="{prefix}{escape(record["run_id"])}">'
-            f"{escape(record['template_id'])}</a></td>"
+            f"{escape(template_title(record['template_id']))}</a></td>"
             f"<td>{escape(status)}</td>"
             f"<td>{escape(record['when'])}</td>"
             f"<td>{nav}</td></tr>"
@@ -798,7 +843,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             "可下载完整CSV。</p>"
         )
     if template.kind == "synthetic":
-        notices.append('<p class="banner">合成样例，不是市场收益</p>')
+        notices.append('<p class="badge evidence">合成样例，不是市场收益</p>')
     elif result.get("evidence_kind"):
         kind = str(result["evidence_kind"])
         label = {
@@ -809,14 +854,18 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             "user_provided": "用户提供数据，来源与业务规则仍须核验",
             "unspecified": "来源性质未声明，不能据此判断为真实或合成数据",
         }.get(kind, kind)
-        notices.append(f'<p class="banner">数据性质：{escape(label)}</p>')
+        notices.append(f'<p class="badge evidence">数据性质：{escape(label)}</p>')
     if result.get("message"):
-        notices.append(f'<p class="banner">{escape(str(result["message"]))}</p>')
+        notices.append(
+            recovery_body(str(result["message"]))
+            if result["status"] in {"failed", "blocked", "check_failed"}
+            else f'<p class="note">{escape(str(result["message"]))}</p>'
+        )
     elif result["status"] == "failed":
         stderr_path = directory / "stderr.txt"
         if stderr_path.is_file():
             detail = stderr_path.read_text(encoding="utf-8")[-800:]
-            notices.append(f"<pre>{escape(detail)}</pre>")
+            notices.append(recovery_body(detail))
     elif (
         result["status"] == "succeeded"
         and not chart
@@ -882,7 +931,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if timing_view or template.metadata.get("benchmark_label")
         else benchmark + chart
     )
-    evidence_open = "" if result["status"] == "succeeded" else " open"
+    evidence_open = ""
     preflight_view = ""
     if result["status"] == "checked":
         checked = json.loads((directory / "preflight.json").read_text(encoding="utf-8"))
@@ -960,6 +1009,16 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             f"<p>{next_step}</p>"
             f'<a href="{back_url}">返回配置</a></section>'
         )
+    metrics = (
+        metric_cards(
+            series,
+            template.metadata,
+            synthetic=template.kind == "synthetic"
+            or result.get("evidence_kind") == "synthetic",
+        )
+        if series
+        else ""
+    )
     body = f"""<header class="page-head">
 <p class="kicker">结果</p>
 <h1>{escape(template.title)}</h1>
@@ -971,10 +1030,12 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
 {preflight_view}
 {counterfactual_panel(directory, family_view)}
 {timing_panel(directory, timing_view)}
+{metrics}
 {curves}
 {drawdown}
 {tables}
-{report_html}
+<details class="panel">
+<summary>完整原生报告</summary>{report_html or "本次没有生成报告。"}</details>
 <details class="panel"{evidence_open}>
 <summary>配置与执行命令</summary>
 {_saved_config(directory)}
@@ -1029,10 +1090,13 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
     label = (
         "账本核验未通过"
         if result["status"] == "verification_failed"
-        else "记录尚未完成"
+        else _STATUS.get(result["status"], "尚未完成，状态待确认")
     )
     body = f"""<header class="page-head"><h1>{escape(template.title)}</h1>
-<p class="lede"><span class="status incomplete">{label}</span></p></header>
+<p class="lede">
+<span class="status incomplete">{label}</span>
+</p>
+</header>
 <section class="panel"><h2>检查与恢复</h2>
 <p>{message}</p>
 <p>请先确认原进程已结束。保留当前记录与账本；已有账户先核验并恢复投影，
@@ -1040,7 +1104,7 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
 <form method="post" action="{action_url}">{inputs}
 <button class="btn primary">{retry_label}</button></form>
 <p class="note">新记录重新读取输入；本次配置、结果与账本继续保留。</p></section>
-<details class="panel" open><summary>配置与执行命令</summary>
+<details class="panel"><summary>配置与执行命令</summary>
 {_saved_config(directory)}<pre>{argv}</pre>{logs}</details>"""
     return _layout("未完成运行", body, "results")
 
@@ -1401,7 +1465,7 @@ class _Handler(
             elif path == "/data":
                 self._send_html(render_data(self.runs_root))
             elif path == "/jobs":
-                self._send_html(render_jobs(self._jobs()))
+                self._redirect("/experiments")
             elif path.startswith("/jobs/"):
                 self._send_html(
                     render_job(
@@ -1426,10 +1490,8 @@ class _Handler(
                 self._send_html(
                     render_reconciliation(record, csrf_token=self.csrf_token)
                 )
-            elif path == "/backtest":
-                self._send_html(render_backtest(self.runs_root))
-            elif path == "/results":
-                self._send_html(render_results(self.runs_root))
+            elif path in {"/backtest", "/results"}:
+                self._redirect("/experiments")
             elif path == "/platform-status":
                 self._send_html(
                     _layout(
@@ -1928,22 +1990,7 @@ _CHOICES = {
     "rebalance_sessions": {"1": "1 个交易日", "5": "5 个交易日"},
 }
 
-_STATUS = {
-    "queued": "排队中",
-    "running": "运行尚未完成",
-    "cancelling": "正在取消",
-    "cancelled": "已取消",
-    "cancel_failed": "取消未成功",
-    "interrupted": "服务重启后中断",
-    "checking": "预检尚未完成",
-    "incomplete": "记录未完成",
-    "checked": "预检通过",
-    "check_failed": "预检未通过",
-    "previewed": "仅预览",
-    "succeeded": "已完成",
-    "failed": "失败",
-    "blocked": "未执行",
-}
+_STATUS = STATUS
 
 _CODE_SCRIPT = """
 const form = document.querySelector("form.flow");
@@ -1968,10 +2015,18 @@ window.addEventListener("pageshow", refreshCode);
 
 
 def _request_summary(request: dict[str, object]) -> str:
+    project_link = ""
+    if project := request.get("research_project"):
+        project_link = (
+            f'<a href="/projects/{escape(project["id"])}?tab=results">'
+            "返回项目结果</a> · "
+        )
     if recipe := request.get("recipe"):
-        label = escape(f"方案：{recipe['name']} · 版本 {recipe['revision'][:12]}")
+        label = escape(
+            f"方案：{recipe['name']} · 保存于 {display_time(recipe.get('created_at'))}"
+        )
         return (
-            f'<span class="meta">{label}</span> '
+            project_link + f'<span class="meta">{label}</span> '
             f'<a href="/research/{escape(recipe["id"])}'
             f'?revision={escape(recipe["revision"])}">'
             "查看本次配置</a>"
@@ -1987,7 +2042,7 @@ def _request_summary(request: dict[str, object]) -> str:
     if isinstance(factors, list) and factors:
         names = "、".join(str(name) for name in factors)
         parts.append(f"因子：{names}")
-    return f'<span class="meta">{escape(" · ".join(parts))}</span>'
+    return project_link + f'<span class="meta">{escape(" · ".join(parts))}</span>'
 
 
 def compiled_from_form(template_id: str, form: dict[str, list[str]]) -> str:
@@ -2386,23 +2441,31 @@ def _choice_label(name: str, choice: object) -> str:
 
 
 def _layout(title: str, body: str, active: str = "strategy") -> str:
+    from importlib.resources import files
+
     nav_html, active_label = navigation(active)
+    usability_css = (
+        files("quant_studio")
+        .joinpath("assets/usability.css")
+        .read_text(encoding="utf-8")
+    )
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)} · Quant Studio</title>
-<style>{_CSS}</style></head>
+<style>{_CSS}{usability_css}</style></head>
 <body><div class="shell">
 <aside class="side">
 <a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
 <nav aria-label="主导航">{nav_html}</nav>
+<a class="btn primary mobile-create" href="/projects/new">新建研究</a>
 <details class="mobile-nav">
 <summary>页面导航<span> · 当前：{escape(active_label)}</span></summary>
 <nav aria-label="页面导航">{nav_html}</nav>
 </details>
-<p class="side-note">不下真实订单。曲线只来自合成样例，或上游已经交出的净值。</p>
+<p class="side-note">研究与模拟跟踪 · 不下真实订单</p>
 </aside>
-<div class="stage">{body}</div>
+<main class="stage">{related_navigation(active)}{body}</main>
 </div></body></html>"""
 
 

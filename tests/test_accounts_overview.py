@@ -58,10 +58,18 @@ def test_no_sources_is_an_actionable_empty_state(tmp_path):
     page = render_accounts()
     assert "尚未配置账户" in page and "QUANT_STUDIO_ACCOUNTS" in page
     home = render_overview(tmp_path)
-    for link in ("/environment", "/data", "/strategy", "/accounts", "/results"):
+    for link in (
+        "/setup",
+        "/data",
+        "/strategy",
+        "/accounts",
+        "/experiments",
+        "/projects/new",
+    ):
         assert f'href="{link}"' in home
-    assert "未设置 QUANT_WORKSPACE_ROOT" in home
-    assert "环境就绪不代表数据完整" in home
+    assert "连接研究工具" in home
+    assert "模板尚未就绪" in home
+    assert "QUANT_WORKSPACE_ROOT" not in home
     assert list(tmp_path.iterdir()) == []
 
 

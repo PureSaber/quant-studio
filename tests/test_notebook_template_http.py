@@ -19,7 +19,7 @@ def test_project_passes_explicit_notebook_template_and_keeps_default(
     host = f"localhost:{server.server_port}"
     try:
         status, _, body = _request(
-            server, "GET", f"/projects/{project['id']}", host=host
+            server, "GET", f"/projects/{project['id']}?tab=plan", host=host
         )
         assert status == 200
         assert b"data-quality-exploration" in body

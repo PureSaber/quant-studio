@@ -8,7 +8,6 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from quant_studio import QuantStudioError
 from quant_studio.data_catalog import catalog, preview_file
 from quant_studio.datasets import DatasetStore
-from quant_studio.experiment_context import status_label
 from quant_studio.notebooks import NotebookStore, notebook_config
 from quant_studio.project_assistant import AssistantStore
 from quant_studio.projects import ProjectStore
@@ -87,11 +86,17 @@ def catalog_body(root, query):
 
 def project_body(root, token, identifier=None, query=None):
     store = ProjectStore(root)
+    if identifier == "new":
+        from quant_studio.project_workspace import new_project_body
+
+        return new_project_body(token, query)
     if identifier is None:
         query = query or {}
         body = """<header class="page-head"><h1>研究项目</h1>
 <p>从研究问题出发，把数据、方案、代码、实验和结论放在一起。</p>
-<a class="btn" href="/projects/templates">研究模板库</a>
+<a class="btn primary" href="/projects/new">新建研究</a>
+<a class="btn" href="/projects/findings">研究结论</a>
+<a class="btn" href="/projects/templates">交互研究模板</a>
 <a class="btn" href="/projects/notebook-compare">Notebook实验比较</a></header>
 <section class="panel"><form method="get"><label>搜索项目<input name="q"></label>
 <button class="btn">搜索</button></form></section>"""
@@ -99,113 +104,10 @@ def project_body(root, token, identifier=None, query=None):
             body += f"""<section class="panel"><h2>
 <a href="/projects/{project["id"]}">{escape(project["name"])}</a></h2>
 <p>{escape(project["question"])}</p></section>"""
-        return (
-            body
-            + f"""<section class="panel"><h2>新建研究项目</h2>
-<form method="post" action="/projects/new">{csrf(token)}
-<label>名称<input name="name" maxlength="120" required></label>
-<label>想回答的问题
-<textarea name="question" maxlength="4000" required></textarea></label>
-<button class="btn primary">创建项目</button></form></section>"""
-        )
-    project = store.get(identifier, (query or {}).get("revision", [None])[0])
-    inputs = DatasetStore(root).list()
-    recipes = RecipeStore(root)
-    recipe_options = {(r["id"], r["revision"]): r for r in recipes.list()}
-    for ref in project["recipes"]:
-        recipe_options[(ref["id"], ref["revision"])] = recipes.get(
-            ref["id"], ref["revision"]
-        )
-    selected = {(r["id"], r["revision"]) for r in project["recipes"]}
-    choices = "".join(
-        f'''<label class="check"><input type="checkbox" name="dataset"
-value="{item["id"]}"
-{"checked" if item["id"] in project["datasets"] else ""}>
-{escape(item["name"])}</label>'''
-        for item in inputs
-    )
-    recipe_choices = "".join(
-        f'''<label class="check"><input type="checkbox" name="recipe"
-value="{rid}@{rev}"
-{"checked" if (rid, rev) in selected else ""}>
-{escape(record["name"])} · {rev[:12]}</label>'''
-        for (rid, rev), record in recipe_options.items()
-    )
-    body = f"""<header class="page-head"><h1>{escape(project["name"])}</h1>
-<p>{escape(project["question"])}</p>
-<p>已连接{len(project["datasets"])}个数据集、{len(project["recipes"])}个方案版本。</p>
-<a class="btn" href="/projects/{identifier}/evidence">研究证据与复核</a>
-</header>"""
-    body += notebook_body(root, token, project)
-    from quant_studio.research_card_web import card_body
+        return body
+    from quant_studio.project_workspace import project_page
 
-    body += card_body(root, token, project)
-    edit_open = "" if project["datasets"] or project["recipes"] else " open"
-    body += f'''<details class="panel"{edit_open}>
-<summary>编辑研究问题、数据、方案与笔记</summary>
-<form method="post" action="/projects/{identifier}/save">{csrf(token)}
-<input type="hidden" name="revision" value="{project["revision"]}">
-<label>名称<input name="name" value="{escape(project["name"], quote=True)}"
-maxlength="120" required></label>
-<label>研究问题<textarea name="question" maxlength="4000" required
->{escape(project["question"])}</textarea></label>
-<h2>连接数据集</h2>{choices or "<p>先在数据目录登记输入。</p>"}
-<a href="/catalog">打开数据目录</a>
-<h2>固定方案版本</h2>{recipe_choices or "<p>还没有方案。</p>"}
-<a href="/research">创建或编辑方案</a>
-<label>研究笔记与结论<textarea name="notes" rows="6" maxlength="16000"
->{escape(project["notes"])}</textarea></label>
-<button class="btn primary">保存新项目版本</button></form></details>'''
-    body += """<section class="panel"><h2>运行已连接方案</h2>
-<p>每项先执行原生预检，通过后运行；提交时固定方案版本。失败保留诊断。</p>"""
-    for ref in project["recipes"]:
-        record = recipes.get(ref["id"], ref["revision"])
-        body += f'''<form method="post" action="/projects/{identifier}/run">
-{csrf(token)}
-<input type="hidden" name="revision" value="{project["revision"]}">
-<input type="hidden" name="recipe" value="{ref["id"]}@{ref["revision"]}">
-<a href="/research/{ref["id"]}?revision={ref["revision"]}">
-{escape(record["name"])} · {ref["revision"][:12]}</a>
-<button class="btn">预检并运行</button></form>'''
-    body += """</section><section class="panel"><h2>项目实验</h2>
-<form method="get" action="/experiments/compare">"""
-    for record in store.experiments(identifier):
-        body += f'''<label class="check"><input type="checkbox" name="run"
-value="{record["run_id"]}">
-<a href="/experiments/{record["run_id"]}">{escape(record["title"])}</a>
- · {escape(status_label(record["status"]))}
- · 保存时间：{escape(record.get("when", "未记录"))}
- · 方案版本：{escape((record.get("recipe") or {}).get("revision", "未记录")[:12])}
- · 项目版本：{
-            escape(
-                (record.get("research_project") or {}).get("revision", "历史方案关联")[
-                    :12
-                ]
-            )
-        }</label>'''
-    body += '<button class="btn">比较所选实验</button></form></section>'
-    body += (
-        f'<section class="panel"><h2>项目模拟账户</h2><a class="btn" '
-        f'href="/projects/{identifier}/registration">选择候选、登记预览与账户核验</a>'
-        "<p>登记和每日调度分别确认；失败及中断回执保留。</p></section>"
-    )
-    body += '<details class="panel"><summary>项目版本记录</summary>'
-    for version in store.history(identifier):
-        body += f"""<p><a href="/projects/{identifier}?revision={version["revision"]}">
-{version["revision"][:12]}</a> · {escape(version["created_at"])}</p>"""
-    body += "</details>"
-    body += f'''<section class="panel"><h2>研究助手</h2>
-<p>根据本项目的数据、方案和实验记录整理问题，先检查证据再选择是否调用模型。</p>
-<form method="post" action="/projects/{identifier}/assistant-prepare">{csrf(token)}
-<input type="hidden" name="revision" value="{project["revision"]}">
-<label>想了解什么<textarea name="question" maxlength="4000" required></textarea></label>
-<label class="check"><input type="checkbox" name="include_notebook" value="yes">
-同时准备当前Notebook源码，生成可审阅的单元格修改建议</label>
-<button class="btn">准备证据与建议</button></form></section>'''
-    for advice in AssistantStore(root).list(identifier):
-        body += f"""<p><a href="/projects/{identifier}/advice/{advice["id"]}">
-研究建议 · {escape(advice["created_at"])}</a> · {escape(advice["status"])}</p>"""
-    return body
+    return project_page(root, token, identifier, query or {})
 
 
 def notebook_body(root, token, project):
@@ -420,13 +322,28 @@ class ProjectHandler:
             from quant_studio.notebook_template_web import create_from_template
 
             project = create_from_template(self.runs_root, data)
-            self._redirect(f"/projects/{project['id']}")
+            self._redirect(f"/projects/{project['id']}?tab=plan")
             return
         if path == "/projects/new":
             name, question = field(data, "name"), field(data, "question")
+            template_id = field(data, "template_id", "")
             if data:
                 raise QuantStudioError("未知项目字段")
-            project = store.save(name, question)
+            refs = []
+            if template_id:
+                from quant_studio.templates import load_template, render_template
+
+                template = load_template(template_id)
+                recipe = RecipeStore(self.runs_root).save(
+                    name, template_id, render_template(template).config
+                )
+                refs = [{"id": recipe["id"], "revision": recipe["revision"]}]
+            project = store.save(name, question, recipes=refs)
+            if refs:
+                self._redirect(
+                    f"/research/{recipe['id']}?project={project['id']}&project_revision={project['revision']}"
+                )
+                return
         else:
             parts = path.removeprefix("/projects/").split("/")
             if len(parts) != 2:
@@ -444,7 +361,10 @@ class ProjectHandler:
                 from quant_studio.research_card_web import card_post
 
                 card_post(self.runs_root, identifier, revision, action, data)
-                self._redirect(f"/projects/{identifier}#research-card")
+                self._redirect(
+                    f"/projects/{identifier}?tab="
+                    + ("conclusions" if action == "decision" else "overview")
+                )
                 return
             if action == "evidence-review":
                 from quant_studio.project_evidence_web import evidence_post
@@ -522,6 +442,39 @@ class ProjectHandler:
                         notebook={"project_id": identifier, "id": record["id"]},
                     )
                     self._redirect(f"/jobs/{job['job_id']}")
+                return
+            if action in {"notes-save", "overview-save", "data-save", "recipes-save"}:
+                project = store.get(identifier, revision)
+                values = {
+                    key: project[key]
+                    for key in ("name", "question", "notes", "datasets", "recipes")
+                }
+                tab = {
+                    "notes-save": "conclusions",
+                    "overview-save": "overview",
+                    "data-save": "data",
+                    "recipes-save": "plan",
+                }[action]
+                if action == "notes-save":
+                    values["notes"] = field(data, "notes", "")
+                elif action == "overview-save":
+                    values.update(
+                        name=field(data, "name"), question=field(data, "question")
+                    )
+                elif action == "data-save":
+                    values["datasets"] = data.pop("dataset", [])
+                else:
+                    refs = []
+                    for raw in data.pop("recipe", []):
+                        parts = raw.split("@")
+                        if len(parts) != 2:
+                            raise QuantStudioError("方案版本无效")
+                        refs.append({"id": parts[0], "revision": parts[1]})
+                    values["recipes"] = refs
+                if data:
+                    raise QuantStudioError("未知项目字段")
+                store.save(**values, project_id=identifier, expected=revision)
+                self._redirect(f"/projects/{identifier}?tab={tab}")
                 return
             if action == "save":
                 name, question, notes = (

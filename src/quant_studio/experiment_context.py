@@ -5,26 +5,8 @@ from datetime import UTC, datetime
 from html import escape
 
 from quant_studio.experiments import ExperimentStore
+from quant_studio.presentation import status_label
 from quant_studio.run_record import load_run_result
-
-STATUS = {
-    "succeeded": "成功",
-    "completed": "已完成",
-    "failed": "失败",
-    "incomplete": "未完成",
-    "running": "运行中",
-    "queued": "排队中",
-    "cancelled": "已取消",
-    "interrupted": "已中断",
-    "blocked": "已阻断",
-    "prepared": "已准备",
-    "pending": "待运行",
-    "skipped": "未执行",
-}
-
-
-def status_label(value):
-    return STATUS.get(value, "未分类状态：" + str(value))
 
 
 def context(root, identifier):
