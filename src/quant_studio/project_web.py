@@ -329,13 +329,26 @@ class ProjectHandler:
             template_id = field(data, "template_id", "")
             if data:
                 raise QuantStudioError("未知项目字段")
+            for label, value, limit in (
+                ("名称", name, 120),
+                ("研究问题", question, 4000),
+            ):
+                if not value.strip() or len(value) > limit:
+                    raise QuantStudioError(f"{label}须为非空文本，最多{limit}字")
             refs = []
             if template_id:
                 from quant_studio.templates import load_template, render_template
 
                 template = load_template(template_id)
                 recipe = RecipeStore(self.runs_root).save(
-                    name, template_id, render_template(template).config
+                    name,
+                    template_id,
+                    render_template(template).config,
+                    cli={
+                        knob["name"]: knob["default"]
+                        for knob in template.knobs
+                        if knob.get("target") == "cli"
+                    },
                 )
                 refs = [{"id": recipe["id"], "revision": recipe["revision"]}]
             project = store.save(name, question, recipes=refs)

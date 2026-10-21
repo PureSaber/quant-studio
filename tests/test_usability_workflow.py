@@ -206,3 +206,33 @@ def test_mixed_comparison_omits_only_unavailable_curve(tmp_path):
     assert {row["run_id"] for row in data["series"]} == {first.run_id, second.run_id}
     assert f"/experiments/{failed.run_id}" in page
     assert "参数差异" in page
+
+
+def test_template_project_keeps_runtime_parameters_and_rejects_empty_question(tmp_path):
+    import pytest
+
+    from quant_studio import QuantStudioError
+    from quant_studio.project_web import ProjectHandler
+    from quant_studio.recipes import RecipeStore
+
+    class Handler(ProjectHandler):
+        runs_root = tmp_path
+
+        def _redirect(self, url):
+            self.destination = url
+
+    handler = Handler()
+    fields = {
+        "name": ["Research"],
+        "question": [""],
+        "template_id": ["a-share-four-factor"],
+    }
+    with pytest.raises(QuantStudioError):
+        handler._project_post("/projects/new", {**fields})
+    assert not RecipeStore(tmp_path).list()
+    handler._project_post("/projects/new", {**fields, "question": ["Universe size?"]})
+    recipe = RecipeStore(tmp_path).list()[0]
+    assert recipe["cli"] == {"symbols_limit": 50}
+    assert 'name="cli:/symbols_limit"' in editor_body(
+        "a-share-four-factor", "token", recipe
+    )
