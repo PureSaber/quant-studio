@@ -33,14 +33,20 @@ async function main() {
       try {if ((await page.goto(base)).status() === 200) break;} catch {}
       await new Promise(r => setTimeout(r, 250));
     }
-    await page.goto(base + '/projects');
+    await page.goto(base + '/projects/new');
     const create = page.locator('form[action="/projects/new"]');
-    await create.getByLabel('名称', {exact: true}).fill('窗口研究：界面验收');
+    await create.getByLabel('项目名称', {exact: true}).fill('窗口研究：界面验收');
     await create.getByLabel('想回答的问题').fill('比较5、10、20、60日窗口');
-    await create.getByRole('button', {name: '创建项目'}).click();
-    await page.waitForURL(/projects\/[a-f0-9]+$/);
-    const projectUrl = page.url();
+    await create.getByRole('button', {name: '创建研究并调整方案'}).click();
+    await page.waitForURL(/research\/[a-f0-9]+\?project=/);
+    const projectId = new URL(page.url()).searchParams.get('project');
+    if (!projectId) throw Error('Created recipe did not retain the project');
+    const projectUrl = base + '/projects/' + projectId;
+    await page.goto(projectUrl + '?tab=plan');
+    await page.getByText('高级：交互研究与批量实验', {exact: true}).click();
     await page.getByRole('button', {name: '创建草稿或刷新数据上下文'}).click();
+    await page.waitForURL(projectUrl + '?tab=plan');
+    await page.getByText('高级：交互研究与批量实验', {exact: true}).click();
     await page.getByText('把当前Notebook保存为研究模板', {exact: true}).click();
     const template = page.locator('form[action$="/template-save"]');
     await template.getByText('参数定义（模板作者填写一次）', {exact: true}).click();

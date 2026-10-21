@@ -444,7 +444,7 @@ class ProjectHandler:
                 notebooks = NotebookStore(self.runs_root)
                 if action == "notebook-init":
                     notebooks.initialize(identifier, revision, template=template)
-                    self._redirect(f"/projects/{identifier}")
+                    self._redirect(f"/projects/{identifier}?tab=plan")
                 else:
                     record = notebooks.prepare(identifier, revision)
                     job = self._jobs().submit(

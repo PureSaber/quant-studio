@@ -28,7 +28,7 @@ def test_project_passes_explicit_notebook_template_and_keeps_default(
             "revision": project["revision"],
             "template": "data-quality-exploration",
         }
-        status, _, _ = _request(
+        status, headers, _ = _request(
             server,
             "POST",
             f"/projects/{project['id']}/notebook-init",
@@ -37,6 +37,7 @@ def test_project_passes_explicit_notebook_template_and_keeps_default(
             fields=fields,
         )
         assert status == 303
+        assert headers["Location"] == f"/projects/{project['id']}?tab=plan"
         assert calls[-1] == (
             project["id"],
             project["revision"],
