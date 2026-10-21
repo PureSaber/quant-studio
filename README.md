@@ -325,3 +325,16 @@ it never falls back to the research environment. Native frozen-code checks remai
 mandatory. Keep the one existing scheduler on the same frozen executable. This
 does not re-register, migrate or promote an account or strategy.
 
+## Research navigation and report isolation
+
+Navigation is grouped into Data, Research, Runs/Compare, Accounts and System.
+Research findings (`/projects/findings`) lists existing human decisions, including
+rejected hypotheses and stopped studies, with the original project revision and
+integrity-checked experiment references. It does not infer a positive conclusion
+from a successful run. Template cards disclose synthetic defaults or state that
+the actual input's provenance still needs verification.
+
+Generated HTML reports run in a CSP sandbox with scripts and downloads enabled,
+but without same-origin access, forms or base-URL overrides. Self-contained charts
+can run; reports that need parent DOM/cookies or same-origin API reads must be
+made self-contained or rendered through a separately authenticated interface.

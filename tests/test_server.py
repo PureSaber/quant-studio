@@ -227,7 +227,10 @@ def test_http_execute_requires_same_origin_and_csrf_token(tmp_path):
             host=authority,
         )
         assert status == 200
-        assert report_headers["Content-Security-Policy"] == "frame-ancestors 'self'"
+        assert report_headers["Content-Security-Policy"] == (
+            "frame-ancestors 'self'; sandbox allow-scripts allow-downloads; "
+            "form-action 'none'; base-uri 'none'"
+        )
         assert report_headers["X-Frame-Options"] == "SAMEORIGIN"
     finally:
         server.shutdown()

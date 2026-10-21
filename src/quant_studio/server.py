@@ -51,6 +51,7 @@ from quant_studio.nav import (
     parse_nav_csv,
     validate_comparison,
 )
+from quant_studio.navigation import navigation, template_evidence_label
 from quant_studio.platform_status_web import (
     capture_process_identity,
     platform_status_body,
@@ -89,6 +90,7 @@ def render_home() -> str:
             f"""<article class="template-card {card_kind}">
 <span class="eyebrow">{label}</span>
 <h2>{escape(template.title)}</h2>
+<p class="badge evidence">{escape(template_evidence_label(template))}</p>
 <p>{escape(template.summary)}</p>
 <p class="trail">{escape(trail)}</p>
 <p class="badge {state}">{escape(ready.message)}</p>
@@ -664,6 +666,7 @@ def render_template_page(
     body = f"""<header class="page-head">
 <p class="kicker">{kind}</p>
 <h1>{escape(template.title)}</h1>
+<p class="badge evidence">{escape(template_evidence_label(template))}</p>
 <p class="lede">{escape(template.summary)}</p>
 <div class="presets">{_preset_links(template, preset_id)}</div>
 </header>
@@ -1836,7 +1839,13 @@ class _Handler(
             self._pending_cookie = None
         policy = getattr(self, "_frame_policy", "DENY")
         ancestors = "'self'" if policy == "SAMEORIGIN" else "'none'"
-        self.send_header("Content-Security-Policy", f"frame-ancestors {ancestors}")
+        csp = f"frame-ancestors {ancestors}"
+        if getattr(self, "_report_sandbox", False):
+            csp += (
+                "; sandbox allow-scripts allow-downloads; "
+                "form-action 'none'; base-uri 'none'"
+            )
+        self.send_header("Content-Security-Policy", csp)
         self.send_header("X-Frame-Options", policy)
         super().end_headers()
 
@@ -1850,6 +1859,8 @@ class _Handler(
         status: int = 200,
         content_type: str = "text/plain; charset=utf-8",
     ) -> None:
+        self._frame_policy = "DENY"
+        self._report_sandbox = False
         body = content.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -1865,8 +1876,8 @@ class _Handler(
             ".csv": "text/csv; charset=utf-8",
             ".json": "application/json; charset=utf-8",
         }[path.suffix.lower()]
-        if path.suffix.lower() == ".html":
-            self._frame_policy = "SAMEORIGIN"
+        self._report_sandbox = path.suffix.lower() == ".html"
+        self._frame_policy = "SAMEORIGIN" if self._report_sandbox else "DENY"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -2375,43 +2386,7 @@ def _choice_label(name: str, choice: object) -> str:
 
 
 def _layout(title: str, body: str, active: str = "strategy") -> str:
-    nav_items = (
-        ("overview", "总览", "/"),
-        ("onboarding", "开始研究", "/onboarding"),
-        ("setup", "首次配置", "/setup"),
-        ("environment", "环境", "/environment"),
-        ("platform-status", "版本与验收", "/platform-status"),
-        ("data", "数据", "/data"),
-        ("datasets", "数据集", "/datasets"),
-        ("catalog", "数据目录", "/catalog"),
-        ("data-center", "数据更新与质量", "/data-center"),
-        ("intake", "导入与质量", "/intake"),
-        ("projects", "研究项目", "/projects"),
-        ("today", "今日运行", "/today"),
-        ("history", "研究历史", "/history"),
-        ("research", "研究方案", "/research"),
-        ("batches", "批量实验", "/batches"),
-        ("durable", "后台因子研究", "/durable-research"),
-        ("experiments", "实验笔记", "/experiments"),
-        ("strategy", "策略", "/strategy"),
-        ("backtest", "回测", "/backtest"),
-        ("jobs", "任务", "/jobs"),
-        ("results", "结果", "/results"),
-        ("fund-reconcile", "基金对账", "/fund-reconcile"),
-        ("accounts", "账户", "/accounts"),
-        ("operations", "服务状态", "/operations"),
-        ("delivery", "环境与交付", "/delivery"),
-        ("logout", "退出登录", "/logout"),
-    )
-    links = []
-    for key, label, href in nav_items:
-        mark = " on" if key == active else ""
-        current = ' aria-current="page"' if key == active else ""
-        links.append(f'<a class="nav{mark}" href="{href}"{current}>{label}</a>')
-    nav_html = "".join(links)
-    active_label = next(
-        (label for key, label, _ in nav_items if key == active), "当前页面"
-    )
+    nav_html, active_label = navigation(active)
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2503,12 +2478,19 @@ nav a {
   text-decoration: none;
 }
 nav a.on { background: #24406e; }
-nav a:focus-visible, .mobile-nav summary:focus-visible {
+nav a:focus-visible, .nav-group summary:focus-visible,
+.mobile-nav > summary:focus-visible {
   outline: 3px solid #8bb8ff;
   outline-offset: 2px;
 }
+.nav-group { margin-top: 8px; }
+.nav-group > summary { color: #cbd8eb; padding: 10px 12px; cursor: pointer; }
+.nav-group a { margin-left: 10px; }
+.mobile-nav .nav-group { grid-column: 1 / -1; }
+.mobile-nav .nav-group a { margin-top: 6px; }
+.badge.evidence { border: 1px solid #b8c8de; background: #edf3fb; color: #243c5f; }
 .mobile-nav { display: none; }
-.mobile-nav summary {
+.mobile-nav > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2521,10 +2503,10 @@ nav a:focus-visible, .mobile-nav summary:focus-visible {
   cursor: pointer;
   list-style: none;
 }
-.mobile-nav summary::-webkit-details-marker { display: none; }
-.mobile-nav summary::after { content: "＋"; color: #b7c8e2; }
-.mobile-nav[open] summary::after { content: "−"; }
-.mobile-nav summary span { color: #b7c8e2; font-size: 12px; }
+.mobile-nav > summary::-webkit-details-marker { display: none; }
+.mobile-nav > summary::after { content: "＋"; color: #b7c8e2; }
+.mobile-nav[open] > summary::after { content: "−"; }
+.mobile-nav > summary span { color: #b7c8e2; font-size: 12px; }
 .mobile-nav nav {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -314,7 +314,11 @@ class ProjectHandler:
         from quant_studio.server import _layout
 
         query = parse_qs(urlparse(self.path).query)
-        if path.endswith("/evidence"):
+        if path == "/projects/findings":
+            from quant_studio.findings import findings_body
+
+            body, active = findings_body(self.runs_root, query), "findings"
+        elif path.endswith("/evidence"):
             from quant_studio.project_evidence_web import evidence_body
 
             parts = path.removeprefix("/projects/").split("/")
