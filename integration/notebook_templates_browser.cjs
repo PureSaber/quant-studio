@@ -50,11 +50,12 @@ print(json.dumps({'project':project['id'],'dataset':item['id']}))`;
     const base = `http://127.0.0.1:${port}`;
     let ready = false;
     for (let i = 0; i < 60; i++) {
-      try { ready = (await page.goto(base + '/projects/' + seeded.project)).status() === 200; }
+      try { ready = (await page.goto(base + '/projects/' + seeded.project + '?tab=plan')).status() === 200; }
       catch (_) { await new Promise(resolve => setTimeout(resolve, 250)); }
       if (ready) break;
     }
     assert(ready, 'Server did not become ready');
+    await page.getByText('高级：交互研究与批量实验', { exact: true }).click();
     await page.getByText('把当前Notebook保存为研究模板', { exact: true }).click();
     await page.getByText('参数定义（模板作者填写一次）', { exact: true }).click();
     const form = page.locator('form[action$="/template-save"]');
@@ -73,7 +74,8 @@ print(json.dumps({'project':project['id'],'dataset':item['id']}))`;
       await page.locator('[name="name"]').fill('观察窗口' + window);
       await page.locator('[name="dataset"]').check();
       await page.locator('[name="param_window"]').fill(String(window));
-      await Promise.all([page.waitForURL(/\/projects\/[a-f0-9]{32}$/), page.getByRole('button', { name: '创建研究项目', exact: true }).click()]);
+      await Promise.all([page.waitForURL(/\/projects\/[a-f0-9]{32}\?tab=plan$/), page.getByRole('button', { name: '创建研究项目', exact: true }).click()]);
+      await page.getByText('高级：交互研究与批量实验', { exact: true }).click();
       await Promise.all([page.waitForURL('**/jobs/*'), page.getByRole('button', { name: '冻结已保存草稿并提交实验' }).click()]);
       const resultURL = await page.getByRole('link', { name: '打开项目实验记录' }).getAttribute('href');
       const parts = resultURL.split('/');

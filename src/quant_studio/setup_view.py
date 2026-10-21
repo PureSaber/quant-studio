@@ -2,6 +2,7 @@
 
 import json
 from html import escape
+from pathlib import Path
 from urllib.parse import quote
 
 from quant_studio import QuantStudioError
@@ -12,6 +13,7 @@ from quant_studio.setup import (
     input_sources,
     repositories,
 )
+from quant_studio.templates import load_template, template_ids
 
 
 def _field(name, label, value, hint):
@@ -76,7 +78,7 @@ def setup_body(store, csrf_token, *, profile=None, error="", reviewed=None):
                 f"<ul>{rows(ready)}</ul><details><summary>"
                 f"其他入口与待处理项（{len(pending)}）</summary>"
                 f"<ul>{rows(pending)}</ul></details>"
-                f"<pre>{document}</pre>"
+                f"<details><summary>配置文件详情</summary><pre>{document}</pre></details>"
                 '<form method="post" action="/setup">'
                 '<input type="hidden" name="_csrf_token" '
                 f'value="{escape(csrf_token)}">'
@@ -88,15 +90,37 @@ def setup_body(store, csrf_token, *, profile=None, error="", reviewed=None):
                 "</div></form></section>"
             )
         )
-    python_fields = "".join(
-        _field(
-            f"python:{repo}",
-            repo,
-            pythons.get(repo, ""),
-            "已有独立环境的Python绝对路径；无需配置的应用可留空",
+    tool_names = {
+        "quant-pipeline": "模拟跟踪工具",
+        "quant-pipeline-frozen": "固定方案运行工具",
+        "quant-pipeline-operations": "日常运行工具",
+        "quant-pipeline-registration": "候选登记工具",
+        "quant-data-kit": "数据检查与导入工具",
+    }
+    for key in template_ids():
+        template = load_template(key)
+        repo = template.metadata.get("runtime_key") or template.metadata.get(
+            "workspace_repo"
         )
-        for repo in repositories()
-    )
+        if repo:
+            tool_names.setdefault(repo, template.title + "工具")
+    python_fields = ""
+    for repo in dict.fromkeys(repositories()):
+        selected = pythons.get(repo, "")
+        state = (
+            "已找到路径，待校验"
+            if selected and Path(selected).is_file()
+            else "尚未连接"
+        )
+        python_fields += f"""<details>
+<summary>{escape(tool_names.get(repo, "其他研究工具"))} · {state}</summary>"""
+        python_fields += _field(
+            f"python:{repo}",
+            "高级：Python 可执行文件",
+            selected,
+            "已有独立环境的绝对路径",
+        )
+        python_fields += f"<small>工具标识：{escape(repo)}</small></details>"
     data_fields = "".join(
         _field(
             f"input:{name}",
@@ -121,20 +145,20 @@ def setup_body(store, csrf_token, *, profile=None, error="", reviewed=None):
                 values.get("QUANT_WORKSPACE_ROOT", ""),
                 "包含量化应用仓库的已有目录；合成样例无需工作区",
             )
-            + '</section><section class="panel"><h2>2.应用运行环境</h2>'
+            + '</section><section class="panel"><h2>2.研究工具</h2>'
             "<p>只填写此次使用的应用。各应用保留自己的依赖，服务不会安装或升级环境。</p>"
             f'<div class="fields">{python_fields}</div></section>'
-            '<section class="panel"><h2>3.数据与研究配置</h2>'
+            '<details class="panel"><summary>3.默认数据与研究配置（可选）</summary>'
             "<p>选择此次使用的已有输入；之后在模板中执行完整原生预检。</p>"
-            f'<div class="fields">{data_fields}</div></section>'
-            '<section class="panel"><h2>4.已有账户（可选）</h2>'
+            f'<div class="fields">{data_fields}</div></details>'
+            '<details class="panel"><summary>4.已有模拟账户（可选）</summary>'
             + _field(
                 "accounts",
                 "已有账户来源配置文件",
                 values.get("QUANT_STUDIO_ACCOUNTS", ""),
                 "quant-studio.accounts/v1格式的已有JSON；账户详情使用quant-pipeline环境只读核验",
             )
-            + '</section><div class="actions"><button class="btn primary" '
+            + '</details><div class="actions"><button class="btn primary" '
             'name="action" value="review">校验并预览配置</button>'
             '<a class="chip" href="/templates/synthetic-demo">先体验合成样例</a>'
             "</div></form>"

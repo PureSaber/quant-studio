@@ -8,6 +8,7 @@ from html import escape
 from urllib.parse import parse_qs, urlparse
 
 from quant_studio import QuantStudioError
+from quant_studio.presentation import display_time
 from quant_studio.recipes import (
     RecipeStore,
     load_input_config,
@@ -53,8 +54,11 @@ def _leaves(value, prefix=""):
             yield path, key, child
 
 
-def _fields(value, prefix, knobs=()):
+def _fields(value, prefix, knobs=(), *, human_units=False):
+    from decimal import Decimal
+
     from quant_studio.form_controls import ADVANCED, LABELS, help_text, special_control
+    from quant_studio.presentation import RATE_FIELDS
 
     parts, advanced = [], []
     for path, key, child in _leaves(value):
@@ -65,6 +69,15 @@ def _fields(value, prefix, knobs=()):
         label = escape(
             knob["label"] if knob else _LABELS.get(key, LABELS.get(key, key))
         )
+        scaled = (
+            human_units
+            and key in RATE_FIELDS
+            and isinstance(child, (int, float))
+            and not isinstance(child, bool)
+        )
+        if scaled:
+            label += "（bp）"
+        display_value = Decimal(str(child)) * 10000 if scaled else child
         special = special_control(
             name, key, child, factor_risk=bool(value.get("risk_model"))
         )
@@ -111,8 +124,9 @@ value="{val}" '''
                 f'''<input
 type="{kind}" step="any"
 name="{name}" '''
-                f'value="{escape(str(child), quote=True)}">'
+                f'value="{escape(str(display_value), quote=True)}">'
             )
+        hint = "1 bp = 0.01%；保存时换算为比例" if scaled else help_text(key)
         wide = key in {"instruments", "allocation"}
         field = (
             f'<div class="recipe-field{" wide" if wide else ""}">'
@@ -121,7 +135,8 @@ name="{name}" '''
                 if wide
                 else f"<label>{label}{control}</label>"
             )
-            + f'<small class="field-help">{escape(help_text(key))}</small></div>'
+            + f"""<small class="field-help">{escape(hint)}</small>
+</div>"""
         )
         (
             advanced
@@ -137,9 +152,13 @@ name="{name}" '''
     return "".join(parts)
 
 
-def _read_fields(base, data, prefix):
+def _read_fields(base, data, prefix, *, human_units=False):
+    from decimal import Decimal
+
+    from quant_studio.presentation import RATE_FIELDS
+
     value = copy.deepcopy(base)
-    for path, _, old in _leaves(base):
+    for path, key, old in _leaves(base):
         raw = _single(data, prefix + path)
         if isinstance(old, (dict, list)) or old is None:
             try:
@@ -165,6 +184,8 @@ def _read_fields(base, data, prefix):
             parsed = raw == "true"
         elif isinstance(old, (int, float)):
             parsed = float(raw) if any(char in raw for char in ".eE") else int(raw)
+            if human_units and key in RATE_FIELDS:
+                parsed = float(Decimal(raw) / 10000)
         else:
             parsed = raw
         parts = [p.replace("~1", "/").replace("~0", "~") for p in path[1:].split("/")]
@@ -242,7 +263,9 @@ class="btn">导入为新方案</button>
 </details>"""
 
 
-def editor_body(template_id, token, record=None, datasets=None, selected_dataset=None):
+def editor_body(
+    template_id, token, record=None, datasets=None, selected_dataset=None, project=None
+):
     from quant_studio.form_controls import EDITOR_SCRIPT
 
     template = load_template(template_id)
@@ -314,46 +337,37 @@ name="dataset_id">{options}</select>
 <a
 href="/datasets">选择、登记或更新数据集</a>
 </p>"""
-    frozen = ""
+    if template.kind == "synthetic":
+        data_picker = '<p class="note">使用内置合成数据，无需连接外部数据。</p>'
+    frozen = (
+        '<p class="version-state" id="version-state">'
+        "尚未保存；运行时会保存当前参数。</p>"
+    )
     if record:
-        actions = (
-            '<button class="btn" name="action" value="preview_saved">'
-            "预览已保存版本</button>"
-        )
-        if template.metadata.get("preflight_argv"):
-            actions += (
-                '<button class="btn" name="action" value="check_saved">'
-                "预检已保存版本</button>"
-            )
-        actions += (
-            '<button class="btn primary" name="action" value="execute_saved">'
-            "运行已保存版本</button>"
-        )
-        frozen = f'''<section
-class="panel">
-<h2>运行保存的版本</h2>
-<p>版本 <code>{revision[:12]}</code>。下方参数编辑后，请先保存；这里始终运行此版本。</p>
-<form
-method="post"
-action="{target}">{_csrf(token)}
-<input
-type="hidden"
-name="revision"
-value="{revision}">
-<div
-class="actions">{actions}
+        frozen = f'''<p class="version-state" id="version-state">已保存 ·
+{escape(display_time(record["created_at"]))}。
+运行将使用本次提交的参数。</p>
+<details><summary>已保存版本与导出</summary><p>版本标识：<code>{revision}</code></p>
+<a href="{target}/export?revision={revision}">导出方案</a> ·
+<a href="{target}/config?revision={revision}">导出原生配置</a></details>'''
+    binding = ""
+    if project:
+        binding = f'''<input type="hidden"
+name="project_id"
+value="{project["id"]}">
+<input type="hidden"
+name="project_revision"
+value="{project["revision"]}">'''
+        frozen = (
+            f"""<p>
 <a
-class="btn"
-href="{target}/export?revision={revision}">导出方案</a>
-<a
-class="btn"
-href="{target}/config?revision={revision}">导出原生配置</a>
-</div>
-</form>
-</section>'''
+href="/projects/{project["id"]}?tab=plan">返回 {escape(project["name"])}</a>
+</p>"""
+            + frozen
+        )
     help_text = (
         "输入路径是这台服务端电脑的路径；远程设备使用同一份数据。"
-        "日期、名单和规则应与所选数据一致，保存后先预检。"
+        "日期、名单和规则应与所选数据一致。运行时先检查数据。"
     )
     external_fields = ""
     parameter_help = "名单可逐项编辑，复杂配置保留高级导入入口。"
@@ -378,7 +392,7 @@ href="{target}/config?revision={revision}">导出原生配置</a>
         if frozen_input:
             external_fields += (
                 '<div class="recipe-grid">'
-                + _fields(frozen_input["config"], "source:")
+                + _fields(frozen_input["config"], "source:", human_units=True)
                 + "</div>"
             )
     return f'''<header
@@ -393,9 +407,10 @@ href="{target}/history">版本历史与改动对比</a>'''
         else ""
     }</header>{frozen}
 <form
-class="panel"
+class="panel" id="recipe-editor"
 method="post"
-action="{target}">{_csrf(token)}
+action="{target}">{_csrf(token)}{binding}
+<input type="hidden" name="ui_units" value="bp">
 <input
 type="hidden"
 name="template_id"
@@ -433,16 +448,21 @@ placeholder="例如：将形成窗口从 120 改为 100">
 <h2>研究参数</h2>
 <p>{parameter_help}</p>
 <div
-class="recipe-grid">{_fields(config, "cfg:", template.knobs if derivative else ())}{
-        _fields(cli, "cli:")
-    }</div>
+class="recipe-grid">{
+        _fields(config, "cfg:", template.knobs if derivative else (), human_units=True)
+    }{_fields(cli, "cli:", human_units=True)}</div>
 <div
 class="actions">
 <button
 class="btn primary"
 name="action"
-value="save">
-保存方案</button>
+value="save_run">{"保存新版本并运行" if record else "检查数据并运行"}</button>
+{
+        '<button class="btn" name="action" value="save_check">只检查数据</button>'
+        if template.metadata.get("preflight_argv")
+        else ""
+    }
+<button class="btn" name="action" value="save">保存方案</button>
 <button
 class="btn"
 name="action"
@@ -460,7 +480,15 @@ class="btn"
 name="action"
 value="import_config">导入配置并保存</button>
 </details>
-</form>{EDITOR_SCRIPT}'''
+</form>{EDITOR_SCRIPT}<script>
+const editor = document.getElementById("recipe-editor");
+editor.addEventListener("input", () => {{
+ const state = document.getElementById("version-state");
+ state.textContent = "有未保存修改；点击运行会保存并使用当前参数。";
+ state.classList.add("dirty");
+ editor.querySelector('[value="save_run"]').textContent = "保存新版本并运行";
+}});
+</script>'''
 
 
 class ResearchHandler:
@@ -478,6 +506,13 @@ class ResearchHandler:
 
         store = self._recipes()
         query = parse_qs(urlparse(self.path).query)
+        project = None
+        if query.get("project"):
+            from quant_studio.projects import ProjectStore
+
+            project = ProjectStore(self.runs_root).get(
+                query["project"][0], query.get("project_revision", [None])[0]
+            )
         if path == "/research":
             body = list_body(store, self.csrf_token)
         elif path == "/research/new":
@@ -491,6 +526,7 @@ class ResearchHandler:
                 self.csrf_token,
                 datasets=datasets.list(template_id),
                 selected_dataset=selected,
+                project=project,
             )
         else:
             parts = path.removeprefix("/research/").split("/")
@@ -515,6 +551,7 @@ class ResearchHandler:
                 self.csrf_token,
                 record,
                 DatasetStore(self.runs_root).list(record["template_id"]),
+                project=project,
             )
         self._send_html(_layout("研究方案", body, "research"))
 
@@ -553,8 +590,31 @@ class ResearchHandler:
                     )
                     self._redirect(f"/jobs/{job['job_id']}")
                 return
-            if action not in {"save", "copy", "import_config", "load_input"}:
+            if action not in {
+                "save",
+                "copy",
+                "import_config",
+                "load_input",
+                "save_run",
+                "save_check",
+            }:
                 raise QuantStudioError("未知方案操作")
+            units = _single(data, "ui_units", "native")
+            if units not in {"native", "bp"}:
+                raise QuantStudioError("未知参数单位")
+            human_units = units == "bp"
+            project_id = _single(data, "project_id", "")
+            project_revision = _single(data, "project_revision", "")
+            project = None
+            if project_id:
+                from quant_studio.projects import ProjectStore
+
+                projects = ProjectStore(self.runs_root)
+                project = projects.get(project_id)
+                if project["revision"] != project_revision:
+                    raise QuantStudioError("项目已更新，请重新打开后提交")
+            elif project_revision:
+                raise QuantStudioError("缺少项目身份")
             template_id = _single(data, "template_id")
             old = store.get(recipe_id, revision) if recipe_id else None
             if old and old["template_id"] != template_id:
@@ -588,8 +648,8 @@ class ResearchHandler:
                     if key.startswith("cfg:"):
                         data.pop(key)
             else:
-                config = _read_fields(base, data, "cfg:")
-            cli = _read_fields(cli_base, data, "cli:")
+                config = _read_fields(base, data, "cfg:", human_units=human_units)
+            cli = _read_fields(cli_base, data, "cli:", human_units=human_units)
             input_config = copy.deepcopy((old or {}).get("input_config"))
             if action == "load_input" or (
                 source.get("kind") == "file" and snapshot and input_config is None
@@ -602,7 +662,7 @@ class ResearchHandler:
                 if snapshot != input_config["source_path"]:
                     raise QuantStudioError("输入文件已改变，请点击加载原生配置后再保存")
                 input_config["config"] = _read_fields(
-                    input_config["config"], data, "source:"
+                    input_config["config"], data, "source:", human_units=human_units
                 )
             if data:
                 raise QuantStudioError("未知方案字段")
@@ -618,4 +678,38 @@ class ResearchHandler:
                 note=note,
                 dataset_id=dataset_id,
             )
+            if project:
+                refs = [r for r in project["recipes"] if r["id"] != record["id"]]
+                refs.append({"id": record["id"], "revision": record["revision"]})
+                project = projects.save(
+                    project["name"],
+                    project["question"],
+                    project_id=project_id,
+                    expected=project_revision,
+                    datasets=project["datasets"],
+                    recipes=refs,
+                    notes=project["notes"],
+                )
+            if action in {"save_run", "save_check"}:
+                job = self._jobs().submit(
+                    "workflow" if action == "save_run" else "check",
+                    record["template_id"],
+                    {},
+                    snapshot=record["snapshot"],
+                    profile=self._request_profile,
+                    recipe=record,
+                    research_project={
+                        "id": project["id"],
+                        "revision": project["revision"],
+                    }
+                    if project
+                    else None,
+                )
+                self._redirect(f"/jobs/{job['job_id']}")
+                return
+            if project:
+                self._redirect(
+                    f"/research/{record['id']}?project={project['id']}&project_revision={project['revision']}"
+                )
+                return
         self._redirect(f"/research/{record['id']}")

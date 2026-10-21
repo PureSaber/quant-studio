@@ -42,7 +42,7 @@ def comparison_explorer(rows):
         for index, row in enumerate(rows)
     )
     return (
-        """<section id="comparison-explorer"><h3>全部实验曲线</h3>
+        """<section id="comparison-explorer"><h3>可比较的实验曲线</h3>
 <p>纵轴为各自原始期初归一化的累计收益；横轴按观测点等距排列。缩放只改变显示区间。</p>
 <div class="recipe-grid">"""
         + choices

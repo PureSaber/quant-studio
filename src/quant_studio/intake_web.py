@@ -78,6 +78,20 @@ def _format_value(value):
 
 
 def _retry_body(uploaded, identifier, encoding, delimiter, message):
+    from quant_studio.presentation import missing_tool
+
+    if missing_tool(message):
+        retry = urlencode({"encoding": encoding, "delimiter": delimiter})
+        return f"""<header class="page-head"><h1>连接数据检查工具</h1>
+<p>{escape(uploaded["filename"])} · 原件已留存</p></header>
+<section class="panel notice"><p>数据检查工具尚未连接，请先完成设置。</p>
+<a class="btn primary" href="/setup">连接数据检查工具</a>
+<a class="btn"
+href="/intake/map/{escape(identifier)}?{escape(retry, quote=True)}">
+连接后重新解析同一原件</a>
+
+<details><summary>技术详情</summary><pre>{escape(message)}</pre>
+<p>SHA-256：{escape(uploaded["sha256"])}</p></details></section>"""
     encodings = _select(
         "encoding",
         [("utf-8-sig", "UTF-8（含BOM）"), ("utf-8", "UTF-8"), ("gb18030", "GB18030")],
@@ -427,8 +441,10 @@ def mapping_body(
     refresh_picker = f'''<section class="panel"><h2>刷新旧数据</h2>
 <p>选择一个已发布版本后，系统会带入数据集名称、父版本和原契约映射；字段变化会先阻断自动复用并显示差异。</p>
 <form method="get" action="/intake/map/{identifier}">
-<input type="hidden" name="encoding" value="{escape(encoding, quote=True)}">
-<input type="hidden" name="delimiter" value="{escape(delimiter, quote=True)}">
+<input type="hidden"
+name="encoding" value="{escape(encoding, quote=True)}">
+<input type="hidden"
+name="delimiter" value="{escape(delimiter, quote=True)}">
 <label>复用已确认映射<select name="reuse">{choices}</select></label>
 <button class="btn">检查字段并带入</button></form></section>'''
     primary_key = ",".join(contract.get("primary_key", []))
@@ -463,10 +479,13 @@ SHA-256 <code>{escape(uploaded["sha256"])}</code></p></header>
 {refresh_picker}{refresh_notice}
 <section class="panel"><h2>原始样例</h2>
 <p>仅预览最多20行，不代表全量质量检查通过。</p>{table(columns, sample_rows)}</section>
-<section class="panel"><form method="post" action="/intake/import">{csrf(token)}
+<section class="panel">
+<form method="post" action="/intake/import">{csrf(token)}
 <input type="hidden" name="upload" value="{identifier}">{reuse_hidden}
-<input type="hidden" name="encoding" value="{escape(encoding, quote=True)}">
-<input type="hidden" name="delimiter" value="{escape(delimiter, quote=True)}">
+<input type="hidden"
+name="encoding" value="{escape(encoding, quote=True)}">
+<input type="hidden"
+name="delimiter" value="{escape(delimiter, quote=True)}">
 <div class="recipe-grid">{name_input}<label>数据类型{kinds}</label>
 {source_input}{provider_input}{timezone_input}
 <label>复权口径{adjustments}</label><label>历史可得性{availability}</label>
@@ -571,7 +590,8 @@ def dataset_view(store, token, query):
 <form method="get" action="/intake/check">
 <input type="hidden" name="name" value="{escape(name, quote=True)}">
 <input type="hidden" name="version" value="{escape(version, quote=True)}">
-<div class="recipe-grid"><label>用途{_select("purpose", list(PURPOSES.items()))}</label>
+<div class="recipe-grid">
+<label>用途{_select("purpose", list(PURPOSES.items()))}</label>
 {_input("columns", "实际使用的列（逗号分隔，留空为全部）")}
 {_input("symbols", "证券代码（逗号分隔，留空为全部）")}
 {_input("start", "开始日期", "", "YYYY-MM-DD")}
@@ -579,7 +599,9 @@ def dataset_view(store, token, query):
 <button class="btn">核验完整选定范围</button></form>
 <p><a href="/intake/read?{base}">查看规范数据</a> ·
 <a href="/intake">返回数据接入</a></p></section>
-<section class="panel"><h2>比较数据版本</h2><form method="get" action="/intake/diff">
+<section class="panel">
+<h2>比较数据版本</h2>
+<form method="get" action="/intake/diff">
 <input type="hidden" name="name" value="{escape(name, quote=True)}">
 <input type="hidden" name="new" value="{escape(version, quote=True)}">
 {_input("old", "旧版本ID", data["version"].get("parent_id") or "")}

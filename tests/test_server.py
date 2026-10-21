@@ -561,11 +561,11 @@ def test_backtest_lists_previews_and_results_keep_finished_runs(tmp_path):
     detail = render_run(previewed.run_dir)
     assert "已完成" in render_run(finished.run_dir)
 
-    assert backtest.count("synthetic-demo") == 1
-    assert "a-share-four-factor" in backtest
+    assert backtest.count("合成净值样例") == 1
+    assert "A 股四类因子研究" in backtest
     assert "仅预览" in backtest
     assert "已完成" in results
-    assert "a-share-four-factor" not in results
+    assert "A 股四类因子研究" not in results
     assert "symbols_limit=20" in detail
     assert "参数：模板默认" in render_run(
         preview("synthetic-demo", {}, runs_root=tmp_path).run_dir

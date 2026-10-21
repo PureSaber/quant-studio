@@ -240,7 +240,7 @@ def chart_fragment(
     change = series.period_return * Decimal(100)
     drawdown = series.max_drawdown * Decimal(100)
     change_text = _percentage(change, return_decimals, signed=True)
-    drawdown_text = _percentage(drawdown, return_decimals)
+    drawdown_text = _percentage(-drawdown, return_decimals)
     return f"""<section class="chart-card"><style>{_CHART_CSS}</style>
 <h2>{escape(title)}{f" · {escape(series.label)}" if series.label else ""}
 {f" · {escape(currency)}账户金额" if currency else ""}</h2>
@@ -595,7 +595,7 @@ def drawdown_fragment(series: NavSeries, *, return_decimals: int = 2) -> str:
         coords.append((x, y))
     line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
     worst = min(value for _, value in points)
-    drawdown_text = _percentage(series.max_drawdown * Decimal(100), return_decimals)
+    drawdown_text = _percentage(-series.max_drawdown * Decimal(100), return_decimals)
     return f"""<section class="chart-card">
 <h2>回撤</h2>
 <p class="muted">最大回撤 {drawdown_text}%，

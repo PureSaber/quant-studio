@@ -18,7 +18,7 @@ def options(values, selected=""):
     )
 
 
-def card_body(root, token, project):
+def card_body(root, token, project, section="all"):
     identifier, revision = project["id"], project["revision"]
     card = project.get("research_card") or {}
     registered = (
@@ -43,6 +43,15 @@ def card_body(root, token, project):
             f'value="{escape(card.get(key, ""), quote=True)}"></label>'
         )
     body += '<button class="btn">保存新的研究卡版本</button></form>'
+    if section == "design":
+        return body + "</section>"
+    if section == "decisions":
+        body = """<section class="panel">
+<h2>正式结论与证据</h2>
+<p>正式决策需引用研究卡和相关实验；失败实验也可作为证据。没有证据时，可随时保存上方备注。</p>"""
+    body += (
+        f'<p><a href="/projects/{identifier}?tab=overview">查看或登记研究设计</a></p>'
+    )
     from quant_studio.project_registration import candidates
 
     candidate_options = '<option value="">暂不提名</option>' + "".join(

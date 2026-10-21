@@ -17,48 +17,30 @@ class Navigation(HTMLParser):
             self.links.append(attrs)
 
 
-def test_navigation_preserves_routes_and_opens_active_group():
+def test_navigation_has_five_destinations_and_contextual_tools():
     page = _layout("Data", "", "catalog")
     nav = Navigation()
     nav.feed(page)
-    # Desktop and mobile expose the same five groups and routes.
-    assert len(nav.groups) == 10
-    assert [g["data-section"] for g in nav.groups if "open" in g] == ["data", "data"]
     expected = {
         "/",
-        "/onboarding",
-        "/setup",
-        "/environment",
-        "/platform-status",
-        "/data",
-        "/datasets",
-        "/catalog",
-        "/data-center",
-        "/intake",
         "/projects",
-        "/projects/findings",
-        "/today",
-        "/history",
-        "/research",
-        "/batches",
-        "/durable-research",
+        "/data",
         "/experiments",
-        "/strategy",
-        "/backtest",
-        "/jobs",
-        "/results",
-        "/fund-reconcile",
         "/accounts",
-        "/operations",
-        "/delivery",
+        "/projects/new",
+        "/strategy",
+        "/setup",
         "/logout",
     }
     assert {a["href"] for a in nav.links} == expected
     assert len(nav.links) == 2 * len(expected)
     assert [a["href"] for a in nav.links if a.get("aria-current") == "page"] == [
-        "/catalog",
-        "/catalog",
+        "/data",
+        "/data",
     ]
+    for route in ("/datasets", "/catalog", "/data-center", "/intake"):
+        assert f'href="{route}"' in page
+    assert 'aria-label="相关功能"' in page
 
 
 def test_fixture_and_unverified_template_inputs_are_visible_before_running():
