@@ -155,6 +155,34 @@ def _python_check(path: str) -> None:
         ) from exc
 
 
+def discover_profile(profile: dict) -> dict:
+    """Inspect conventional locations within the selected workspace; never execute."""
+    validate_shape(profile)
+    found = deepcopy(profile)
+    workspace = profile["environment"].get("QUANT_WORKSPACE_ROOT")
+    if not workspace or not Path(workspace).is_dir():
+        raise QuantStudioError("请先填写已有工作区目录，再扫描研究工具")
+    root = Path(workspace).resolve()
+    for repo in repositories():
+        if repo in found["python_by_repo"]:
+            continue
+        for environment in (
+            root / repo / ".venv",
+            root / ".venvs" / repo,
+            root / (repo + "-env"),
+        ):
+            for executable in (
+                environment / "Scripts" / "python.exe",
+                environment / "bin" / "python",
+            ):
+                if executable.is_file() and executable.resolve().is_relative_to(root):
+                    found["python_by_repo"][repo] = str(executable.resolve())
+                    break
+            if repo in found["python_by_repo"]:
+                break
+    return found
+
+
 def validate_profile(profile: dict) -> list[tuple[str, str]]:
     from quant_studio.accounts import account_sources
     from quant_studio.runner import template_readiness

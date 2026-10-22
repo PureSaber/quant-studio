@@ -54,38 +54,83 @@ def _leaves(value, prefix=""):
             yield path, key, child
 
 
-def _fields(value, prefix, knobs=(), *, human_units=False):
+def _fields(
+    value, prefix, knobs=(), *, human_units=False, currency=None, factor_catalog=()
+):
     from decimal import Decimal
 
     from quant_studio.form_controls import ADVANCED, LABELS, help_text, special_control
+    from quant_studio.form_presentation import (
+        GROUPS,
+        group_for,
+        numeric,
+        rate_echo,
+        unit_for,
+    )
     from quant_studio.presentation import RATE_FIELDS
 
     parts, advanced = [], []
+    groups = {group: [] for group in GROUPS}
     for path, key, child in _leaves(value):
         name = escape(prefix + path, quote=True)
         knob = next(
             (k for k in knobs if k.get("path") == path[1:].replace("/", ".")), None
         )
         label = escape(
-            knob["label"] if knob else _LABELS.get(key, LABELS.get(key, key))
+            knob.get("label", _LABELS.get(key, LABELS.get(key, "扩展参数")))
+            if knob
+            else _LABELS.get(key, LABELS.get(key, "扩展参数"))
         )
-        scaled = (
-            human_units
-            and key in RATE_FIELDS
-            and isinstance(child, (int, float))
-            and not isinstance(child, bool)
+        universe_name = path in {"/universe", "/universe/name"}
+        if universe_name:
+            label = "股票池"
+        group = (
+            GROUPS[0]
+            if universe_name or path.startswith("/universe/")
+            else group_for(key)
         )
-        if scaled:
-            label += "（bp）"
+        scaled = human_units and key in RATE_FIELDS and numeric(child)
+        is_numeric = numeric(child) and (
+            not isinstance(child, str)
+            or scaled
+            or (knob and knob["type"] in {"decimal-string", "number", "int"})
+        )
+        unit = unit_for(key, currency=currency, rate=scaled) if is_numeric else ""
+        if unit and "（" not in label:
+            label += f"（{escape(unit)}）"
         display_value = Decimal(str(child)) * 10000 if scaled else child
         special = special_control(
             name, key, child, factor_risk=bool(value.get("risk_model"))
         )
+        summary_value = ""
+        if universe_name and child == "hs300":
+            summary_value = ' data-summary-value="沪深300"'
+            special = (
+                f'<input type="hidden" name="{name}" value="hs300">'
+                '<input value="沪深300" readonly aria-label="股票池">'
+                "<small>模板固定</small>"
+            )
+        if key == "factors" and isinstance(child, list) and factor_catalog:
+            catalog = {item["name"]: item["label"] for item in factor_catalog}
+            catalog.update({v: "自定义因子" for v in child if v not in catalog})
+            special = f'<input type="hidden" name="{name}" value="">' + "".join(
+                f'<label class="check"><input type="checkbox" name="{name}" '
+                f'value="{escape(code, quote=True)}" '
+                f'data-factor-label="{escape(title, quote=True)}"'
+                + (" checked" if code in child else "")
+                + f">{escape(title)}"
+                f'<code class="technical-name" hidden>{escape(code)}</code></label>'
+                for code, title in catalog.items()
+            )
         if knob and knob["type"] == "enum":
+            from quant_studio.server import _choice_label
+
             options = "".join(
                 f'<option value="{escape(str(v), quote=True)}"'
                 + (" selected" if child == v else "")
-                + f">{escape(knob.get('choice_labels', {}).get(v, str(v)))}</option>"
+                + ">"
+                + escape(knob.get("choice_labels", {}).get(v, _choice_label(key, v)))
+                + "</option>"
                 for v in knob["choices"]
             )
             control = f'<select name="{name}">{options}</select>'
@@ -112,7 +157,7 @@ value="{val}" '''
                 + "</select>"
             )
         else:
-            kind = "number" if isinstance(child, (int, float)) else "text"
+            kind = "number" if is_numeric else "text"
             if (
                 isinstance(child, str)
                 and len(child) == 10
@@ -120,29 +165,58 @@ value="{val}" '''
                 and child[7:8] == "-"
             ):
                 kind = "date"
+            bounds = ""
+            if knob and kind == "number":
+                for attribute, source in (("min", "minimum"), ("max", "maximum")):
+                    if source in knob:
+                        bound = Decimal(str(knob[source])) * (10000 if scaled else 1)
+                        bounds += f' {attribute}="{bound}"'
+            if key == "schema" or (knob and knob.get("readonly")):
+                bounds += ' readonly aria-description="模板固定"'
             control = (
                 f'''<input
 type="{kind}" step="any"
 name="{name}" '''
-                f'value="{escape(str(display_value), quote=True)}">'
+                f'value="{escape(str(display_value), quote=True)}"{bounds}>'
             )
-        hint = "1 bp = 0.01%；保存时换算为比例" if scaled else help_text(key)
-        wide = key in {"instruments", "allocation"}
+        hint = f"= {rate_echo(child)}；1 bp = 0.01%" if scaled else help_text(key)
+        if key == "factors" and factor_catalog:
+            hint = "勾选模板已声明的因子；技术名称可按需显示。"
+        wide = key in {"instruments", "allocation", "factors"}
         field = (
-            f'<div class="recipe-field{" wide" if wide else ""}">'
+            f'<div class="recipe-field{" wide" if wide else ""}" '
+            f'data-label="{label}" data-key="{escape(key)}" data-unit="{escape(unit)}" '
+            f'data-group="{group}"{summary_value}>'
             + (
                 f"<h3>{label}</h3>{control}"
                 if wide
                 else f"<label>{label}{control}</label>"
             )
+            + f'<code class="technical-name" hidden>{escape(key)}</code>'
             + f"""<small class="field-help">{escape(hint)}</small>
+<span class="field-error" aria-live="polite"></span>
 </div>"""
         )
         (
             advanced
-            if not knob and (key in ADVANCED or key not in _LABELS | LABELS)
-            else parts
+            if not knob
+            and not universe_name
+            and (
+                key in ADVANCED
+                or key not in _LABELS | LABELS
+                or (
+                    isinstance(child, str)
+                    and child.endswith((".parquet", ".csv", ".json", ".yaml"))
+                )
+            )
+            else groups[group]
         ).append(field)
+    for group, fields in groups.items():
+        if fields:
+            parts.append(
+                f'<fieldset class="wide parameter-group"><legend>{group}</legend>'
+                '<div class="recipe-grid">' + "".join(fields) + "</div></fieldset>"
+            )
     if advanced:
         parts.append(
             '<details class="wide"><summary>高级参数与数据口径</summary>'
@@ -159,7 +233,11 @@ def _read_fields(base, data, prefix, *, human_units=False):
 
     value = copy.deepcopy(base)
     for path, key, old in _leaves(base):
-        raw = _single(data, prefix + path)
+        supplied = data.get(prefix + path, [])
+        if key == "factors" and isinstance(old, list) and supplied[:1] == [""]:
+            raw = json.dumps(data.pop(prefix + path)[1:])
+        else:
+            raw = _single(data, prefix + path)
         if isinstance(old, (dict, list)) or old is None:
             try:
                 parsed = json.loads(raw)
@@ -188,6 +266,11 @@ def _read_fields(base, data, prefix, *, human_units=False):
                 parsed = float(Decimal(raw) / 10000)
         else:
             parsed = raw
+            if human_units and key in RATE_FIELDS:
+                from quant_studio.form_presentation import numeric
+
+                if numeric(old):
+                    parsed = format(Decimal(raw) / 10000, "f")
         parts = [p.replace("~1", "/").replace("~0", "~") for p in path[1:].split("/")]
         target = value
         for part in parts[:-1]:
@@ -264,7 +347,13 @@ class="btn">导入为新方案</button>
 
 
 def editor_body(
-    template_id, token, record=None, datasets=None, selected_dataset=None, project=None
+    template_id,
+    token,
+    record=None,
+    datasets=None,
+    selected_dataset=None,
+    project=None,
+    next_version=1,
 ):
     from quant_studio.form_controls import EDITOR_SCRIPT
 
@@ -447,16 +536,28 @@ placeholder="例如：将形成窗口从 120 改为 100">
 {external_fields}
 <h2>研究参数</h2>
 <p>{parameter_help}</p>
+<label class="check"><input type="checkbox" id="show-technical-names">
+显示技术名称</label>
 <div
 class="recipe-grid">{
-        _fields(config, "cfg:", template.knobs if derivative else (), human_units=True)
+        _fields(
+            config,
+            "cfg:",
+            template.knobs,
+            human_units=True,
+            currency=template.metadata.get("nav_currency"),
+            factor_catalog=template.metadata.get("factor_catalog", ()),
+        )
     }{_fields(cli, "cli:", human_units=True)}</div>
+<aside class="plan-summary" aria-label="当前方案摘要"><h2>当前方案摘要</h2>
+<div id="plan-summary"></div><p>运行会固定本次保存的方案版本，
+之后的修改不会影响这次结果。运行时重新检查数据。</p></aside>
 <div
 class="actions">
 <button
 class="btn primary"
 name="action"
-value="save_run">{"保存新版本并运行" if record else "检查数据并运行"}</button>
+value="save_run">保存为 v{next_version} 并运行</button>
 {
         '<button class="btn" name="action" value="save_check">只检查数据</button>'
         if template.metadata.get("preflight_argv")
@@ -482,11 +583,14 @@ value="import_config">导入配置并保存</button>
 </details>
 </form>{EDITOR_SCRIPT}<script>
 const editor = document.getElementById("recipe-editor");
-editor.addEventListener("input", () => {{
+editor.addEventListener("input", event => {{
+ if (event.target.id === "show-technical-names") return;
  const state = document.getElementById("version-state");
  state.textContent = "有未保存修改；点击运行会保存并使用当前参数。";
  state.classList.add("dirty");
- editor.querySelector('[value="save_run"]').textContent = "保存新版本并运行";
+ editor.querySelector('[value="save_run"]').textContent = "保存为 v{
+        next_version
+    } 并运行";
 }});
 </script>'''
 
@@ -552,6 +656,7 @@ class ResearchHandler:
                 record,
                 DatasetStore(self.runs_root).list(record["template_id"]),
                 project=project,
+                next_version=len(store.history(record["id"])) + 1,
             )
         self._send_html(_layout("研究方案", body, "research"))
 
@@ -568,6 +673,15 @@ class ResearchHandler:
             action = _single(data, "action")
             revision = _single(data, "revision", "")
             if action in {"preview_saved", "check_saved", "execute_saved"}:
+                project_id = _single(data, "project_id", "")
+                project_revision = _single(data, "project_revision", "")
+                if bool(project_id) != bool(project_revision):
+                    raise QuantStudioError("研究项目须同时指定身份与版本")
+                project_ref = (
+                    {"id": project_id, "revision": project_revision}
+                    if project_id
+                    else None
+                )
                 if not recipe_id or not revision or data:
                     raise QuantStudioError("运行须指定已保存的唯一版本")
                 record = store.get(recipe_id, revision)
@@ -587,6 +701,7 @@ class ResearchHandler:
                         snapshot=record["snapshot"],
                         profile=self._request_profile,
                         recipe=record,
+                        research_project=project_ref,
                     )
                     self._redirect(f"/jobs/{job['job_id']}")
                 return

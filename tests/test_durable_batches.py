@@ -163,7 +163,8 @@ def test_batch_http_form_uses_csrf_and_preserves_history_links(
         status, _, body = _request(
             server, "GET", "/durable-research/batches/" + "a" * 32, host=host
         )
-        assert status == 200 and b"<script>" not in body
+        assert status == 200 and b"<script>project</script>" not in body
+        assert b"&lt;script&gt;project&lt;/script&gt;" in body
         assert ("/durable-research/" + "b" * 32).encode() in body
         status, _, _ = _request(
             server,

@@ -42,11 +42,11 @@ def _report_html(rows: list[tuple[str, Decimal]]) -> str:
 <style>
 body {{
   margin: 0;
-  color: #101828;
-  background: #fff;
+  color: var(--tone-101828);
+  background: var(--tone-fff);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }}
-.tag {{ margin: 8px 12px; color: #8a5a00; }}
+.tag {{ margin: 8px 12px; color: var(--tone-8a5a00); }}
 </style></head>
 <body>
 <p class="tag">合成样例，不是市场收益</p>

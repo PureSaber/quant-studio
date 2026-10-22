@@ -66,6 +66,7 @@ from quant_studio.presentation import (
     metric_cards,
     progress_body,
     recovery_body,
+    status_label,
     template_title,
 )
 from quant_studio.project_web import ProjectHandler
@@ -140,7 +141,7 @@ def render_overview(runs_root: Path) -> str:
     )
     setup = (
         (
-            f'<section class="panel notice"><h2>连接研究工具</h2>'
+            f'<section class="panel notice notice-attention"><h2>连接研究工具</h2>'
             f"<p>{unavailable} 个模板尚未就绪。可在设置中统一检查工具连接；"
             "合成样例可先体验。</p>"
             '<a class="btn" href="/setup">检查设置</a></section>'
@@ -420,7 +421,9 @@ def render_jobs(manager: JobManager) -> str:
     return _layout("任务中心", body, "jobs")
 
 
-def render_job(manager: JobManager, job_id: str, *, csrf_token: str = "") -> str:
+def render_job(
+    manager: JobManager, job_id: str, *, csrf_token: str = "", auto_open=True
+) -> str:
     job = manager.get(job_id)
     active = job["status"] in {"queued", "running", "cancelling"}
     refresh = ""
@@ -471,12 +474,16 @@ setTimeout(updateJob, 3000);
     for key, route in (("notebook", "notebook"), ("assistant", "advice")):
         if job.get(key):
             item = job[key]
+            if job["status"] == "succeeded":
+                result_target = f"/projects/{item['project_id']}/{route}/{item['id']}"
             run_link += (
                 f'<p><a href="/projects/{escape(item["project_id"])}/{route}/'
                 f'{escape(item["id"])}">打开项目实验记录</a></p>'
             )
     if job.get("intake"):
         identifier = job["intake"]["request_id"]
+        if job["status"] == "succeeded":
+            result_target = f"/intake/requests/{identifier}"
         run_link += (
             f'<p><a href="/intake/requests/{escape(identifier)}">查看导入报告</a></p>'
         )
@@ -507,6 +514,15 @@ setTimeout(updateJob, 3000);
             )
         except QuantStudioError:
             resource_body = '<section class="panel"><p>尚无可用资源记录。</p></section>'
+    recovery = (
+        recovery_body(str(job.get("message") or status_label(job["status"])))
+        if job["status"] in {"failed", "interrupted", "cancelled", "cancel_failed"}
+        else ""
+    )
+    if not auto_open:
+        result_target = ""
+    if result_target and not active:
+        refresh = f"<script>location.assign({json.dumps(result_target)});</script>"
     body = f"""{refresh}<header class="page-head"><p class="kicker">任务</p>
 <h1>{escape(title)}</h1>
 <p class="lede" id="job-state">{escape(_STATUS.get(job["status"], job["status"]))}</p>
@@ -514,9 +530,10 @@ setTimeout(updateJob, 3000);
 <section class="panel" id="job-progress" data-active="{str(active).lower()}"
 data-result="{escape(result_target)}">
 <h2>运行进度</h2>{progress_body(job, metadata)}
-<p>{escape(str(job.get("message") or ""))}</p>{run_link}{cancel}</section>
+{run_link}{cancel}{recovery}</section>
 <details class="panel">
 <summary>技术日志</summary>
+<p>{escape(str(job.get("message") or ""))}</p>
 <pre id="job-log">{escape(log) if log else "尚无日志"}</pre>
 <p class="note">取消只作用于当前服务实例持有的本任务进程句柄；
 取消失败不会显示为成功。</p>
@@ -713,6 +730,9 @@ def render_template_page(
 <h1>{escape(template.title)}</h1>
 <p class="badge evidence">{escape(template_evidence_label(template))}</p>
 <p class="lede">{escape(template.summary)}</p>
+<p><a class="btn primary" href="/projects/new?template={template_ref}">
+用此模板新建研究</a></p>
+<p class="note">下方直接运行会保存参数，并归入新的“快速试跑”项目。</p>
 <div class="presets">{_preset_links(template, preset_id)}</div>
 </header>
 <div class="studio-grid">
@@ -720,13 +740,14 @@ def render_template_page(
  data-code="/templates/{template_ref}/code">
 <input type="hidden" name="_csrf_token" value="{escape(csrf_token)}">
 <ol class="steps">{"".join(steps)}</ol>
+<input type="hidden" name="_display_units" value="bp">
 </form>
-<aside class="code-card" id="code">
+<details class="code-card" id="code"><summary>技术详情：生成的配置与命令</summary>
 <p class="eyebrow">代码</p>
 <h2>生成结果</h2>
 <p class="step-copy">改参数后这里跟着更新。页面不执行手写代码。</p>
 <pre id="compiled">{escape(document)}</pre>
-</aside>
+</details>
 </div>
 <script>{_CODE_SCRIPT}</script>"""
     return _layout(template.title, body, "strategy")
@@ -742,7 +763,15 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         template.metadata["title"] = recipe["name"]
     if result.get("verification_status") == "failed":
         result = {**result, "status": "verification_failed"}
-    if result["status"] in {"running", "checking", "incomplete", "verification_failed"}:
+    if result["status"] in {
+        "running",
+        "checking",
+        "incomplete",
+        "verification_failed",
+        "interrupted",
+        "cancelled",
+        "cancel_failed",
+    }:
         return _render_unfinished_run(directory, request, result, template, csrf_token)
     family_view = (
         load_counterfactual_view(directory, result)
@@ -855,17 +884,14 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             "unspecified": "来源性质未声明，不能据此判断为真实或合成数据",
         }.get(kind, kind)
         notices.append(f'<p class="badge evidence">数据性质：{escape(label)}</p>')
-    if result.get("message"):
-        notices.append(
-            recovery_body(str(result["message"]))
-            if result["status"] in {"failed", "blocked", "check_failed"}
-            else f'<p class="note">{escape(str(result["message"]))}</p>'
-        )
-    elif result["status"] == "failed":
+    if result["status"] in {"failed", "blocked", "check_failed"}:
+        detail = str(result.get("message") or "")
         stderr_path = directory / "stderr.txt"
-        if stderr_path.is_file():
+        if not detail and stderr_path.is_file():
             detail = stderr_path.read_text(encoding="utf-8")[-800:]
-            notices.append(recovery_body(detail))
+        notices.append(recovery_body(detail or status_label(result["status"])))
+    elif result.get("message"):
+        notices.append(f'<p class="note">{escape(str(result["message"]))}</p>')
     elif (
         result["status"] == "succeeded"
         and not chart
@@ -894,6 +920,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         )
         if _has_benchmark(nav_path):
             benchmark = '<p class="note">净值文件包含基准列，可在原始数据中查看。</p>'
+    baseline = None
     benchmark_path = directory / "benchmark_nav.csv"
     if series is not None and benchmark_path.is_file():
         baseline = parse_nav_csv(benchmark_path, initial_nav=series.initial_nav)
@@ -904,7 +931,7 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
             benchmark = (
                 '<p class="note">同区间基准：区间涨跌'
                 f"{baseline.period_return * 100:+.2f}%，"
-                f"最大回撤{baseline.max_drawdown * 100:.2f}%。"
+                f"最大回撤{-baseline.max_drawdown * 100:.2f}%。"
                 "完整比较见下方原始报告。</p>"
             )
             if timing_view:
@@ -931,6 +958,19 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
         if timing_view or template.metadata.get("benchmark_label")
         else benchmark + chart
     )
+    if series is not None:
+        from quant_studio.nav_explorer import explorer
+
+        curves = explorer(
+            series,
+            baseline=baseline,
+            currency=template.metadata.get("nav_currency", ""),
+            source="合成数据 · 仅用于熟悉流程"
+            if template.kind == "synthetic"
+            else template.title,
+            static=curves + drawdown,
+        )
+        drawdown = ""
     evidence_open = ""
     preflight_view = ""
     if result["status"] == "checked":
@@ -952,6 +992,13 @@ def render_run(run_dir: str | Path, *, csrf_token: str = "") -> str:
                 ("action", "execute_saved"),
                 ("revision", recipe["revision"]),
             ]
+            if project := request.get("research_project"):
+                fields.extend(
+                    [
+                        ("project_id", project["id"]),
+                        ("project_revision", project["revision"]),
+                    ]
+                )
         inputs = "".join(
             f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
             for key, value in fields
@@ -1070,6 +1117,13 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
             ("revision", recipe["revision"]),
             ("action", "check_saved" if has_preflight else "execute_saved"),
         ]
+        if project := request.get("research_project"):
+            fields.extend(
+                [
+                    ("project_id", project["id"]),
+                    ("project_revision", project["revision"]),
+                ]
+            )
     inputs = "".join(
         f'<input type="hidden" name="{escape(key)}" value="{escape(value)}">'
         for key, value in fields
@@ -1084,7 +1138,7 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
         if (path := directory / name).is_file()
     )
     argv = " ".join(escape(str(item)) for item in result.get("argv", []))
-    message = escape(
+    message = recovery_body(
         result.get("message") or "进程可能仍在运行，也可能已中断；尚无完成证据。"
     )
     label = (
@@ -1098,10 +1152,12 @@ def _render_unfinished_run(directory, request, result, template, csrf_token):
 </p>
 </header>
 <section class="panel"><h2>检查与恢复</h2>
-<p>{message}</p>
+{message}
 <p>请先确认原进程已结束。保留当前记录与账本；已有账户先核验并恢复投影，
 不要用初始化覆盖账户。部分产物不能作为完整结果。</p>
 <form method="post" action="{action_url}">{inputs}
+<label class="check"><input type="checkbox" required>
+我已确认原任务结束，允许按相同参数创建新的运行记录。</label>
 <button class="btn primary">{retry_label}</button></form>
 <p class="note">新记录重新读取输入；本次配置、结果与账本继续保留。</p></section>
 <details class="panel"><summary>配置与执行命令</summary>
@@ -1423,7 +1479,9 @@ class _Handler(
                 )
             elif path == "/durable-research" or path.startswith("/durable-research/"):
                 self._durable_get(path)
-            elif path in {"/data-center", "/history", "/delivery"}:
+            elif path == "/history":
+                self._redirect("/experiments?" + urlparse(self.path).query)
+            elif path in {"/data-center", "/delivery"}:
                 self._maintenance_get(path)
             elif path == "/onboarding":
                 from quant_studio.onboarding import onboarding_body
@@ -1472,6 +1530,8 @@ class _Handler(
                         self._jobs(),
                         path.removeprefix("/jobs/"),
                         csrf_token=self.csrf_token,
+                        auto_open=parse_qs(urlparse(self.path).query).get("inspect")
+                        != ["1"],
                     )
                 )
             elif path == "/fund-reconcile":
@@ -1544,7 +1604,8 @@ class _Handler(
             if path.startswith(("/intake", "/batches", "/onboarding")):
                 body = (
                     '<header class="page-head"><h1>此操作尚未完成</h1></header>'
-                    f'<section class="panel"><p role="alert">{escape(str(exc))}</p>'
+                    + recovery_body(str(exc))
+                    + '<section class="panel">'
                     '<p><a href="/intake">查看保留的导入记录</a> · '
                     '<a href="/onboarding">查看下一步</a></p></section>'
                 )
@@ -1704,6 +1765,15 @@ class _Handler(
                 result = run(template_id, knobs, execute=False, **options)
                 self._redirect(f"/runs/{result.run_id}")
             else:
+                from quant_studio.quick_trial import create_trial
+
+                recipe, project = create_trial(
+                    self.runs_root,
+                    template_id,
+                    knobs,
+                    factors=factors,
+                    snapshot=snapshot,
+                )
                 job = self._jobs().submit(
                     action,
                     template_id,
@@ -1711,13 +1781,22 @@ class _Handler(
                     factors=factors,
                     snapshot=snapshot,
                     profile=self._request_profile,
+                    recipe=recipe,
+                    research_project={
+                        "id": project["id"],
+                        "revision": project["revision"],
+                    },
                 )
                 self._redirect(f"/jobs/{job['job_id']}")
         except (QuantStudioError, UnicodeDecodeError, ValueError) as exc:
             if code_view:
                 self._send_text(f"错误: {exc}", status=400)
                 return
-            self._send_text(f"请求未执行：{exc}", status=400)
+            self._send_text(
+                _layout("请求未执行", recovery_body(str(exc)), "projects"),
+                status=400,
+                content_type="text/html; charset=utf-8",
+            )
 
     def _setup_post(self, data) -> None:
         if self.settings_store is None:
@@ -1728,7 +1807,19 @@ class _Handler(
             actions = data.pop("action", [])
             if len(actions) != 1:
                 raise QuantStudioError("请选择唯一的配置操作")
-            if actions == ["review"]:
+            if actions == ["scan"]:
+                from quant_studio.setup import discover_profile
+
+                profile = discover_profile(profile_from_form(data))
+                body = (
+                    '<p class="notice-info">扫描完成。找到的路径仍需校验；'
+                    "本次尚未保存配置。</p>"
+                )
+                body += setup_body(
+                    self.settings_store, self.csrf_token, profile=profile
+                )
+                self._send_html(_layout("发现研究工具", body, "setup"))
+            elif actions == ["review"]:
                 profile = profile_from_form(data)
                 token, checks = self.settings_store.review(profile)
                 body = setup_body(
@@ -1951,18 +2042,33 @@ class _Handler(
 def _parse_form_knobs(
     template_id: str, form: dict[str, list[str]]
 ) -> dict[str, object]:
+    from decimal import Decimal, InvalidOperation
+
+    from quant_studio.presentation import RATE_FIELDS
+
     template = load_template(template_id)
     knobs = {}
+    form = dict(form)
+    display_units = form.pop("_display_units", ["native"])
+    if display_units not in (["native"], ["bp"]):
+        raise QuantStudioError("显示单位无效")
     declarations = {item["name"]: item for item in template.knobs}
     for name, values in form.items():
         if name not in declarations:
             raise QuantStudioError(f"未知参数 {name}")
+        if len(values) != 1:
+            raise QuantStudioError("参数不能重复提交")
         raw = values[0]
+        if display_units == ["bp"] and name in RATE_FIELDS:
+            try:
+                raw = str(Decimal(raw) / 10000)
+            except InvalidOperation as exc:
+                raise QuantStudioError("费用须为有效的基点数值") from exc
         kind = declarations[name]["type"]
         if kind == "int":
             knobs[name] = int(raw)
         elif kind == "number":
-            knobs[name] = float(raw) if "." in raw else int(raw)
+            knobs[name] = float(raw)
         else:
             knobs[name] = raw
     return knobs
@@ -2060,12 +2166,23 @@ def compiled_from_form(template_id: str, form: dict[str, list[str]]) -> str:
 
 
 def _knob_fields(template: object, selected: dict[str, object]) -> list[str]:
+    from decimal import Decimal
+
+    from quant_studio.form_presentation import numeric, rate_echo, unit_for
+    from quant_studio.presentation import RATE_FIELDS
+
     fields = []
     for knob in template.knobs:
         name = escape(knob["name"])
         current = selected.get(knob["name"], knob["default"])
-        shown = escape(str(current))
-        label = escape(knob.get("label", _LABELS.get(knob["name"], knob["name"])))
+        rate = knob["name"] in RATE_FIELDS and numeric(current)
+        shown = escape(str(Decimal(str(current)) * 10000 if rate else current))
+        label = escape(knob.get("label", _LABELS.get(knob["name"], "研究参数")))
+        if numeric(current):
+            unit = unit_for(
+                knob["name"], currency=template.metadata.get("nav_currency"), rate=rate
+            )
+            label += f"（{unit}）"
         if knob["type"] == "enum" or "choices" in knob:
             labels = {
                 str(choice): knob.get("choice_labels", {}).get(
@@ -2089,9 +2206,21 @@ def _knob_fields(template: object, selected: dict[str, object]) -> list[str]:
                 else "number"
             )
             step = ' step="any"' if knob["type"] == "number" else ""
-            control = f'<input type="{input_type}" name="{name}" value="{shown}"{step}>'
+            bounds = ""
+            if rate:
+                bounds += ' data-rate-bp="true"'
+            for attr, key in (("min", "minimum"), ("max", "maximum")):
+                if key in knob:
+                    bound = Decimal(str(knob[key])) * (10000 if rate else 1)
+                    bounds += f' {attr}="{bound}"'
+            control = (
+                f'<input type="{input_type}" name="{name}" '
+                f'value="{shown}"{step}{bounds}>'
+            )
+        hint = f"= {rate_echo(current)}；1 bp = 0.01%" if rate else ""
         fields.append(
-            f"<label><span>{label}</span><small>{name}</small>{control}</label>"
+            f"<label><span>{label}</span>{control}"
+            f'<small class="field-help">{hint}</small></label>'
         )
     return fields
 
@@ -2147,7 +2276,7 @@ def _data_step(template: object) -> str:
 def _run_step(template: object) -> str:
     ready = template_readiness(template)
     disabled = "" if ready.runnable or ready.needs_input else " disabled"
-    hint = "" if ready.runnable else f'<p class="banner">{escape(ready.message)}</p>'
+    hint = "" if ready.runnable else recovery_body(ready.message)
     check = (
         '<button class="btn" name="action" value="check">数据预检</button>'
         if template.metadata.get("preflight_argv")
@@ -2443,17 +2572,25 @@ def _choice_label(name: str, choice: object) -> str:
 def _layout(title: str, body: str, active: str = "strategy") -> str:
     from importlib.resources import files
 
+    from quant_studio.display_html import display_html
+
+    body = display_html(body)
+
     nav_html, active_label = navigation(active)
     usability_css = (
         files("quant_studio")
         .joinpath("assets/usability.css")
         .read_text(encoding="utf-8")
     )
+    tokens = files("quant_studio").joinpath("assets/tokens.css").read_text("utf-8")
+    display_script = (
+        files("quant_studio").joinpath("assets/display.js").read_text("utf-8")
+    )
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)} · Quant Studio</title>
-<style>{_CSS}{usability_css}</style></head>
+<style>{_CSS}{usability_css}{tokens}</style></head>
 <body><div class="shell">
 <aside class="side">
 <a class="brand" href="/"><b>Quant Studio</b><span>本地研究台</span></a>
@@ -2463,10 +2600,10 @@ def _layout(title: str, body: str, active: str = "strategy") -> str:
 <summary>页面导航<span> · 当前：{escape(active_label)}</span></summary>
 <nav aria-label="页面导航">{nav_html}</nav>
 </details>
-<p class="side-note">研究与模拟跟踪 · 不下真实订单</p>
+<p class="side-note">研究用途 · 不下真实订单 · 不构成投资建议</p>
 </aside>
 <main class="stage">{related_navigation(active)}{body}</main>
-</div></body></html>"""
+</div><script>{display_script}</script></body></html>"""
 
 
 _FILE_TIME_NOTE = (
@@ -2478,19 +2615,19 @@ _CSS = """
 .recipe-grid { display: grid; gap: 20px; margin: 20px 0;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .recipe-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.recipe-field small { color: #687789; overflow-wrap: anywhere; }
+.recipe-field small { color: var(--tone-687789); overflow-wrap: anywhere; }
 textarea { box-sizing: border-box; width: 100%; resize: vertical; min-height: 90px;
-  padding: 12px; border: 1px solid #cfd7df; border-radius: 8px;
+  padding: 12px; border: 1px solid var(--tone-cfd7df); border-radius: 8px;
   font: 13px/1.5 Consolas, monospace; }
 .recipe-grid input, .recipe-grid select { box-sizing: border-box; width: 100%; }
 .panel { margin-bottom: 20px; }
 :root {
-  --ink: #101828;
-  --muted: #667085;
-  --line: #e6ebf2;
-  --blue: #1677ff;
-  --bg: #f3f6fb;
-  --card: #ffffff;
+  --ink: var(--tone-101828);
+  --muted: var(--tone-667085);
+  --line: var(--tone-e6ebf2);
+  --blue: var(--tone-1677ff);
+  --bg: var(--tone-f3f6fb);
+  --card: var(--tone-ffffff);
 }
 * { box-sizing: border-box; }
 body {
@@ -2520,8 +2657,8 @@ body {
   width: 232px;
   flex: none;
   padding: 28px 20px;
-  color: #d7e0ee;
-  background: #0b1220;
+  color: var(--tone-d7e0ee);
+  background: var(--tone-0b1220);
 }
 .brand {
   display: block;
@@ -2529,7 +2666,7 @@ body {
   text-decoration: none;
 }
 .brand b { display: block; font-size: 18px; letter-spacing: 0.02em; }
-.brand span { color: #8ea0b8; font-size: 12px; }
+.brand span { color: var(--tone-8ea0b8); font-size: 12px; }
 nav { margin-top: 32px; }
 nav a {
   display: block;
@@ -2537,21 +2674,24 @@ nav a {
   padding: 10px 12px;
   border-radius: 8px;
   color: white;
-  background: #172033;
+  background: var(--tone-172033);
   text-decoration: none;
 }
-nav a.on { background: #24406e; }
+nav a.on { background: var(--tone-24406e); }
 nav a:focus-visible, .nav-group summary:focus-visible,
 .mobile-nav > summary:focus-visible {
-  outline: 3px solid #8bb8ff;
+  outline: 3px solid var(--tone-8bb8ff);
   outline-offset: 2px;
 }
 .nav-group { margin-top: 8px; }
-.nav-group > summary { color: #cbd8eb; padding: 10px 12px; cursor: pointer; }
+.nav-group > summary { color: var(--tone-cbd8eb); padding: 10px 12px; cursor: pointer; }
 .nav-group a { margin-left: 10px; }
 .mobile-nav .nav-group { grid-column: 1 / -1; }
 .mobile-nav .nav-group a { margin-top: 6px; }
-.badge.evidence { border: 1px solid #b8c8de; background: #edf3fb; color: #243c5f; }
+.badge.evidence { border: 1px solid var(--tone-b8c8de);
+background: var(--tone-edf3fb);
+color: var(--tone-243c5f);
+}
 .mobile-nav { display: none; }
 .mobile-nav > summary {
   display: flex;
@@ -2559,17 +2699,17 @@ nav a:focus-visible, .nav-group summary:focus-visible,
   justify-content: space-between;
   min-height: 40px;
   padding: 9px 12px;
-  border: 1px solid #34445f;
+  border: 1px solid var(--tone-34445f);
   border-radius: 8px;
   color: white;
-  background: #172033;
+  background: var(--tone-172033);
   cursor: pointer;
   list-style: none;
 }
 .mobile-nav > summary::-webkit-details-marker { display: none; }
-.mobile-nav > summary::after { content: "＋"; color: #b7c8e2; }
+.mobile-nav > summary::after { content: "＋"; color: var(--tone-b7c8e2); }
 .mobile-nav[open] > summary::after { content: "−"; }
-.mobile-nav > summary span { color: #b7c8e2; font-size: 12px; }
+.mobile-nav > summary span { color: var(--tone-b7c8e2); font-size: 12px; }
 .mobile-nav nav {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2591,28 +2731,33 @@ ul.commands { padding-left: 18px; }
   color: var(--muted);
   font-size: 13px;
 }
-.badge.ready { color: #067647; }
+.badge.ready { color: var(--tone-067647); }
 .presets { margin-bottom: 16px; }
 .chip {
   display: inline-block;
   margin: 0 8px 8px 0;
   padding: 6px 12px;
-  border: 1px solid #d0d7e2;
+  border: 1px solid var(--tone-d0d7e2);
   border-radius: 999px;
   color: inherit;
   text-decoration: none;
 }
-.chip.on { border-color: var(--blue); background: #e8f1ff; color: #175cd3; }
+.chip.on { border-color: var(--blue);
+background: var(--tone-e8f1ff);
+color: var(--tone-175cd3);
+}
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; }
 .table-scroll { max-width: 100%; overflow-x: auto; }
 .table-scroll td, .table-scroll th { padding-right: 16px; white-space: nowrap; }
-.table-scroll thead { background: #f8fafc; }
-.table-scroll tbody tr:nth-child(even) { background: #f8fafc; }
-.table-scroll tbody tr:hover { background: #edf4ff; }
+.table-scroll thead { background: var(--tone-f8fafc); }
+.table-scroll tbody tr:nth-child(even) { background: var(--tone-f8fafc); }
+.table-scroll tbody tr:hover { background: var(--tone-edf4ff); }
 .table-scroll td, .table-scroll th { padding-left: 12px; }
 .table-scroll .numeric { text-align: right; font-variant-numeric: tabular-nums; }
-.table-scroll:focus-visible { outline: 3px solid #8bb8ff; outline-offset: 2px; }
+.table-scroll:focus-visible { outline: 3px solid var(--tone-8bb8ff);
+outline-offset: 2px;
+}
 .environment-table { table-layout: fixed; }
 .environment-table td, .environment-table th {
   overflow-wrap: anywhere; padding: 12px 16px 12px 0; vertical-align: top;
@@ -2637,14 +2782,18 @@ td, th {
   min-width: 140px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: #f5f8fc;
+  background: var(--tone-f5f8fc);
 }
 .stat b { display: block; font-size: 20px; }
 .stat span { color: var(--muted); font-size: 12px; }
 .chart-card svg { width: 100%; height: auto; }
-.chart-card line { stroke: #e6ebf2; }
-.chart-card text { fill: #98a2b3; font-size: 12px; }
-.side-note { margin-top: 28px; color: #8ea0b8; font-size: 12px; line-height: 1.6; }
+.chart-card line { stroke: var(--tone-e6ebf2); }
+.chart-card text { fill: var(--tone-98a2b3); font-size: 12px; }
+.side-note { margin-top: 28px;
+color: var(--tone-8ea0b8);
+font-size: 12px;
+line-height: 1.6;
+}
 .stage { flex: 1; min-width: 0; padding: 32px 28px 48px; }
 .page-head { max-width: 880px; margin-bottom: 24px; }
 .kicker {
@@ -2678,10 +2827,12 @@ h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
   border-radius: 16px;
   background: var(--card);
 }
-.template-card.synthetic { background: #f7f3ff; border-color: #ddd0f5; }
+.template-card.synthetic { background: var(--tone-f7f3ff);
+border-color: var(--tone-ddd0f5);
+}
 .eyebrow { color: var(--muted); font-size: 12px; }
 .template-card h2 { margin: 10px 0 8px; font-size: 20px; }
-.template-card p { margin: 0; color: #475467; line-height: 1.55; }
+.template-card p { margin: 0; color: var(--tone-475467); line-height: 1.55; }
 .open { margin-top: auto; padding-top: 18px; color: var(--blue); font-weight: 650; }
 .panel {
   max-width: 880px;
@@ -2740,7 +2891,7 @@ h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  background: #0b1220;
+  background: var(--tone-0b1220);
   color: white;
   font-size: 13px;
   line-height: 28px;
@@ -2763,16 +2914,16 @@ input, select {
   width: 100%;
   margin-top: 8px;
   padding: 11px 12px;
-  border: 1px solid #d0d7e2;
+  border: 1px solid var(--tone-d0d7e2);
   border-radius: 10px;
-  background: #fff;
+  background: var(--tone-fff);
   color: var(--ink);
   font: inherit;
 }
 .actions { display: flex; gap: 10px; }
 .btn {
   padding: 10px 16px;
-  border: 1px solid #d0d7e2;
+  border: 1px solid var(--tone-d0d7e2);
   border-radius: 10px;
   background: white;
   font: inherit;
@@ -2783,21 +2934,23 @@ input, select {
   margin: 16px 0 0;
   padding: 12px 14px;
   border-radius: 10px;
-  background: #fff7e8;
-  color: #8a5a00;
+  background: var(--tone-fff7e8);
+  color: var(--tone-8a5a00);
 }
-.banner.quiet { background: #f2f4f7; color: var(--muted); }
+.banner.quiet { background: var(--tone-f2f4f7); color: var(--muted); }
 .status {
   display: inline-block;
   padding: 4px 10px;
   border-radius: 999px;
-  background: #e8f1ff;
-  color: #175cd3;
+  background: var(--tone-e8f1ff);
+  color: var(--tone-175cd3);
   font-size: 13px;
 }
-.status.failed, .status.blocked { background: #fdecec; color: #b42318; }
+.status.failed, .status.blocked { background: var(--tone-fdecec);
+color: var(--tone-b42318);
+}
 .status.incomplete, .status.running, .status.checking {
-  background: #fff2d5; color: #835300;
+  background: var(--tone-fff2d5); color: var(--tone-835300);
 }
 .command { margin-bottom: 16px; }
 .command h2 { margin: 0 0 10px; font-size: 16px; }
@@ -2806,8 +2959,8 @@ pre {
   padding: 14px;
   overflow: auto;
   border-radius: 10px;
-  background: #0f172a;
-  color: #e5eefc;
+  background: var(--tone-0f172a);
+  color: var(--tone-e5eefc);
   white-space: pre-wrap;
 }
 iframe {

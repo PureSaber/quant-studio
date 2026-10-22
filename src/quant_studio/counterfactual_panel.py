@@ -122,12 +122,13 @@ def counterfactual_panel(directory, view):
     return (
         body + f"<p>{links}</p></section>"
         "<style>.counterfactual-period{margin-top:18px;"
-        "border-top:1px solid #dce4ee;padding-top:12px}"
+        "border-top:1px solid var(--tone-dce4ee);padding-top:12px}"
         ".counterfactual summary{cursor:pointer;font-weight:600}"
         ".counterfactual-components{margin-top:12px;overflow-wrap:anywhere}"
         ".counterfactual td:first-child{min-width:10em}"
-        ".counterfactual .effect-bar{height:5px;border-radius:3px;background:#2563eb}"
-        ".counterfactual .effect-bar.negative{background:#be3455}</style>"
+        ".counterfactual .effect-bar{height:5px;border-radius:3px;"
+        "background:var(--series-1)}"
+        ".counterfactual .effect-bar.negative{background:var(--tone-be3455)}</style>"
         '<details class="panel"><summary>原策略配置</summary><pre>'
         + escape(json.dumps(view["effective_config"], ensure_ascii=False, indent=2))
         + "</pre></details>"

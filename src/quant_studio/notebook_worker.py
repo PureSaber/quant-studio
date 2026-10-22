@@ -126,7 +126,7 @@ def execute(directory, timeout, output=None):
             "<title>研究实验</title>",
             "<style>body{max-width:1000px;margin:32px auto;font:16px sans-serif}"
             "pre{white-space:pre-wrap;overflow-wrap:anywhere;"
-            "background:#f4f6f8;padding:16px}</style>",
+            "padding:16px}</style>",
             "<h1>Notebook研究实验</h1>",
             "<p>执行失败；以下保留已完成输出。</p>" if failed else "<p>执行完成。</p>",
         ]

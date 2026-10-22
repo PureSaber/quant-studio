@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from html import escape
+from importlib.resources import files as _resource_files
 from pathlib import Path
 
 from quant_studio import QuantStudioError
@@ -49,22 +50,27 @@ TABLE_FILES = {
 }
 NAV_FILENAMES = ("nav.csv", "capital_curves.csv", "cumulative_returns.csv")
 
-_CHART_CSS = """
-.chart-card { color: #101828; font-family: "Segoe UI", "PingFang SC", sans-serif; }
+_CHART_CSS = (
+    _resource_files("quant_studio").joinpath("assets/tokens.css").read_text("utf-8")
+    + """
+.chart-card { color: var(--tone-101828);
+font-family: "Segoe UI", "PingFang SC", sans-serif;
+}
 .chart-card h2 { margin: 8px 12px 0; font-size: 20px; }
 .stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px; }
 .stat {
   min-width: 120px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: #f5f8fc;
+  background: var(--tone-f5f8fc);
 }
 .stat b { display: block; font-size: 20px; }
-.stat span { color: #667085; font-size: 12px; }
+.stat span { color: var(--tone-667085); font-size: 12px; }
 .chart-card svg { width: 100%; height: auto; }
-.chart-card line { stroke: #e6ebf2; }
-.chart-card text { fill: #98a2b3; font-size: 12px; }
+.chart-card line { stroke: var(--tone-e6ebf2); }
+.chart-card text { fill: var(--tone-98a2b3); font-size: 12px; }
 """
+)
 
 
 @dataclass(frozen=True)
@@ -252,13 +258,13 @@ def chart_fragment(
 <svg viewBox="0 0 940 360" role="img" aria-label="{escape(title)}">
 <defs>
 <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-<stop offset="0%" stop-color="#1677ff" stop-opacity="0.28"/>
-<stop offset="100%" stop-color="#1677ff" stop-opacity="0.02"/>
+<stop offset="0%" stop-color="var(--tone-1677ff)" stop-opacity="0.28"/>
+<stop offset="100%" stop-color="var(--tone-1677ff)" stop-opacity="0.02"/>
 </linearGradient>
 </defs>
 {"".join(grids)}
 <polygon points="{area}" fill="url(#area)"/>
-<polyline points="{line}" fill="none" stroke="#1677ff" stroke-width="3"
+<polyline points="{line}" fill="none" stroke="var(--tone-1677ff)" stroke-width="3"
  stroke-linejoin="round" stroke-linecap="round"/>
 {axis}
 </svg>
@@ -308,7 +314,7 @@ def comparison_fragment(
         )
     lines = []
     for curve, color, dash in zip(
-        curves, ("#1677ff", "#b45309"), ("", "8 5"), strict=True
+        curves, ("var(--tone-1677ff)", "var(--tone-b45309)"), ("", "8 5"), strict=True
     ):
         points = " ".join(
             f"{left + Decimal(right - left) * i / (len(curve) - 1):.1f},"
@@ -339,7 +345,7 @@ def comparison_fragment(
 <div class="stat"><span>{escape(difference_label)}</span>
 <b>{difference:+.2f}个百分点</b></div>
 </div>
-<p>蓝色实线：{first_label}；棕色虚线：{label}。收益差为区间收益相减，不是年化或风险调整后收益。</p>
+<p>蓝色实线：{first_label}；灰色虚线：{label}。收益差为区间收益相减，不是年化或风险调整后收益。</p>
 <svg viewBox="0 0 940 360" role="img" aria-label="{title}">
 {"".join(grids)}{"".join(lines)}{axis}
 </svg>
@@ -601,6 +607,6 @@ def drawdown_fragment(series: NavSeries, *, return_decimals: int = 2) -> str:
 <p class="muted">最大回撤 {drawdown_text}%，
 曲线最低 {_percentage(worst, return_decimals)}%</p>
 <svg viewBox="0 0 940 180" role="img" aria-label="回撤曲线">
-<polyline points="{line}" fill="none" stroke="#d92d20" stroke-width="2.5"/>
+<polyline points="{line}" fill="none" stroke="var(--tone-d92d20)" stroke-width="2.5"/>
 </svg>
 </section>"""

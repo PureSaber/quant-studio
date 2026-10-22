@@ -9,24 +9,9 @@ from quant_studio import QuantStudioError
 from quant_studio.notebook_batches import NotebookBatchStore
 from quant_studio.notebook_templates import NotebookTemplateStore
 from quant_studio.notebooks import NotebookStore
+from quant_studio.presentation import STATUS as _STATUS
 from quant_studio.projects import ProjectStore
 from quant_studio.workbench_web import csrf, field
-
-_STATUS = {
-    "preparing": "准备中",
-    "prepared": "等待提交",
-    "submitted": "已提交",
-    "ready": "等待提交",
-    "queued": "排队中",
-    "running": "运行中",
-    "cancelling": "正在取消",
-    "cancelled": "已取消",
-    "cancel_failed": "未能取消，请查看实际结果",
-    "succeeded": "已完成",
-    "failed": "失败",
-    "interrupted": "已中断",
-    "blocked": "未通过检查",
-}
 
 
 def iterations_body(root, token, project_id, query):

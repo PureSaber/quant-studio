@@ -207,7 +207,7 @@ class DurableResearchClient:
     def batches(self) -> list[dict]:
         return [
             batch
-            for batch in self._call("batch-list", "--limit", "30")
+            for batch in self._history("batch-list", "batch_id")
             if all(
                 member["job"]["request"]["kind"] == "rolling_research"
                 for member in batch["members"]
@@ -246,9 +246,33 @@ class DurableResearchClient:
     def list(self) -> list[dict]:
         return [
             job
-            for job in self._call("list", "--limit", "30")
+            for job in self._history("list", "job_id")
             if job["request"]["kind"] == "rolling_research"
         ]
+
+    def _history(self, command, identity):
+        try:
+            capabilities = self._call("capabilities")
+        except QuantStudioError:
+            capabilities = {}
+        self.history_limited = not (
+            isinstance(capabilities, dict)
+            and capabilities.get("history_pagination") == "cursor/v1"
+        )
+        if self.history_limited:
+            return self._call(command, "--limit", "30")
+        rows, seen = [], set()
+        before = []
+        while True:
+            page = self._call(command, "--limit", "100", *before)
+            for row in page:
+                if row[identity] in seen:
+                    raise QuantStudioError("后台历史分页没有前进，请检查研究工具版本")
+                seen.add(row[identity])
+            rows.extend(page)
+            if len(page) < 100:
+                return rows
+            before = ["--before", page[-1][identity]]
 
     def query(self, action: str, job_id: str) -> object:
         if action not in {"get", "cancel", "events", "attempts"}:

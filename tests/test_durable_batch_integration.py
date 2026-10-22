@@ -20,6 +20,7 @@ from quant_factors.contracts_v2 import (
     FactorSpec,
     FrequencySpec,
 )
+from quant_pipeline.durable_batches import BatchStore
 from quant_pipeline.durable_jobs import JobStore
 from quant_pipeline.durable_research import retain_artifacts
 from quant_pipeline.durable_worker import Worker
@@ -132,3 +133,16 @@ def test_real_studio_cli_batch_worker_and_shared_snapshot(tmp_path, monkeypatch)
     )
     for member in final["members"]:
         assert len(client.query("attempts", member["job"]["job_id"])) == 1
+
+    # Read real CLI pages beyond both the former 30-row window and a full page.
+    # These history fixtures are submitted to the isolated test DB, never executed.
+    history = BatchStore(JobStore(tmp_path / "jobs.db"))
+    batch_ids = {batch["batch_id"]}
+    job_ids = {member["job"]["job_id"] for member in batch["members"]}
+    for index in range(105):
+        older = history.submit(batch["request"], f"history-{index}")
+        batch_ids.add(older["batch_id"])
+        job_ids.update(member["job"]["job_id"] for member in older["members"])
+    assert {item["batch_id"] for item in client.batches()} == batch_ids
+    assert {item["job_id"] for item in client.list()} == job_ids
+    assert not client.history_limited

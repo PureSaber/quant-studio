@@ -134,7 +134,13 @@ def test_new_pages_and_forms_use_existing_auth_and_csrf(tmp_path, monkeypatch):
             "/delivery",
             f"/projects/{project['id']}/iterations?template={template['id']}",
         ]:
-            status, _, body = _request(server, "GET", url, host=host)
+            status, headers, body = _request(server, "GET", url, host=host)
+            if url == "/history":
+                assert status == 303
+                assert headers["Location"].startswith("/experiments?")
+                status, _, body = _request(
+                    server, "GET", headers["Location"], host=host
+                )
             assert status == 200, (url, body)
         fields = {"action": "doctor"}
         assert (

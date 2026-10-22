@@ -109,6 +109,48 @@ def test_client_isolates_python_and_reports_subprocess_failure(configured, monke
     assert environment["QUANT_RESEARCH_STORE_ROOT"] == configured[1]["artifact_root"]
 
 
+@pytest.mark.parametrize("batch", [False, True])
+def test_history_reads_all_pages_before_filtering_research_jobs(
+    configured, monkeypatch, batch
+):
+    client = DurableResearchClient(configured[0])
+    identity = "batch_id" if batch else "job_id"
+    items = [
+        {
+            identity: str(i),
+            "request": {"kind": "echo" if i < 100 else "rolling_research"},
+        }
+        for i in range(135)
+    ]
+    if batch:
+        items = [{**item, "members": [{"job": item}]} for item in items]
+
+    def execute(*args):
+        if args[0] == "capabilities":
+            return {"history_pagination": "cursor/v1"}
+        offset = int(args[-1]) + 1 if "--before" in args else 0
+        return items[offset : offset + int(args[2])]
+
+    monkeypatch.setattr(client, "_call", execute)
+    records = client.batches() if batch else client.list()
+    assert [row[identity] for row in records] == [str(i) for i in range(100, 135)]
+    assert not client.history_limited
+
+
+def test_old_worker_keeps_recent_history_and_reports_limit(configured, monkeypatch):
+    client = DurableResearchClient(configured[0])
+    calls = []
+
+    def execute(*args):
+        calls.append(args)
+        return {} if args[0] == "capabilities" else []
+
+    monkeypatch.setattr(client, "_call", execute)
+    assert client.list() == []
+    assert client.history_limited
+    assert calls[-1] == ("list", "--limit", "30")
+
+
 def test_foreign_job_cannot_be_cancelled(configured, monkeypatch):
     client = DurableResearchClient(configured[0])
     calls = []
