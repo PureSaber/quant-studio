@@ -3,6 +3,7 @@
 from html import escape
 
 from quant_studio import QuantStudioError
+from quant_studio.decision_summary import summary_body
 from quant_studio.projects import ProjectStore
 from quant_studio.research_cards import ACTIONS, ROLES, VERDICTS, DecisionStore
 
@@ -23,6 +24,7 @@ def findings_body(root, query):
 <select name="action">{options}</select></label><button class="btn">筛选</button>
 </form></section>"""
     projects, decisions = ProjectStore(root), DecisionStore(root)
+    daily, daily_read = None, False
     count = 0
     for current in projects.list():
         records = decisions.list(current["id"])
@@ -44,6 +46,15 @@ def findings_body(root, query):
                 for ref in record["evidence"]
             )
             href = f"/projects/{project['id']}?revision={project['revision']}"
+            if record.get("account") and not daily_read:
+                from quant_studio.etf_daily import inspect_daily
+
+                daily_read = True
+                try:
+                    daily = inspect_daily()
+                except (QuantStudioError, OSError, ValueError):
+                    daily = None
+            summary = summary_body(projects.runs_root, record, daily)
             body += f'''<section class="panel"><h2><a href="{href}">
 {escape(project["name"])}</a></h2>
 <p class="badge">{VERDICTS[record["verdict"]]} · {ACTIONS[record["action"]]}</p>
@@ -51,6 +62,7 @@ def findings_body(root, query):
 <p>{ROLES[card["sample_role"]]} · {escape(card["start"])} 至 {escape(card["end"])}</p>
 <p>否定条件：{escape(card["rejection_rule"])}</p>
 <p>结论依据：{escape(record["rationale"])}</p>
+{summary}
 <p>记录时间：{escape(record["recorded_at"])}</p><ul>{evidence}</ul></section>'''
     if not count:
         body += '<section class="panel"><p>尚无符合条件的研究结论。</p></section>'

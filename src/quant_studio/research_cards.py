@@ -87,6 +87,7 @@ class DecisionStore:
         evidence,
         candidate="",
         account_id="",
+        next_review_date="",
     ):
         project = self.projects.get(project_id)
         if project["revision"] != revision:
@@ -95,6 +96,15 @@ class DecisionStore:
             raise QuantStudioError("请先登记研究卡")
         if verdict not in VERDICTS or action not in ACTIONS:
             raise QuantStudioError("研究结论或后续行动无效")
+        if not isinstance(next_review_date, str):
+            raise QuantStudioError("下次复核日期须为 YYYY-MM-DD")
+        if next_review_date:
+            try:
+                parsed = date.fromisoformat(next_review_date)
+                if parsed.isoformat() != next_review_date:
+                    raise ValueError("noncanonical date")
+            except (ValueError, TypeError) as exc:
+                raise QuantStudioError("下次复核日期须为 YYYY-MM-DD") from exc
         if (
             not isinstance(rationale, str)
             or not rationale.strip()
@@ -173,6 +183,7 @@ class DecisionStore:
             "evidence": refs,
             "candidate": candidate,
             "account": account,
+            "next_review_date": next_review_date,
         }
         record["sha256"] = digest(record)
         directory = self.root / project_id / "decisions"

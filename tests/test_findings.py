@@ -32,6 +32,7 @@ def test_findings_retain_rejected_hypothesis_revision_and_check_evidence(tmp_pat
         action="stop_research",
         rationale="negative evidence",
         evidence=[result.run_id],
+        next_review_date="2026-10-29",
     )
     store.save(
         "new title",
@@ -45,6 +46,8 @@ def test_findings_retain_rejected_hypothesis_revision_and_check_evidence(tmp_pat
     assert "old hypothesis" in page and "new hypothesis" not in page
     assert "&lt;study&gt;" in page and "<study>" not in page
     assert result.run_id in page and project["revision"] in page
+    assert "下次复核：2026-10-29" in page and "Gate A：未关联模拟账户" in page
+    assert "未提供原生目标评审结果" in page
     assert "negative evidence" not in findings_body(
         tmp_path, {"action": ["revise_hypothesis"]}
     )
