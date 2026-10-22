@@ -47,11 +47,11 @@ def comparison_explorer(rows):
 <div class="recipe-grid">"""
         + choices
         + """</div>
+<svg id="curve-svg" viewBox="0 0 900 340" role="img"
+aria-label="所选实验累计收益曲线" style="width:100%;height:auto"></svg>
 <label>显示起点<input type="range" id="curve-start" min="0" value="0"></label>
 <label>显示终点<input type="range" id="curve-end" min="0"></label>
 <p id="curve-window" aria-live="polite"></p>
-<svg id="curve-svg" viewBox="0 0 900 340" role="img"
-aria-label="所选实验累计收益曲线" style="width:100%;height:auto"></svg>
 <button class="btn" id="curve-export" disabled>导出当前区间CSV</button>
 <noscript><p>交互曲线需要JavaScript，原始指标与报告链接仍可查看。</p></noscript>
 <script type="application/json" id="curve-data">"""
@@ -61,7 +61,7 @@ aria-label="所选实验累计收益曲线" style="width:100%;height:auto"></svg
 const data=JSON.parse(document.getElementById('curve-data').textContent);
 const a=document.getElementById('curve-start'),b=document.getElementById('curve-end');
 const svg=document.getElementById('curve-svg'), ns='http://www.w3.org/2000/svg';
-const colors=['#1677ff','#c2410c','#047857','#7c3aed'];
+const colors=['var(--series-1)','var(--series-2)','var(--series-3)','var(--series-4)'];
 const choices=Array.from(document.querySelectorAll('.curve-choice'));
 choices.forEach((choice,i)=>choice.parentElement.style.color=colors[i]);
 a.max=b.max=String(data.dates.length-1);b.value=b.max;
@@ -77,11 +77,14 @@ const selected=choices.filter(c=>c.checked).map(c=>+c.value);
 let lo=0,hi=0;
 selected.forEach(i=>{for(let j=start;j<=end;j++){
 const v=Number(data.series[i].values[j]);lo=Math.min(lo,v);hi=Math.max(hi,v);}});
-const span=hi-lo||0.01,x=j=>70+800*(j-start)/Math.max(1,end-start);
+const raw=(hi-lo||0.01)/4,power=10**Math.floor(Math.log10(raw)),ratio=raw/power;
+const step=(ratio<=1?1:ratio<=2?2:ratio<=5?5:10)*power;
+lo=Math.floor(lo/step)*step;hi=Math.ceil(hi/step)*step;if(lo===hi)hi+=step;
+const span=hi-lo,x=j=>70+800*(j-start)/Math.max(1,end-start);
 const y=v=>285-240*(v-lo)/span;
-for(let k=0;k<5;k++){const v=lo+span*k/4;
-node('line',{x1:70,x2:870,y1:y(v),y2:y(v),stroke:'#e6ebf2'});
-node('text',{x:2,y:y(v)+4,fill:'#667085','font-size':12},(v*100).toFixed(2)+'%');}
+for(let v=lo;v<=hi+step/100;v+=step){
+node('line',{x1:70,x2:870,y1:y(v),y2:y(v),stroke:'var(--tone-e6ebf2)'});
+node('text',{x:2,y:y(v)+4,fill:'var(--tone-667085)','font-size':12},(v*100).toFixed(2)+'%');}
 selected.forEach(i=>{let points='';for(let j=start;j<=end;j++){
 points+=x(j)+','+y(Number(data.series[i].values[j]))+' ';}
 node('polyline',{points,fill:'none',stroke:colors[i],'stroke-width':2});

@@ -169,7 +169,7 @@ class ExperimentStore:
             except (OSError, ValueError, QuantStudioError) as exc:
                 return {
                     "run_id": identifier,
-                    "title": self.annotation(identifier)["title"] or identifier[:12],
+                    "title": self.annotation(identifier)["title"] or "结果待核验的运行",
                     "template_id": "",
                     "status": result["status"],
                     "return": None,

@@ -30,7 +30,8 @@ def test_batch_page_handles_a_cancel_request_that_lost_the_completion_race(
     run.update(status="cancel_failed", message="完成时取消已来不及")
     batches.notebooks._save(batches.notebooks.directory(project["id"], execution), run)
     body = iterations_body(tmp_path, "csrf", project["id"], {})
-    assert "未能取消" in body
+    assert "取消未确认" in body
+    assert "已取消" not in body
     assert execution in body
 
 

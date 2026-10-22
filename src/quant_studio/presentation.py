@@ -1,6 +1,6 @@
 """Human-facing labels without changing stored outcomes or financial evidence."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from html import escape
 
 STATUS = {
@@ -23,6 +23,31 @@ STATUS = {
     "blocked": "未执行",
     "skipped": "未执行",
     "verification_failed": "结果核验未通过",
+    "saved": "已保存",
+    "ready": "等待提交",
+    "submitted": "已提交",
+    "preparing": "准备中",
+    "preflight_queued": "数据检查排队中",
+    "preflight_running": "检查数据中",
+    "preflight_failed": "数据检查未通过",
+    "execution_queued": "运行排队中",
+    "execution_running": "运行中（尚未完成）",
+    "execution_failed": "运行失败",
+    "unknown": "状态待确认",
+    "expired": "租约失效",
+}
+
+
+# Import outcomes include the publication step, unlike generic job completion.
+INTAKE_STATUS = {
+    "prepared": "映射已确认，等待提交",
+    "queued": "已排队，等待前序任务",
+    "running": "正在执行全量检查",
+    "succeeded": "已通过并发布",
+    "blocked": "质量检查未通过",
+    "failed": "导入失败，可查看原因后重试",
+    "interrupted": "服务中断，原请求已保留",
+    "cancelled": "已取消，原请求已保留",
 }
 
 
@@ -32,10 +57,15 @@ def status_label(value):
 
 def display_time(value):
     try:
-        stamp = datetime.fromisoformat(value)
+        stamp = (
+            datetime.fromtimestamp(value, UTC)
+            if type(value) in {int, float}
+            else datetime.fromisoformat(value)
+        )
         if stamp.tzinfo is not None:
             return stamp.astimezone().strftime("%Y-%m-%d %H:%M %z")
-    except (TypeError, ValueError):
+        return stamp.strftime("%Y-%m-%d %H:%M") + "（时区未记录）"
+    except (TypeError, ValueError, OverflowError, OSError):
         pass
     return str(value or "未记录")
 
@@ -80,7 +110,20 @@ def progress_body(job, metadata):
     steps = "".join(
         f"<li>{escape(step)}</li>" for step in progress_steps(job, metadata)
     )
-    return f'<p>当前：{escape(current)}</p><ol class="run-steps">{steps}</ol>'
+    elapsed = ""
+    try:
+        start = datetime.fromisoformat(job["created_at"])
+        end = (
+            datetime.now(UTC)
+            if job.get("status") in {"queued", "running", "cancelling"}
+            else datetime.fromisoformat(job["updated_at"])
+        )
+        seconds = max(0, int((end - start).total_seconds()))
+        minutes, seconds = divmod(seconds, 60)
+        elapsed = f" · 提交后已过 {minutes} 分 {seconds} 秒（含排队）"
+    except (KeyError, TypeError, ValueError):
+        pass
+    return f'<p>当前：{escape(current)}{elapsed}</p><ol class="run-steps">{steps}</ol>'
 
 
 def missing_tool(message):
@@ -92,6 +135,7 @@ def missing_tool(message):
             "Python不存在",
             "源码不存在",
             "未连接研究工具",
+            "Worker",
         )
     )
 
@@ -105,9 +149,13 @@ def recovery_body(message):
     ):
         title, href, action = "需要检查输入数据", "/data", "检查数据"
     else:
-        title, href, action = "本次运行未完成，请查看诊断", "", ""
+        title, href, action = (
+            "本次运行未完成，请查看诊断后调整方案",
+            "/projects",
+            "返回研究项目",
+        )
     link = f'<a class="btn" href="{href}">{action}</a>' if href else ""
-    return f"""<section class="panel notice">
+    return f"""<section class="panel notice-error">
 <h2>{title}</h2>{link}<details>
 <summary>技术详情</summary>
 <pre>{escape(message)}</pre>
@@ -163,4 +211,8 @@ RATE_FIELDS = {
     "slippage_rate",
     "stamp_rate",
     "stamp_tax_rate",
+    "sfc_rate",
+    "afrc_rate",
+    "trading_rate",
+    "settlement_rate",
 }

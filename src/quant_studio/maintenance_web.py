@@ -14,6 +14,7 @@ from quant_studio.environment_delivery import (
     DeliveryStore,
     delivery_config,
 )
+from quant_studio.presentation import status_label
 from quant_studio.projects import digest
 from quant_studio.research_history import search_history
 from quant_studio.workbench_web import csrf, field
@@ -124,7 +125,8 @@ value="{escape(",".join(symbols), quote=True)}"></label>
     body += '</section><section class="panel"><h2>最近更新与导入任务</h2>'
     for job in [j for j in jobs if j["action"] in {"collect", "intake"}][:30]:
         body += f"""<p><a href="/jobs/{job["job_id"]}">{escape(job["created_at"])}</a>
-· {escape(job["status"])} · {escape(job.get("message") or "")}</p>"""
+· {status_label(job["status"])}</p><details><summary>技术详情</summary>
+<pre>{escape(job.get("message") or "尚无诊断信息")}</pre></details>"""
     return body + "</section>"
 
 
@@ -272,7 +274,9 @@ def delivery_body(root, token):
             + "</h2>"
         )
         body += (
-            f"<p>{escape(record['status'])} · {escape(record.get('message', ''))}</p>"
+            f"<p>{status_label(record['status'])}</p>"
+            "<details><summary>技术详情</summary>"
+            f"<pre>{escape(record.get('message', ''))}</pre></details>"
         )
         body += _json(record["request"])
         if record["status"] == "prepared":

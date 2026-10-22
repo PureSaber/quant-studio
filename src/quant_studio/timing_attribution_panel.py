@@ -32,12 +32,13 @@ def attribution_panel(run_id, view):
         "每折归因期初为1，沿用原计分决策及次日收益；"
         "未重新建仓，各折不拼接，重叠日期不增加独立样本。</p></details>"
         "<style>.attribution-fold{margin-top:14px;"
-        "border-top:1px solid #dce4ee;padding-top:12px}"
+        "border-top:1px solid var(--tone-dce4ee);padding-top:12px}"
         ".attribution-fold summary{cursor:pointer;font-weight:600}"
         ".timing-attribution th,.timing-attribution td{white-space:nowrap}"
-        ".contribution-bar{height:5px;border-radius:3px;margin-top:4px;background:#2563eb}"
-        ".contribution-bar.negative{background:#be3455}"
-        ".contribution-total{font-weight:700;border-top:2px solid #cbd5e1}</style>"
+        ".contribution-bar{height:5px;border-radius:3px;margin-top:4px;background:var(--tone-2563eb)}"
+        ".contribution-bar.negative{background:var(--tone-be3455)}"
+        ".contribution-total{font-weight:600;"
+        "border-top:2px solid var(--tone-cbd5e1)}</style>"
         + body
         + f'<p><a href="/runs/{escape(run_id)}/files/'
         'strategy-output/studio-view/attribution_daily.csv" download>'

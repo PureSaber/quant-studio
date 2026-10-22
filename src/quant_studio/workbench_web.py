@@ -3,14 +3,14 @@
 import json
 from datetime import date, timedelta
 from html import escape
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from quant_studio import QuantStudioError
 from quant_studio.datasets import DatasetStore, collection_request
 from quant_studio.derivative_datasets import form as derivative_form
 from quant_studio.experiments import ExperimentStore, configuration_diff
 from quant_studio.free_derivative_datasets import form as free_derivative_form
-from quant_studio.presentation import STATUS, status_label, template_title
+from quant_studio.presentation import template_title
 from quant_studio.templates import load_template, template_ids
 
 
@@ -29,7 +29,11 @@ def field(data, key, default=None):
 
 
 def diff_table(rows):
+    from decimal import Decimal
+
     from quant_studio.form_controls import LABELS
+    from quant_studio.form_presentation import numeric, rate_echo, unit_for
+    from quant_studio.presentation import RATE_FIELDS
     from quant_studio.research_web import _LABELS
 
     def label(path):
@@ -40,13 +44,21 @@ def diff_table(rows):
             f"<code>{escape(path)}</code></details>"
         )
 
+    def value(path, item):
+        key = path.rsplit(".", 1)[-1]
+        if numeric(item):
+            if key in RATE_FIELDS:
+                return escape(f"{Decimal(str(item)) * 10000:g} bp = {rate_echo(item)}")
+            return escape(f"{item} {unit_for(key)}")
+        return escape(json.dumps(item, ensure_ascii=False))
+
     content = "".join(
         f"""<tr>
 <td>{label(row["path"])}</td>
 <td
-class="diff-value">{escape(json.dumps(row["before"], ensure_ascii=False))}</td>
+class="diff-value">{value(row["path"], row["before"])}</td>
 <td
-class="diff-value">{escape(json.dumps(row["after"], ensure_ascii=False))}</td>
+class="diff-value">{value(row["path"], row["after"])}</td>
 </tr>"""
         for row in rows
     )
@@ -294,165 +306,9 @@ class="btn">检查文件并登记</button>
 
 
 def experiments_body(root, token, query, jobs=()):
-    store = ExperimentStore(root)
-    text, status = query.get("q", [""])[0], query.get("status", [""])[0]
-    template = query.get("template", [""])[0]
-    project_id = query.get("project", [""])[0]
-    records = store.list(query=text, status=status, template=template)
-    if project_id:
-        from quant_studio.projects import ProjectStore
+    from quant_studio.run_index import index_body
 
-        allowed = {r["run_id"] for r in ProjectStore(root).experiments(project_id)}
-        records = [r for r in records if r["run_id"] in allowed]
-    from quant_studio.projects import ProjectStore
-
-    project_options = '<option value="">全部项目</option>' + "".join(
-        f'<option value="{p["id"]}"'
-        + (" selected" if p["id"] == project_id else "")
-        + f">{escape(p['name'])}</option>"
-        for p in ProjectStore(root).list()
-    )
-    template_options = '<option value="">全部模板</option>' + "".join(
-        f'<option value="{key}"'
-        + (" selected" if key == template else "")
-        + f">{escape(load_template(key).title)}</option>"
-        for key in template_ids()
-    )
-    page = max(1, int(query.get("page", ["1"])[0]))
-    page = min(page, max(1, (len(records) + 24) // 25))
-    rows = []
-    for r in records[(page - 1) * 25 : page * 25]:
-        rows.append(
-            f'''<tr>
-<td>
-<input
-type="checkbox"
-name="run"
-value="{r["run_id"]}"
-aria-label="选择 {escape(r["title"], quote=True)}">
-</td>
-<td>
-<a
-href="/experiments/{r["run_id"]}">{escape(r["title"])}</a>
-<br>
-<small>{escape(template_title(r["template_id"]))}</small>
-</td>
-<td>{escape(status_label(r["status"]))}</td>
-<td>{escape(r.get("annotation_error") or r["note"][:100])}</td>
-<td>{escape(r["when"])}</td>
-</tr>'''
-        )
-
-    def page_link(number):
-        return escape(
-            urlencode(
-                {
-                    "q": text,
-                    "status": status,
-                    "template": template,
-                    "project": project_id,
-                    "page": number,
-                }
-            ),
-            quote=True,
-        )
-
-    links = " · ".join(
-        f"""<a
-href="/experiments?{page_link(p)}">
-{label}</a>"""
-        for p, label in [
-            (max(1, page - 1), "上一页"),
-            (min(max(1, (len(records) + 24) // 25), page + 1), "下一页"),
-        ]
-    )
-    tasks = []
-    for job in jobs:
-        if job.get("run_id") and job.get("status") not in {
-            "queued",
-            "running",
-            "cancelling",
-        }:
-            continue
-        title = (job.get("recipe") or {}).get("name") or template_title(
-            job.get("template_id", "")
-        )
-        if status and job.get("status") != status:
-            continue
-        if template and job.get("template_id") != template:
-            continue
-        if project_id and (job.get("research_project") or {}).get("id") != project_id:
-            continue
-        if (
-            text
-            and text.casefold() not in (title + str(job.get("message", ""))).casefold()
-        ):
-            continue
-        tasks.append(
-            f'<p><a href="/jobs/{escape(job["job_id"])}">{escape(title)}</a> · '
-            f"{status_label(job.get('status'))}</p>"
-        )
-    task_panel = (
-        '<section class="panel"><h2>后台任务</h2>' + "".join(tasks) + "</section>"
-        if tasks
-        else ""
-    )
-    return f'''<header
-class="page-head">
-<h1>运行记录</h1>
-
-<p>搜索全部历史记录，给实验命名和写备注。选择 2–4 次运行比较参数与结果。</p>
-</header>
-{task_panel}
-<section
-class="panel">
-<form
-method="get">
-<div
-class="recipe-grid">
-<label>搜索名称、备注或版本<input
-name="q"
-value="{escape(text, quote=True)}">
-</label>
-<label>状态<select
-name="status">
-<option
-value="">全部</option>{
-        "".join(
-            f'''<option
-value="{v}" {"selected" if v == status else ""}>{label}</option>'''
-            for v, label in STATUS.items()
-        )
-    }</select>
-</label>
-<label>项目<select name="project">{project_options}</select></label>
-<label>模板<select name="template">{template_options}</select></label>
-</div>
-<button
-class="btn">搜索</button>
-</form>
-</section>
-<section
-class="panel">
-<form
-action="/experiments/compare"
-method="get">
-<div
-class="table-scroll">
-<table>
-<tr>
-<th>选择</th>
-<th>实验</th>
-<th>状态</th>
-<th>备注</th>
-<th>记录时间</th>
-</tr>{"".join(rows)}</table>
-</div>
-<button
-class="btn primary">比较所选实验</button>
-</form>
-<p>共 {len(records)} 条 · 第 {page} 页，每页 25 条 · {links}</p>
-</section>'''
+    return index_body(root, token, query, jobs)
 
 
 def experiment_body(root, token, identifier):

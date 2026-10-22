@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: PureSaber/quant-pipeline
-          ref: 612817cef1a96724f2e13ef4c88bc46988c201dc
+          ref: 5be759f71f389028d5bb880ff1da815e983e2cb1
           path: quant-pipeline
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -264,6 +264,9 @@ class AccessHandler:
             self._login_page(str(exc), status=400)
 
     def _login_page(self, error="", status=200):
+        from importlib.resources import files
+
+        tokens = files("quant_studio").joinpath("assets/tokens.css").read_text("utf-8")
         nonce = secrets.token_urlsafe(32)
         self._pending_cookie = (
             f"{NONCE}={nonce}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=300"
@@ -271,13 +274,14 @@ class AccessHandler:
         self._send_text(
             f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>登录 · Quant Studio</title><style>
-body{{font:16px system-ui;background:#f3f5f8;color:#14283e;margin:0}}
+<title>登录 · Quant Studio</title><style>{tokens}
+body{{font:16px system-ui;background:var(--tone-f3f5f8);
+color:var(--tone-14283e);margin:0}}
 main{{max-width:420px;margin:12vh auto;padding:32px;
-background:white;border-radius:16px}}
+background:var(--card);border-radius:16px}}
 input,button{{box-sizing:border-box;width:100%;padding:14px;
 margin:10px 0;font:inherit}}
-button{{background:#17635c;color:white;border:0;border-radius:8px}}</style>
+button{{background:var(--tone-17635c);color:var(--card);border:0;border-radius:8px}}</style>
 <main><h1>Quant Studio</h1><p>连接你的本机研究工作台</p>
 <p role="alert">{escape(error)}</p><form method="post" action="/login">
 <input type="hidden" name="nonce" value="{nonce}"><label>访问密码

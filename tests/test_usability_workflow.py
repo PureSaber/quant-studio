@@ -45,7 +45,7 @@ def test_rate_input_uses_basis_points_without_changing_native_units():
 def test_editor_runs_submitted_fields_instead_of_a_separate_saved_form():
     page = editor_body("synthetic-demo", "test-token")
     assert 'value="save_run"' in page
-    assert "检查数据并运行" in page
+    assert "保存为 v1 并运行" in page
     assert "execute_saved" not in page
 
 

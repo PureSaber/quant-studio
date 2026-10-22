@@ -169,6 +169,7 @@ rel="noopener noreferrer">打开JupyterLab</a></p>'''
 
 
 def notebook_result_body(root, identifier, execution):
+    from quant_studio.presentation import recovery_body, status_label
 
     store = NotebookStore(root)
     record = store.get(identifier, execution)
@@ -179,8 +180,15 @@ def notebook_result_body(root, identifier, execution):
     )
     body = f"""<header class="page-head"><h1>Notebook实验</h1>
 <a href="/projects/{identifier}">返回研究项目</a></header><section class="panel">
-<p>状态：{escape(record["status"])}</p><p>{escape(record.get("message", ""))}</p>
-<p>项目版本：{record["project_revision"]}</p>"""
+<p>状态：{status_label(record["status"])}</p>"""
+    if record["status"] in {
+        "blocked",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "cancel_failed",
+    }:
+        body += recovery_body(record.get("message", ""))
     body += f"<p>执行模式：{mode}</p>"
     for name in record.get("artifacts", {}):
         path = store.artifact(identifier, execution, name)
@@ -540,6 +548,7 @@ class ProjectHandler:
 
 def assistant_body(root, token, project_id, identifier):
     from quant_studio.datasets import file_hash
+    from quant_studio.presentation import recovery_body, status_label
 
     store = AssistantStore(root)
     record = store.get(project_id, identifier)
@@ -548,7 +557,15 @@ def assistant_body(root, token, project_id, identifier):
     body = f"""<header class="page-head"><h1>研究助手</h1>
 <a href="/projects/{project_id}">返回项目</a></header><section class="panel">
 <h2>{escape(context["question"])}</h2><p>{escape(record["scope"])}</p>
-<p>状态：{escape(record["status"])} · {escape(record.get("message", ""))}</p>"""
+<p>状态：{status_label(record["status"])}</p>"""
+    if record["status"] in {
+        "blocked",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "cancel_failed",
+    }:
+        body += recovery_body(record.get("message", ""))
     for evidence in context["evidence"]:
         body += f'''<h3><a href="{escape(record["links"][evidence["id"]], quote=True)}">
 {evidence["id"]} · 查看来源</a></h3><pre>{escape(evidence["text"])}</pre>'''

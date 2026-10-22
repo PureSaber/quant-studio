@@ -6,16 +6,8 @@ from html import escape
 
 from quant_studio import QuantStudioError
 from quant_studio.durable_research import configured_client
+from quant_studio.presentation import STATUS, display_time, recovery_body
 from quant_studio.workbench_web import csrf, field
-
-STATUS = {
-    "queued": "等待Worker",
-    "running": "正在计算",
-    "succeeded": "已完成",
-    "failed": "失败",
-    "cancelled": "已取消",
-    "expired": "租约失效",
-}
 
 
 class DurableHandler:
@@ -26,7 +18,7 @@ class DurableHandler:
         try:
             client = configured_client()
         except (QuantStudioError, FileNotFoundError, ValueError) as exc:
-            body += '<section class="panel"><p>' + escape(str(exc)) + "</p></section>"
+            body += recovery_body(str(exc))
             self._send_html(_layout("后台研究", body, "durable"))
             return
         if path == "/durable-research":
@@ -59,7 +51,8 @@ action="/durable-research/batch-submit">
             for batch in client.batches() if batch_available else []:
                 body += (
                     f'<li><a href="/durable-research/batches/{batch["batch_id"]}">'
-                    + escape(batch["request"]["run_id"])
+                    + "后台批次 · "
+                    + escape(display_time(batch.get("created_at")))
                     + "</a> · "
                     + escape(STATUS[batch["status"]])
                     + "</li>"
@@ -74,7 +67,8 @@ action="/durable-research/batch-submit">
             for job in client.list():
                 body += (
                     f'<tr><td><a href="/durable-research/{job["job_id"]}">'
-                    + escape(job["request"]["run_id"])
+                    + "因子研究 · "
+                    + escape(display_time(job.get("created_at")))
                     + "</a></td><td>"
                     + escape(STATUS[job["status"]])
                     + "</td><td>"
@@ -137,6 +131,8 @@ action="/durable-research/batches/{batch_id}/retry">
         else:
             job_id = path.removeprefix("/durable-research/")
             job = client.query("get", job_id)
+            if job["status"] in {"failed", "cancelled", "expired"}:
+                body += recovery_body(str(job.get("error") or STATUS[job["status"]]))
             body += (
                 '<section class="panel"><h2>' + escape(STATUS[job["status"]]) + "</h2>"
             )

@@ -42,12 +42,20 @@ def setup_body(store, csrf_token, *, profile=None, error="", reviewed=None):
         "保存后继续选择模板，执行原生数据预检；填写路径本身不代表数据已通过核验。</p>"
         f'<p class="setup-state">{status}</p></header>'
     )
+    head += """<section class="panel"><h2>显示设置</h2>
+<label>涨跌颜色<select id="return-colors">
+<option value="red-up">红涨绿跌</option><option value="green-up">绿涨红跌</option>
+</select></label><p>只影响收益数字的颜色，正负号始终显示。保存在当前浏览器。</p>
+<p><span class="return-positive">+1.00%</span> ·
+<span class="return-negative">−1.00%</span></p>
+</section>"""
     if error:
         head += f'<p class="banner">{escape(error)}</p>'
     destination = (
+        "<details><summary>技术详情：配置保存位置</summary>"
         '<p class="note setup-path">配置仅保存到本次服务的本地文件：'
         f"{escape(str(store.path))}。重启使用相同保存位置即可恢复；"
-        "留空字段沿用启动配置，填写的选择优先用于新请求。</p>"
+        "留空字段沿用启动配置，填写的选择优先用于新请求。</p></details>"
     )
     managed = {k: v for k, v in values.items() if k in SERVER_CONFIG_KEYS}
     if managed:
@@ -145,7 +153,10 @@ def setup_body(store, csrf_token, *, profile=None, error="", reviewed=None):
                 values.get("QUANT_WORKSPACE_ROOT", ""),
                 "包含量化应用仓库的已有目录；合成样例无需工作区",
             )
-            + '</section><section class="panel"><h2>2.研究工具</h2>'
+            + '<button class="btn" name="action" value="scan">'
+            "连接研究工具：扫描已有环境</button>"
+            "<p>只在所选工作区内查找现有环境，找到后校验并预览。</p></section>"
+            '<section class="panel"><h2>2.研究工具</h2>'
             "<p>只填写此次使用的应用。各应用保留自己的依赖，服务不会安装或升级环境。</p>"
             f'<div class="fields">{python_fields}</div></section>'
             '<details class="panel"><summary>3.默认数据与研究配置（可选）</summary>'

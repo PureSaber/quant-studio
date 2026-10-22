@@ -13,7 +13,7 @@ dependencies = ["PyYAML", "quant-data-kit @ git+https://github.com/PureSaber/qua
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
-isolation = ["quant-pipeline @ git+https://github.com/PureSaber/quant-pipeline.git@b7534624b818e301ea63bd43901d00a613f50086"]
+isolation = ["quant-pipeline @ git+https://github.com/PureSaber/quant-pipeline.git@5be759f71f389028d5bb880ff1da815e983e2cb1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

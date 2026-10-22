@@ -9,26 +9,10 @@ from html import escape
 from urllib.parse import parse_qs, urlparse
 
 from quant_studio import QuantStudioError
+from quant_studio.presentation import STATUS as _STATUS_LABELS
 from quant_studio.recipes import RecipeStore
 from quant_studio.research_batches import BatchStore
 from quant_studio.research_resources import ResourceStore
-
-_STATUS_LABELS = {
-    "prepared": "待显式提交",
-    "submitted": "已提交",
-    "running": "执行中",
-    "cancelling": "取消中",
-    "cancelled": "已取消",
-    "completed": "已完成",
-    "interrupted": "服务中断",
-    "preflight_queued": "预检排队",
-    "preflight_running": "预检中",
-    "preflight_failed": "预检失败",
-    "execution_queued": "运行排队",
-    "execution_running": "运行中",
-    "execution_failed": "运行失败",
-    "succeeded": "成功",
-}
 
 
 def _csrf(token: str) -> str:

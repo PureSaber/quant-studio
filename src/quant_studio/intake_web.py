@@ -12,20 +12,10 @@ from quant_studio.intake_tools import (
     dataset_identifier,
     request_status,
 )
+from quant_studio.presentation import INTAKE_STATUS as _STATUS_LABELS
 from quant_studio.project_web import table
 from quant_studio.recipes import _atomic
 from quant_studio.workbench_web import csrf, field
-
-_STATUS_LABELS = {
-    "prepared": "映射已确认，等待提交",
-    "queued": "已排队，等待前序任务",
-    "running": "正在执行全量检查",
-    "succeeded": "已通过并发布",
-    "blocked": "质量检查未通过",
-    "failed": "导入失败，可查看原因后重试",
-    "interrupted": "服务中断，原请求已保留",
-    "cancelled": "已取消，原请求已保留",
-}
 
 
 def _data(response):
