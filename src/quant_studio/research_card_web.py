@@ -64,6 +64,7 @@ def card_body(root, token, project, section="all"):
 <label>结论<select name="verdict">{options(VERDICTS, "inconclusive")}</select></label>
 <label>下一步<select name="action">{options(ACTIONS)}</select></label>
 <label>理由<textarea name="rationale" maxlength="8000" required></textarea></label>
+<label>下次复核日期（可选）<input type="date" name="next_review_date"></label>
 <label>提名的已完成原生候选（仅提名时必选）
 <select name="candidate">{candidate_options}</select></label>
 <label>已配置的模拟账户ID（可选）<input name="account_id"></label><p>引用实验：</p>'''
@@ -116,6 +117,7 @@ def card_post(root, identifier, revision, action, data):
     values.update(
         candidate=field(data, "candidate", ""),
         account_id=field(data, "account_id", ""),
+        next_review_date=field(data, "next_review_date", ""),
         evidence=data.pop("evidence", []),
     )
     if data:
